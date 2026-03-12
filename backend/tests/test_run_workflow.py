@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+import time
+
+from fastapi.testclient import TestClient
+
+
+
+def _create_project(client: TestClient) -> dict:
+    response = client.post('/projects', json={'name': 'Workflow Test'})
+    assert response.status_code == 200
+    return response.json()
+
+
+
+def _import_video(client: TestClient, project_id: str, path) -> dict:
+    with path.open('rb') as handle:
+        response = client.post(
+            '/recordings/import',
+            files={'file': (path.name, handle, 'video/mp4')},
+            data={'project_id': project_id},
+        )
+    assert response.status_code == 200
+    return response.json()
+
+
+
+def test_single_scene_run_waits_for_fallback_and_persists_log_events(client: TestClient, video_factory, wait_for_run) -> None:
+    project = _create_project(client)
+    video = video_factory('single-scene.mp4', ['red'])
+    recording = _import_video(client, project['id'], video)
+
+    run = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={'tolerance': 50, 'min_scene_gap_ms': 900, 'sample_fps': 4, 'detector_mode': 'content', 'extract_offset_ms': 200},
+    ).json()
+
+    detail = wait_for_run(client, run['id'])
+
+    assert detail['summary']['status'] == 'awaiting_fallback'
+    assert detail['summary']['phase'] == 'awaiting_fallback'
+    assert detail['summary']['needs_fallback_decision'] is True
+    assert detail['summary']['progress'] < 1.0
+    assert detail['summary']['candidate_count'] == 1
+    assert any(event['phase'] == 'primary_scan' for event in detail['events'])
+    assert any(event['phase'] == 'awaiting_fallback' for event in detail['events'])
+
+
+
+def test_fallback_can_complete_and_delete_run(client: TestClient, video_factory, wait_for_run) -> None:
+    project = _create_project(client)
+    video = video_factory('fallback-scene.mp4', ['red'])
+    recording = _import_video(client, project['id'], video)
+
+    run = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={'tolerance': 50, 'min_scene_gap_ms': 900, 'sample_fps': 4, 'detector_mode': 'content', 'extract_offset_ms': 200},
+    ).json()
+    waiting = wait_for_run(client, run['id'])
+    assert waiting['summary']['status'] == 'awaiting_fallback'
+
+    start_fallback = client.post(f"/runs/{run['id']}/fallback")
+    assert start_fallback.status_code == 200
+
+    detail = wait_for_run(client, run['id'], {'completed', 'failed', 'cancelled'})
+    assert detail['summary']['status'] == 'completed'
+    assert any(event['phase'] == 'fallback_scan' for event in detail['events'])
+
+    delete_response = client.delete(f"/runs/{run['id']}")
+    assert delete_response.status_code == 204
+    assert client.get(f"/recordings/{recording['id']}").status_code == 200
+
+
+
+def test_abort_blocks_recording_delete_until_run_stops(client: TestClient, video_factory, wait_for_run, monkeypatch) -> None:
+    import app.main as main
+    from app.services.detection import CancellationRequested
+
+    original_detect = main.detect_candidates
+
+    def slow_detect_candidates(*, progress_callback, cancellation_callback, **kwargs):
+        progress_callback('primary_scan', 'Scanning video for interaction changes (5%)', 0.2, 'info')
+        for _ in range(40):
+            if cancellation_callback():
+                raise CancellationRequested('Run cancelled while scanning the video.')
+            time.sleep(0.05)
+        return original_detect(progress_callback=progress_callback, cancellation_callback=cancellation_callback, **kwargs)
+
+    monkeypatch.setattr(main, 'detect_candidates', slow_detect_candidates)
+
+    project = _create_project(client)
+    video = video_factory('delete-guard.mp4', ['red', 'blue', 'green'], segment_duration=2)
+    recording = _import_video(client, project['id'], video)
+
+    run = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={'tolerance': 35, 'min_scene_gap_ms': 300, 'sample_fps': 6, 'detector_mode': 'content', 'extract_offset_ms': 50},
+    ).json()
+
+    time.sleep(0.2)
+    delete_response = client.delete(f"/recordings/{recording['id']}")
+    assert delete_response.status_code == 409
+
+    cancel_response = client.post(f"/runs/{run['id']}/cancel")
+    assert cancel_response.status_code == 200
+
+    detail = wait_for_run(client, run['id'], {'cancelled'})
+    assert detail['summary']['status'] == 'cancelled'
+
+    delete_response = client.delete(f"/recordings/{recording['id']}")
+    assert delete_response.status_code == 204
