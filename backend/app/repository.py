@@ -103,6 +103,16 @@ def get_project(project_id: str) -> dict[str, Any] | None:
     return _row_to_dict(row)
 
 
+def update_project_name(project_id: str, name: str) -> dict[str, Any] | None:
+    payload = {
+        "id": project_id,
+        "name": name.strip(),
+    }
+    with connect() as conn:
+        conn.execute("UPDATE projects SET name = :name WHERE id = :id", payload)
+    return get_project(project_id)
+
+
 def create_recording(
     *,
     recording_id: str | None = None,
@@ -158,6 +168,16 @@ def list_recordings(project_id: str) -> list[dict[str, Any]]:
             (project_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def update_recording_filename(recording_id: str, filename: str) -> dict[str, Any] | None:
+    payload = {
+        "id": recording_id,
+        "filename": filename.strip(),
+    }
+    with connect() as conn:
+        conn.execute("UPDATE recordings SET filename = :filename WHERE id = :id", payload)
+    return get_recording(recording_id)
 
 
 def delete_recording_record(recording_id: str) -> None:

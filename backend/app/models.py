@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 CandidateStatus = Literal["pending", "accepted", "rejected"]
 RunStatus = Literal["queued", "running", "awaiting_fallback", "completed", "failed", "cancelled"]
 DetectorMode = Literal["content", "adaptive"]
+ExportMode = Literal["accepted", "all"]
 RunPhase = Literal[
     "queued",
     "probing",
@@ -31,6 +32,10 @@ class HealthResponse(BaseModel):
 
 
 class ProjectCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class ProjectUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
@@ -64,6 +69,14 @@ class RecordingImportResponse(BaseModel):
     height: int
     fps: float
     created_at: str
+
+
+class RecordingUpdate(BaseModel):
+    filename: str = Field(min_length=1, max_length=240)
+
+
+class ExportRequest(BaseModel):
+    mode: ExportMode = "accepted"
 
 
 class DetectionRunSummary(BaseModel):

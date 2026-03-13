@@ -16,13 +16,16 @@ from .database import init_db
 from .models import (
     CandidateFrameResponse,
     CandidateUpdate,
+    ExportRequest,
     DetectionRunDetail,
     DetectionRunSummary,
     HealthResponse,
     ProjectCreate,
     ProjectResponse,
+    ProjectUpdate,
     RecordingDetailResponse,
     RecordingImportResponse,
+    RecordingUpdate,
     RunEventResponse,
     RunSettings,
 )
@@ -50,6 +53,8 @@ from .repository import (
     recording_has_active_runs,
     replace_candidates,
     update_candidate,
+    update_project_name,
+    update_recording_filename,
     update_run,
 )
 from .services.detection import (
@@ -449,6 +454,14 @@ def projects_create(payload: ProjectCreate) -> ProjectResponse:
     return _serialize_project(project)
 
 
+@app.patch("/projects/{project_id}", response_model=ProjectResponse)
+def projects_update(project_id: str, payload: ProjectUpdate) -> ProjectResponse:
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return _serialize_project(update_project_name(project_id, payload.name))
+
+
 @app.get("/projects/{project_id}")
 def projects_show(project_id: str) -> dict:
     project = get_project(project_id)
@@ -461,13 +474,18 @@ def projects_show(project_id: str) -> dict:
 
 
 @app.post("/recordings/import", response_model=RecordingImportResponse)
-async def recordings_import(project_id: str = Form(...), file: UploadFile = File(...)) -> RecordingImportResponse:
+async def recordings_import(
+    project_id: str = Form(...),
+    filename: str | None = Form(default=None),
+    file: UploadFile = File(...),
+) -> RecordingImportResponse:
     _require_tools()
     project = get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    sanitized_name = sanitize_filename(file.filename or "recording.mp4")
+    preferred_name = filename.strip() if filename else file.filename or "recording.mp4"
+    sanitized_name = sanitize_filename(preferred_name)
     recording_slug = recording_slug_from_filename(sanitized_name)
     recording_id = uuid4().hex
     destination = recording_source_path(
@@ -508,6 +526,14 @@ def recordings_show(recording_id: str) -> RecordingDetailResponse:
         **_serialize_recording(recording).model_dump(),
         runs=[_serialize_run_summary(run) for run in list_runs(recording_id)],
     )
+
+
+@app.patch("/recordings/{recording_id}", response_model=RecordingImportResponse)
+def recordings_update(recording_id: str, payload: RecordingUpdate) -> RecordingImportResponse:
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return _serialize_recording(update_recording_filename(recording_id, sanitize_filename(payload.filename)))
 
 
 @app.delete("/recordings/{recording_id}", status_code=204)
@@ -639,10 +665,11 @@ def candidates_update(candidate_id: str, payload: CandidateUpdate) -> CandidateF
 
 
 @app.post("/runs/{run_id}/export")
-def runs_export(run_id: str) -> dict:
+def runs_export(run_id: str, payload: ExportRequest) -> dict:
     project, recording, run = _run_context(run_id)
     if run["status"] != "completed":
         raise HTTPException(status_code=409, detail="Only completed runs can be exported")
+    export_mode = payload.mode
     _set_run_state(
         run_id,
         status="completed",
@@ -660,6 +687,7 @@ def runs_export(run_id: str) -> dict:
             recording=recording,
             run=run,
             candidates=candidates,
+            mode=export_mode,
         )
     except ValueError as exc:
         _set_run_state(
@@ -678,7 +706,11 @@ def runs_export(run_id: str) -> dict:
         status="completed",
         phase="completed",
         progress=1.0,
-        message=f"Exported {item_count} accepted walkthrough steps",
+        message=(
+            f"Exported {item_count} accepted walkthrough steps"
+            if export_mode == "accepted"
+            else f"Exported {item_count} screenshot candidates"
+        ),
         level="success",
     )
     return _serialize_export_bundle(bundle)
