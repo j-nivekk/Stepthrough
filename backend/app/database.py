@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS detection_runs (
     tolerance REAL NOT NULL,
     min_scene_gap_ms INTEGER NOT NULL,
     sample_fps REAL,
+    allow_high_fps_sampling INTEGER NOT NULL DEFAULT 0,
     extract_offset_ms INTEGER NOT NULL,
     progress REAL NOT NULL DEFAULT 0,
     message TEXT,
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS candidate_frames (
     run_id TEXT NOT NULL REFERENCES detection_runs(id) ON DELETE CASCADE,
     recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
     detector_index INTEGER NOT NULL,
+    candidate_origin TEXT NOT NULL DEFAULT 'detected',
     timestamp_ms INTEGER NOT NULL,
     timestamp_tc TEXT NOT NULL,
     image_path TEXT NOT NULL,
@@ -145,4 +147,6 @@ def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
         _ensure_column(conn, "detection_runs", "phase", "TEXT NOT NULL DEFAULT 'queued'")
+        _ensure_column(conn, "detection_runs", "allow_high_fps_sampling", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "candidate_frames", "candidate_origin", "TEXT NOT NULL DEFAULT 'detected'")
         _backfill_detection_run_phase(conn)

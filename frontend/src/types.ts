@@ -1,5 +1,6 @@
 export type DetectorMode = 'content' | 'adaptive';
 export type CandidateStatus = 'pending' | 'accepted' | 'rejected';
+export type CandidateOrigin = 'detected' | 'manual';
 export type ExportMode = 'accepted' | 'all';
 export type RunStatus = 'queued' | 'running' | 'awaiting_fallback' | 'completed' | 'failed' | 'cancelled';
 export type RunPhase =
@@ -61,6 +62,7 @@ export interface RunSummary {
   tolerance: number;
   min_scene_gap_ms: number;
   sample_fps: number | null;
+  allow_high_fps_sampling: boolean;
   extract_offset_ms: number;
   progress: number;
   message?: string | null;
@@ -85,6 +87,7 @@ export interface CandidateFrame {
   run_id: string;
   recording_id: string;
   detector_index: number;
+  candidate_origin: CandidateOrigin;
   timestamp_ms: number;
   timestamp_tc: string;
   image_path: string;
@@ -149,6 +152,7 @@ export interface RunSettings {
   tolerance: number;
   min_scene_gap_ms: number;
   sample_fps: number | null;
+  allow_high_fps_sampling: boolean;
   detector_mode: DetectorMode;
   extract_offset_ms: number;
 }

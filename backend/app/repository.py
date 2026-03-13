@@ -206,6 +206,7 @@ def create_run(recording_id: str, settings: RunSettings) -> dict[str, Any]:
         "tolerance": settings.tolerance,
         "min_scene_gap_ms": settings.min_scene_gap_ms,
         "sample_fps": settings.sample_fps,
+        "allow_high_fps_sampling": settings.allow_high_fps_sampling,
         "extract_offset_ms": settings.extract_offset_ms,
         "progress": 0.0,
         "message": "Queued",
@@ -218,10 +219,10 @@ def create_run(recording_id: str, settings: RunSettings) -> dict[str, Any]:
             """
             INSERT INTO detection_runs (
                 id, recording_id, status, phase, detector_mode, tolerance, min_scene_gap_ms, sample_fps,
-                extract_offset_ms, progress, message, candidate_count, created_at, updated_at
+                allow_high_fps_sampling, extract_offset_ms, progress, message, candidate_count, created_at, updated_at
             ) VALUES (
                 :id, :recording_id, :status, :phase, :detector_mode, :tolerance, :min_scene_gap_ms, :sample_fps,
-                :extract_offset_ms, :progress, :message, :candidate_count, :created_at, :updated_at
+                :allow_high_fps_sampling, :extract_offset_ms, :progress, :message, :candidate_count, :created_at, :updated_at
             )
             """,
             payload,
@@ -283,11 +284,11 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
             conn.executemany(
                 """
                 INSERT INTO candidate_frames (
-                    id, run_id, recording_id, detector_index, timestamp_ms, timestamp_tc, image_path,
+                    id, run_id, recording_id, detector_index, candidate_origin, timestamp_ms, timestamp_tc, image_path,
                     scene_score, status, title, notes, image_hash, histogram_signature,
                     revisit_group_id, similar_to_candidate_id, similarity_distance, created_at, updated_at
                 ) VALUES (
-                    :id, :run_id, :recording_id, :detector_index, :timestamp_ms, :timestamp_tc, :image_path,
+                    :id, :run_id, :recording_id, :detector_index, :candidate_origin, :timestamp_ms, :timestamp_tc, :image_path,
                     :scene_score, :status, :title, :notes, :image_hash, :histogram_signature,
                     :revisit_group_id, :similar_to_candidate_id, :similarity_distance, :created_at, :updated_at
                 )
@@ -297,6 +298,7 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
                         **candidate,
                         "run_id": run_id,
                         "recording_id": recording_id,
+                        "candidate_origin": candidate.get("candidate_origin", "detected"),
                     }
                     for candidate in candidates
                 ],

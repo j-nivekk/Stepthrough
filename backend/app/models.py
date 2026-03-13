@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 CandidateStatus = Literal["pending", "accepted", "rejected"]
+CandidateOrigin = Literal["detected", "manual"]
 RunStatus = Literal["queued", "running", "awaiting_fallback", "completed", "failed", "cancelled"]
 DetectorMode = Literal["content", "adaptive"]
 ExportMode = Literal["accepted", "all"]
@@ -50,9 +51,10 @@ class ProjectResponse(BaseModel):
 
 
 class RunSettings(BaseModel):
-    tolerance: float = Field(default=50, ge=0, le=100)
+    tolerance: float = Field(default=50, ge=1, le=100)
     min_scene_gap_ms: int = Field(default=900, ge=0, le=60_000)
-    sample_fps: float | None = Field(default=4.0, gt=0, le=30)
+    sample_fps: float | None = Field(default=4.0, gt=0)
+    allow_high_fps_sampling: bool = False
     detector_mode: DetectorMode = "content"
     extract_offset_ms: int = Field(default=200, ge=0, le=10_000)
 
@@ -88,6 +90,7 @@ class DetectionRunSummary(BaseModel):
     tolerance: float
     min_scene_gap_ms: int
     sample_fps: float | None
+    allow_high_fps_sampling: bool
     extract_offset_ms: int
     progress: float
     message: str | None = None
@@ -108,6 +111,7 @@ class CandidateFrameResponse(BaseModel):
     run_id: str
     recording_id: str
     detector_index: int
+    candidate_origin: CandidateOrigin
     timestamp_ms: int
     timestamp_tc: str
     image_path: str
@@ -187,3 +191,7 @@ class CandidateUpdate(BaseModel):
     status: CandidateStatus | None = None
     title: str | None = Field(default=None, max_length=240)
     notes: str | None = Field(default=None, max_length=2_000)
+
+
+class ManualCandidateCreate(BaseModel):
+    timestamp_ms: int = Field(ge=0)

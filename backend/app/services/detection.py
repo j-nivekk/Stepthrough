@@ -36,12 +36,19 @@ PRIMARY_SCAN_RANGE = (0.1, 0.46)
 PRIMARY_EXTRACT_RANGE = (0.48, 0.66)
 FALLBACK_SCAN_RANGE = (0.72, 0.9)
 FALLBACK_EXTRACT_RANGE = (0.91, 0.97)
+CONTENT_THRESHOLD_RANGE = (8.0, 48.0)
+ADAPTIVE_THRESHOLD_RANGE = (1.0, 7.0)
+
+
+def _map_tolerance_threshold(tolerance: float, threshold_range: tuple[float, float]) -> float:
+    floor, ceiling = threshold_range
+    normalized = (max(1.0, min(100.0, tolerance)) - 1.0) / 99.0
+    return floor + ((ceiling - floor) * normalized)
 
 
 def map_run_settings(settings: RunSettings, fps: float) -> DetectorConfiguration:
-    normalized = settings.tolerance / 100.0
-    content_threshold = 18.0 + (normalized * 24.0)
-    adaptive_threshold = 2.0 + (normalized * 4.0)
+    content_threshold = _map_tolerance_threshold(settings.tolerance, CONTENT_THRESHOLD_RANGE)
+    adaptive_threshold = _map_tolerance_threshold(settings.tolerance, ADAPTIVE_THRESHOLD_RANGE)
     min_scene_len_frames = max(1, round((settings.min_scene_gap_ms / 1000) * max(fps, 1.0)))
     frame_skip = 0
     if settings.sample_fps:
@@ -63,7 +70,8 @@ def build_sensitive_fallback_settings(settings: RunSettings) -> RunSettings:
         detector_mode="adaptive",
         tolerance=20,
         min_scene_gap_ms=300,
-        sample_fps=8,
+        sample_fps=settings.sample_fps if settings.allow_high_fps_sampling else 8,
+        allow_high_fps_sampling=settings.allow_high_fps_sampling,
         extract_offset_ms=settings.extract_offset_ms,
     )
 
@@ -184,6 +192,7 @@ def detect_candidates(
             {
                 "id": uuid4().hex,
                 "detector_index": index,
+                "candidate_origin": "detected",
                 "timestamp_ms": timestamp_ms,
                 "timestamp_tc": timecode_from_ms(timestamp_ms),
                 "image_path": image_path.as_posix(),
