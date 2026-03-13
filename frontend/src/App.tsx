@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   API_BASE,
@@ -26,6 +26,7 @@ import type {
   GlobalRunPreset,
   Project,
   ProjectRunPreset,
+  RecordingDetail,
   RecordingSummary,
   RunDetail,
   RunPhase,
@@ -60,7 +61,32 @@ interface ImportQueueItem {
   signature: string | null;
 }
 
+interface AnalysisTaskItem {
+  recording: RecordingSummary;
+  run: RunSummary;
+}
+
+type AnalysisHintKey =
+  | 'detector_mode'
+  | 'extract_offset_ms'
+  | 'load'
+  | 'min_scene_gap_ms'
+  | 'reset'
+  | 'run'
+  | 'sample_fps'
+  | 'save'
+  | 'tolerance';
+
 const workflowStages: WorkflowStage[] = ['projects', 'import', 'analysis'];
+const activeRunStatuses: RunSummary['status'][] = ['queued', 'running'];
+const analysisResetStarPoints = Array.from({ length: 34 }, (_value, index) => {
+  const angle = -Math.PI / 2 + (Math.PI * index) / 17;
+  const radiusX = index % 2 === 0 ? 43 : 35;
+  const radiusY = index % 2 === 0 ? 16 : 12;
+  const x = 46 + Math.cos(angle) * radiusX;
+  const y = 16 + Math.sin(angle) * radiusY;
+  return `${x.toFixed(2)},${y.toFixed(2)}`;
+}).join(' ');
 
 const phaseLabels: Record<RunPhase, string> = {
   queued: 'Queued',
@@ -260,16 +286,6 @@ function formatRunTiming(run: RunSummary): string {
   return `Created ${new Date(run.created_at).toLocaleString()}`;
 }
 
-function formatSettingsSource(source: SettingsSource): string {
-  if (source === 'project') {
-    return 'project working preset';
-  }
-  if (source === 'browser') {
-    return 'browser default preset';
-  }
-  return 'app defaults';
-}
-
 function formatProjectActivity(lastActivityAt: string): string {
   const timestamp = new Date(lastActivityAt).getTime();
   if (Number.isNaN(timestamp)) {
@@ -302,6 +318,12 @@ function formatProjectSummary(project: Project): string {
   return `${videoLabel} • ${runLabel} • ${formatProjectActivity(project.last_activity_at)}`;
 }
 
+function formatProjectCounts(project: Project): string {
+  const videoLabel = `${project.recording_count} ${project.recording_count === 1 ? 'video' : 'videos'}`;
+  const runLabel = `${project.run_count} ${project.run_count === 1 ? 'run' : 'runs'}`;
+  return `${videoLabel} • ${runLabel}`;
+}
+
 function jumpToAnchor(anchorId: string): void {
   if (typeof document === 'undefined') {
     return;
@@ -319,6 +341,37 @@ function createLocalId(prefix: string): string {
     return `${prefix}-${crypto.randomUUID()}`;
   }
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, milliseconds);
+  });
+}
+
+function clampInteger(value: number, min?: number, max?: number): number {
+  let nextValue = Math.round(value);
+  if (typeof min === 'number') {
+    nextValue = Math.max(min, nextValue);
+  }
+  if (typeof max === 'number') {
+    nextValue = Math.min(max, nextValue);
+  }
+  return nextValue;
+}
+
+function triggerDownload(url: string): void {
+  if (typeof document === 'undefined') {
+    return;
+  }
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.target = '_blank';
+  anchor.rel = 'noreferrer';
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 function buildImportFileSignature(file: Pick<File, 'name' | 'size' | 'lastModified'>): string {
@@ -385,6 +438,25 @@ function getUploadedImportItems(queue: ImportQueueItem[]): ImportQueueItem[] {
   return queue.filter((item) => item.status === 'uploaded' && Boolean(item.recordingId));
 }
 
+function getAnalysisTaskStatusRank(status: RunSummary['status']): number {
+  if (status === 'running') {
+    return 0;
+  }
+  if (status === 'queued') {
+    return 1;
+  }
+  if (status === 'awaiting_fallback') {
+    return 2;
+  }
+  if (status === 'completed') {
+    return 3;
+  }
+  if (status === 'failed') {
+    return 4;
+  }
+  return 5;
+}
+
 function App() {
   const queryClient = useQueryClient();
   const [projectName, setProjectName] = useState('');
@@ -397,10 +469,12 @@ function App() {
   const [settingsFeedback, setSettingsFeedback] = useState('');
   const [globalPreset, setGlobalPreset] = useState<GlobalRunPreset | null>(() => loadGlobalRunPreset());
   const [importQueue, setImportQueue] = useState<ImportQueueItem[]>([]);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const [liveMessage, setLiveMessage] = useState<string>('');
+  const [analysisActionMessage, setAnalysisActionMessage] = useState<string>('');
   const [appError, setAppError] = useState<string>('');
-  const [runsExpanded, setRunsExpanded] = useState(false);
+  const [bulkDeletePending, setBulkDeletePending] = useState(false);
+  const [bulkExportPending, setBulkExportPending] = useState(false);
   const isHydratingProjectSettingsRef = useRef(false);
   const hydratedProjectIdRef = useRef<string | null>(null);
   const hydratedSettingsSignatureRef = useRef<string | null>(null);
@@ -418,7 +492,7 @@ function App() {
     enabled: Boolean(selectedRecordingId),
     refetchInterval: (query) => {
       const recording = query.state.data;
-      return recording?.runs.some((run) => ['queued', 'running'].includes(run.status)) ? 1500 : false;
+      return recording?.runs.some((run) => activeRunStatuses.includes(run.status)) ? 1500 : false;
     },
   });
   const runDetailQuery = useQuery({
@@ -427,8 +501,18 @@ function App() {
     enabled: Boolean(selectedRunId),
     refetchInterval: (query) => {
       const run = query.state.data as RunDetail | undefined;
-      return run && ['queued', 'running'].includes(run.summary.status) ? 2000 : false;
+      return run && activeRunStatuses.includes(run.summary.status) ? 2000 : false;
     },
+  });
+  const projectRecordings = projectDetailQuery.data?.recordings ?? [];
+  const analysisRecordingQueries = useQueries({
+    queries: projectRecordings.map((recording) => ({
+      queryKey: ['recording', recording.id, 'analysis'],
+      queryFn: () => getRecording(recording.id),
+      enabled: workflowStage === 'analysis' && Boolean(selectedProjectId),
+      refetchInterval: (query: { state: { data: RecordingDetail | undefined } }) =>
+        query.state.data?.runs.some((run) => activeRunStatuses.includes(run.status)) ? 1500 : false,
+    })),
   });
 
   useEffect(() => {
@@ -440,6 +524,7 @@ function App() {
       setSettingsSource(globalPreset ? 'browser' : 'app');
       setSettingsFeedback('');
       setImportQueue([]);
+      setPreviewRecordingId(null);
       setWorkflowStage('projects');
       return;
     }
@@ -486,9 +571,17 @@ function App() {
     if (!stillSelected) {
       setSelectedRecordingId(null);
       setSelectedRunId(null);
-      setRunsExpanded(false);
     }
   }, [projectDetailQuery.data, selectedRecordingId]);
+
+  useEffect(() => {
+    if (!previewRecordingId) {
+      return;
+    }
+    if (!projectRecordings.some((recording) => recording.id === previewRecordingId)) {
+      setPreviewRecordingId(null);
+    }
+  }, [previewRecordingId, projectRecordings]);
 
   useEffect(() => {
     const runs = recordingDetailQuery.data?.runs ?? [];
@@ -502,7 +595,7 @@ function App() {
     if (!selectedRunId || !runDetailQuery.data) {
       return;
     }
-    if (!['queued', 'running'].includes(runDetailQuery.data.summary.status)) {
+    if (!activeRunStatuses.includes(runDetailQuery.data.summary.status)) {
       return;
     }
 
@@ -537,13 +630,9 @@ function App() {
   });
 
   const importRecordingMutation = useMutation({
-    mutationFn: ({ projectId, file }: { file: File; localId?: string; projectId: string; source: 'import' | 'workspace' }) =>
-      importRecording(projectId, file),
+    mutationFn: ({ projectId, file }: { file: File; localId?: string; projectId: string }) => importRecording(projectId, file),
     onSuccess: (recording, variables) => {
-      if (variables.source === 'workspace') {
-        setUploadFile(null);
-      }
-      if (variables.source === 'import' && variables.localId) {
+      if (variables.localId) {
         setImportQueue((current) =>
           current.map((item) =>
             item.localId === variables.localId
@@ -562,14 +651,13 @@ function App() {
       }
       setSelectedRecordingId(recording.id);
       setSelectedRunId(null);
-      setRunsExpanded(false);
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['project', recording.project_id] });
       queryClient.invalidateQueries({ queryKey: ['recording', recording.id] });
     },
     onError: (error: Error, variables) => {
       setAppError(error.message);
-      if (variables.source === 'import' && variables.localId) {
+      if (variables.localId) {
         setImportQueue((current) =>
           current.map((item) =>
             item.localId === variables.localId
@@ -592,7 +680,6 @@ function App() {
       if (selectedRecordingId === variables.recordingId) {
         setSelectedRecordingId(null);
         setSelectedRunId(null);
-        setRunsExpanded(false);
       }
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] });
@@ -605,7 +692,6 @@ function App() {
     mutationFn: ({ recordingId, settings }: { recordingId: string; settings: RunSettings }) => createRun(recordingId, settings),
     onSuccess: (run) => {
       setSelectedRunId(run.id);
-      setRunsExpanded(true);
       setLiveMessage('Queued detection job.');
       queryClient.invalidateQueries({ queryKey: ['recording', run.recording_id] });
       queryClient.invalidateQueries({ queryKey: ['run', run.id] });
@@ -679,12 +765,39 @@ function App() {
 
   const selectedRecording = recordingDetailQuery.data ?? null;
   const selectedRun = runDetailQuery.data ?? null;
+  const selectedRecordingSummary = projectRecordings.find((recording) => recording.id === selectedRecordingId) ?? null;
+  const previewRecording = projectRecordings.find((recording) => recording.id === previewRecordingId) ?? null;
   const healthWarning = healthQuery.data && healthQuery.data.missing_tools.length > 0;
-  const selectedVideoUrl = selectedRecording ? absoluteApiUrl(selectedRecording.source_url) : null;
-  const exportUrl = selectedRun?.export_bundle ? absoluteApiUrl(selectedRun.export_bundle.zip_url) : null;
   const presetText = useMemo(() => serializeRunPresetText(runSettings), [runSettings]);
   const uploadedImportItems = useMemo(() => getUploadedImportItems(importQueue), [importQueue]);
   const canCompleteImport = uploadedImportItems.length > 0;
+  const analysisTaskItems = useMemo<AnalysisTaskItem[]>(() => {
+    return projectRecordings
+      .flatMap((recording, index) => {
+      const detail = analysisRecordingQueries[index]?.data;
+        return (detail?.runs ?? []).map((run) => ({ recording, run }));
+      })
+      .sort((left, right) => {
+        const statusRankDelta = getAnalysisTaskStatusRank(left.run.status) - getAnalysisTaskStatusRank(right.run.status);
+        if (statusRankDelta !== 0) {
+          return statusRankDelta;
+        }
+        return new Date(right.run.created_at).getTime() - new Date(left.run.created_at).getTime();
+      });
+  }, [analysisRecordingQueries, projectRecordings]);
+  const latestRunByRecordingId = useMemo(() => {
+    const nextMap = new Map<string, RunSummary>();
+    analysisTaskItems.forEach((item) => {
+      const existing = nextMap.get(item.recording.id);
+      if (!existing || new Date(item.run.created_at).getTime() > new Date(existing.created_at).getTime()) {
+        nextMap.set(item.recording.id, item.run);
+      }
+    });
+    return nextMap;
+  }, [analysisTaskItems]);
+  const analysisTaskItemByRunId = useMemo(() => {
+    return new Map(analysisTaskItems.map((item) => [item.run.id, item]));
+  }, [analysisTaskItems]);
   const candidateSimilarityLinks = useMemo(() => {
     const links = new Map<string, SimilarLink>();
     if (!selectedRun) {
@@ -737,14 +850,28 @@ function App() {
     return links;
   }, [selectedRun]);
 
+  async function waitForRunToLeaveActiveState(runId: string): Promise<RunDetail> {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const run = await getRun(runId);
+      if (!activeRunStatuses.includes(run.summary.status)) {
+        return run;
+      }
+      await sleep(1000);
+    }
+    throw new Error('Timed out while waiting for the task to stop.');
+  }
+
+  function clearAnalysisMessages() {
+    setAppError('');
+    setAnalysisActionMessage('');
+  }
+
   function enterProject(projectId: string) {
     setSelectedProjectId(projectId);
     setSelectedRecordingId(null);
     setSelectedRunId(null);
-    setRunsExpanded(false);
     setWorkflowStage('import');
-    setAppError('');
-    setUploadFile(null);
+    clearAnalysisMessages();
   }
 
   function handleCreateProject(event: React.FormEvent<HTMLFormElement>) {
@@ -752,25 +879,38 @@ function App() {
     if (!projectName.trim()) {
       return;
     }
-    setAppError('');
+    clearAnalysisMessages();
     createProjectMutation.mutate(projectName.trim());
   }
 
-  function handleImportRecording(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedProjectId || !uploadFile) {
-      return;
+  function setAnalysisSelection(recordingId: string, jumpToRunDetail: boolean) {
+    const latestRun = latestRunByRecordingId.get(recordingId) ?? null;
+    setSelectedRecordingId(recordingId);
+    setSelectedRunId(latestRun?.id ?? null);
+    if (latestRun && jumpToRunDetail) {
+      jumpToAnalysisAnchor('analysis-run-detail');
     }
-    setAppError('');
-    importRecordingMutation.mutate({ projectId: selectedProjectId, file: uploadFile, source: 'workspace' });
   }
 
-  function handleStartRun(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function handleSelectRecording(recordingId: string) {
+    setAnalysisSelection(recordingId, true);
+  }
+
+  function handlePreviewRecording(recordingId: string) {
+    setPreviewRecordingId((current) => {
+      const nextRecordingId = current === recordingId ? null : recordingId;
+      if (nextRecordingId) {
+        jumpToAnalysisAnchor('analysis-video-preview');
+      }
+      return nextRecordingId;
+    });
+  }
+
+  function handleStartAnalysisRun() {
     if (!selectedRecordingId) {
       return;
     }
-    setAppError('');
+    clearAnalysisMessages();
     createRunMutation.mutate({ recordingId: selectedRecordingId, settings: runSettings });
   }
 
@@ -789,22 +929,8 @@ function App() {
   }
 
   function handleResetToAppDefaults() {
-    setRunSettings(defaultRunSettings);
+    setRunSettings({ ...defaultRunSettings });
     setSettingsFeedback('Reset the current project to the built-in defaults.');
-  }
-
-  async function handleCopyPresetText() {
-    if (typeof navigator === 'undefined' || !navigator.clipboard) {
-      setSettingsFeedback('Clipboard copy is unavailable here. Open “Show preset text” to copy it manually.');
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(presetText);
-      setSettingsFeedback('Copied the formatted preset text to your clipboard.');
-    } catch {
-      setSettingsFeedback('Could not copy automatically. Open “Show preset text” to copy it manually.');
-    }
   }
 
   function confirmDeleteRecording(recordingId: string, filename: string) {
@@ -827,6 +953,31 @@ function App() {
       return;
     }
     handleNavigateToAnalysis(true);
+  }
+
+  function jumpToAnalysisAnchor(anchorId: string) {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.setTimeout(() => jumpToAnchor(anchorId), 0);
+  }
+
+  function handleJumpToAnalysisSelection() {
+    if (selectedRun) {
+      jumpToAnchor('analysis-run-detail');
+      return;
+    }
+    if (previewRecordingId) {
+      jumpToAnchor('analysis-video-preview');
+      return;
+    }
+    jumpToAnchor('analysis-parameters');
+  }
+
+  function handleSelectTaskRun(recordingId: string, runId: string, anchorId = 'analysis-run-detail') {
+    setSelectedRecordingId(recordingId);
+    setSelectedRunId(runId);
+    jumpToAnalysisAnchor(anchorId);
   }
 
   function handleImportFileSelection(files: FileList | File[]) {
@@ -857,7 +1008,7 @@ function App() {
       return;
     }
 
-    setAppError('');
+    clearAnalysisMessages();
     setImportQueue((current) =>
       current.map((item) =>
         item.localId === localId
@@ -873,7 +1024,6 @@ function App() {
       projectId: selectedProjectId,
       file: queueItem.file,
       localId,
-      source: 'import',
     });
   }
 
@@ -912,7 +1062,6 @@ function App() {
     setImportQueue(persistedRows);
     setSelectedRecordingId(nextRecordingId);
     setSelectedRunId(null);
-    setRunsExpanded(false);
     setWorkflowStage('analysis');
   }
 
@@ -921,6 +1070,173 @@ function App() {
       return;
     }
     deleteRunMutation.mutate({ runId });
+  }
+
+  async function handleExportTaskRuns(runIds: string[]): Promise<void> {
+    const uniqueRunIds = Array.from(new Set(runIds));
+    const tasks = uniqueRunIds
+      .map((runId) => analysisTaskItemByRunId.get(runId))
+      .filter((item): item is AnalysisTaskItem => Boolean(item));
+    const completedTasks = tasks.filter((item) => item.run.status === 'completed');
+    const skippedCount = tasks.length - completedTasks.length;
+
+    clearAnalysisMessages();
+    if (!completedTasks.length) {
+      setAppError('Only completed tasks can be exported.');
+      return;
+    }
+
+    setBulkExportPending(true);
+    try {
+      const results = await Promise.allSettled(
+        completedTasks.map(async (item) => {
+          const bundle = await exportRun(item.run.id);
+          await queryClient.invalidateQueries({ queryKey: ['run', item.run.id] });
+          await queryClient.invalidateQueries({ queryKey: ['recording', item.run.recording_id] });
+          triggerDownload(absoluteApiUrl(bundle.zip_url));
+          return item.run.id;
+        }),
+      );
+
+      let successCount = 0;
+      const failures: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          successCount += 1;
+          return;
+        }
+        failures.push(
+          `${completedTasks[index].recording.filename}: ${result.reason instanceof Error ? result.reason.message : 'Export failed.'}`,
+        );
+      });
+
+      if (successCount > 0) {
+        const skipSuffix = skippedCount ? ` Skipped ${skippedCount} non-completed ${skippedCount === 1 ? 'task' : 'tasks'}.` : '';
+        setAnalysisActionMessage(`Exported ${successCount} ${successCount === 1 ? 'task' : 'tasks'}.${skipSuffix}`);
+      }
+      if (failures.length > 0) {
+        setAppError(`Could not export ${failures.length === 1 ? 'a task' : `${failures.length} tasks`}: ${failures.join(' · ')}`);
+      }
+    } finally {
+      setBulkExportPending(false);
+    }
+  }
+
+  async function handleDeleteSelectedRuns(runIds: string[]): Promise<string[] | null> {
+    const uniqueRunIds = Array.from(new Set(runIds));
+    const tasks = uniqueRunIds
+      .map((runId) => analysisTaskItemByRunId.get(runId))
+      .filter((item): item is AnalysisTaskItem => Boolean(item));
+
+    if (!tasks.length) {
+      return [];
+    }
+
+    const activeTasks = tasks.filter((item) => activeRunStatuses.includes(item.run.status));
+    const confirmCopy = activeTasks.length
+      ? `Delete ${tasks.length} selected ${tasks.length === 1 ? 'task' : 'tasks'}? ${activeTasks.length} active ${
+          activeTasks.length === 1 ? 'task will' : 'tasks will'
+        } be ended first, then deleted.`
+      : `Delete ${tasks.length} selected ${tasks.length === 1 ? 'task' : 'tasks'}?`;
+    if (!window.confirm(confirmCopy)) {
+      return null;
+    }
+
+    clearAnalysisMessages();
+    setBulkDeletePending(true);
+
+    const failedRunIds = new Set<string>();
+    const failures: string[] = [];
+    let deletedCount = 0;
+
+    try {
+      if (activeTasks.length > 0) {
+        const abortResults = await Promise.allSettled(
+          activeTasks.map(async (item) => {
+            const run = await abortRun(item.run.id);
+            await queryClient.invalidateQueries({ queryKey: ['run', run.id] });
+            await queryClient.invalidateQueries({ queryKey: ['recording', run.recording_id] });
+            return run.id;
+          }),
+        );
+
+        abortResults.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            return;
+          }
+          failedRunIds.add(activeTasks[index].run.id);
+          failures.push(
+            `${activeTasks[index].recording.filename}: ${
+              result.reason instanceof Error ? result.reason.message : 'Could not end the task before deleting it.'
+            }`,
+          );
+        });
+
+        const waitingTasks = activeTasks.filter((item) => !failedRunIds.has(item.run.id));
+        const waitResults = await Promise.allSettled(
+          waitingTasks.map(async (item) => {
+            const run = await waitForRunToLeaveActiveState(item.run.id);
+            await queryClient.invalidateQueries({ queryKey: ['run', run.summary.id] });
+            await queryClient.invalidateQueries({ queryKey: ['recording', run.summary.recording_id] });
+            return run.summary.id;
+          }),
+        );
+
+        waitResults.forEach((result, index) => {
+          if (result.status === 'fulfilled') {
+            return;
+          }
+          failedRunIds.add(waitingTasks[index].run.id);
+          failures.push(
+            `${waitingTasks[index].recording.filename}: ${
+              result.reason instanceof Error ? result.reason.message : 'Timed out waiting for the task to stop.'
+            }`,
+          );
+        });
+      }
+
+      const deletableTasks = tasks.filter((item) => !failedRunIds.has(item.run.id));
+      const deleteResults = await Promise.allSettled(
+        deletableTasks.map(async (item) => {
+          await deleteRun(item.run.id);
+          if (selectedRunId === item.run.id) {
+            setSelectedRunId(null);
+          }
+          await queryClient.invalidateQueries({ queryKey: ['recording', item.run.recording_id] });
+          queryClient.removeQueries({ queryKey: ['run', item.run.id] });
+          return item.run.id;
+        }),
+      );
+
+      deleteResults.forEach((result, index) => {
+        if (result.status === 'fulfilled') {
+          deletedCount += 1;
+          return;
+        }
+        failedRunIds.add(deletableTasks[index].run.id);
+        failures.push(
+          `${deletableTasks[index].recording.filename}: ${
+            result.reason instanceof Error ? result.reason.message : 'Delete failed.'
+          }`,
+        );
+      });
+
+      if (selectedProjectId) {
+        await queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] });
+      }
+      await queryClient.invalidateQueries({ queryKey: ['projects'] });
+
+      if (deletedCount > 0) {
+        setAnalysisActionMessage(`Deleted ${deletedCount} ${deletedCount === 1 ? 'task' : 'tasks'}.`);
+      }
+      if (failures.length > 0) {
+        setAppError(`Could not delete ${failures.length === 1 ? 'a task' : `${failures.length} tasks`}: ${failures.join(' · ')}`);
+      }
+
+      return tasks.filter((item) => failedRunIds.has(item.run.id)).map((item) => item.run.id);
+    } finally {
+      setBulkDeletePending(false);
+    }
   }
 
   const canExport = Boolean(selectedRun && selectedRun.summary.status === 'completed' && selectedRun.accepted_steps.length > 0);
@@ -963,598 +1279,54 @@ function App() {
   }
 
   return (
-    <div className="shell">
-      <StageNavigator
-        activeStage="analysis"
-        className="analysis-stage-nav"
-        onNavigate={setProjectStage}
-      />
-      <aside className="sidebar">
-        <div className="brand-card">
-          <p className="eyebrow">Walkthrough Research Toolkit</p>
-          <h1>Stepthrough</h1>
-          <p className="lede">
-            Import recordings, detect interface changes, review candidate screenshots, and export a chronological walkthrough.
-          </p>
-        </div>
-
-        <form className="card stack-gap" onSubmit={handleCreateProject}>
-          <div>
-            <h2>New Project</h2>
-            <p className="muted">Create a workspace for a study, participant session, or app flow.</p>
-          </div>
-          <input
-            className="field"
-            placeholder="e.g. Banking Onboarding Study"
-            value={projectName}
-            onChange={(event) => setProjectName(event.target.value)}
-          />
-          <button className="primary-button" disabled={createProjectMutation.isPending} type="submit">
-            {createProjectMutation.isPending ? 'Creating…' : 'Create Project'}
-          </button>
-        </form>
-
-        <section className="card stack-gap">
-          <div className="section-header compact">
-            <div>
-              <h2>Projects</h2>
-              <p className="muted">Choose the workspace you want to continue.</p>
-            </div>
-            <span className="count-badge">{projectsQuery.data?.length ?? 0}</span>
-          </div>
-          <div className="project-list">
-            {projectsQuery.data?.map((project) => (
-              <button
-                key={project.id}
-                className={`project-row ${project.id === selectedProjectId ? 'selected' : ''}`}
-                onClick={() => enterProject(project.id)}
-                type="button"
-              >
-                <span>
-                  <strong>{project.name}</strong>
-                  <small>{formatProjectSummary(project)}</small>
-                </span>
-                <span className="slug-pill">{project.slug}</span>
-              </button>
-            ))}
-            {!projectsQuery.data?.length && <p className="empty-copy">Projects will appear here once you create one.</p>}
-          </div>
-        </section>
-      </aside>
-
-      <main className="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Local-first processing</p>
-            <h2>{activeProject ? activeProject.name : 'Loading project…'}</h2>
-          </div>
-          <div className="topbar-status">
-            <span className={`status-pill ${healthWarning ? 'warning' : 'ready'}`}>
-              {healthWarning ? 'Tools missing' : 'FFmpeg ready'}
-            </span>
-            {liveMessage && <span className="status-pill info">{liveMessage}</span>}
-          </div>
-        </header>
-
-        {healthWarning && (
-          <section className="banner warning-banner">
-            <strong>Video tools are not ready.</strong>
-            <span>{healthQuery.data?.message}</span>
-          </section>
-        )}
-
-        {appError && (
-          <section className="banner error-banner">
-            <strong>Something went wrong.</strong>
-            <span>{appError}</span>
-          </section>
-        )}
-
-        {activeProject && (
-          <section className="card stack-gap">
-            <div className="section-header">
-              <div>
-                <h2>Recordings</h2>
-                <p className="muted">Import a phone or desktop recording, then select it to configure detection.</p>
-              </div>
-              <span className="slug-pill">{activeProject.slug}</span>
-            </div>
-
-            <form className="upload-form" onSubmit={handleImportRecording}>
-              <label className="upload-dropzone">
-                <input
-                  accept="video/*"
-                  onChange={(event) => setUploadFile(event.target.files?.[0] ?? null)}
-                  type="file"
-                />
-                <span>{uploadFile ? uploadFile.name : 'Choose a recording file'}</span>
-                <small>Stepthrough copies the video into local project storage.</small>
-              </label>
-              <button className="secondary-button" disabled={!selectedProjectId || !uploadFile || importRecordingMutation.isPending} type="submit">
-                {importRecordingMutation.isPending ? 'Importing…' : 'Import Recording'}
-              </button>
-            </form>
-
-            <div className="recording-list">
-              {projectDetailQuery.data?.recordings.map((recording) => (
-                <div className={`management-row ${recording.id === selectedRecordingId ? 'selected-shell' : ''}`} key={recording.id}>
-                  <button
-                    className={`recording-row ${recording.id === selectedRecordingId ? 'selected' : ''}`}
-                    onClick={() => {
-                      setSelectedRecordingId(recording.id);
-                      setSelectedRunId(null);
-                      setRunsExpanded(false);
-                    }}
-                    type="button"
-                  >
-                    <span>
-                      <strong>{recording.filename}</strong>
-                      <small>
-                        {recording.duration_tc} · {recording.width}×{recording.height} · {recording.fps} fps
-                      </small>
-                    </span>
-                    <span className="slug-pill">{recording.slug}</span>
-                  </button>
-                  <div className="row-actions">
-                    <button className="danger-button" onClick={() => confirmDeleteRecording(recording.id, recording.filename)} type="button">
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {!projectDetailQuery.data?.recordings.length && (
-                <p className="empty-copy">Imported recordings will appear here for processing and run history.</p>
-              )}
-            </div>
-          </section>
-        )}
-
-        {selectedRecording && (
-          <section className="card stack-gap">
-            <div className="section-header">
-              <div>
-                <h2>Detection Setup</h2>
-                <p className="muted">Tune how aggressively Stepthrough looks for interaction changes in the selected recording.</p>
-              </div>
-              <span className="count-badge">{selectedRecording.runs.length} runs</span>
-            </div>
-
-            <details className="disclosure-card">
-              <summary>What do these settings mean?</summary>
-              <div className="disclosure-body stack-gap">
-                <p className="helper-text">Tolerance controls how much change is required before a screenshot is suggested.</p>
-                <p className="helper-text">Min scene gap prevents near-duplicate screenshots from tiny changes too close together in time.</p>
-                <p className="helper-text">Sample fps trades speed against sensitivity. Detector mode changes how frame differences are interpreted.</p>
-                <p className="helper-text">Extract offset nudges the captured frame slightly after a change so the interface has time to settle.</p>
-                <p className="helper-text">Your current form auto-saves per project in this browser. You can also promote it to a browser-wide default preset.</p>
-              </div>
-            </details>
-
-            <details className="disclosure-card">
-              <summary>Tips for mobile app interfaces</summary>
-              <div className="disclosure-body stack-gap">
-                <p className="helper-text">For apps like WhatsApp, tune in this order: tolerance, sample fps, min scene gap, detector mode, then extract offset.</p>
-                <ol className="helper-list">
-                  <li>Missing subtle screens like keyboards, badges, or sheet openings: lower tolerance first.</li>
-                  <li>Missing very brief menus or overlays: raise sample fps next.</li>
-                  <li>Getting too many near-duplicates from scrolling or animation: raise min scene gap.</li>
-                  <li>If scrolling dominates the video and keeps triggering false scenes: switch from content to adaptive mode.</li>
-                  <li>If screenshots look blurry or transitional: raise extract offset.</li>
-                </ol>
-                <p className="helper-text">A good mobile starting point is content mode with moderate tolerance, moderate sample fps, a mid-range scene gap, and a small positive extract offset.</p>
-              </div>
-            </details>
-
-            <form className="stack-gap" onSubmit={handleStartRun}>
-              <label className="field-group">
-                <div className="field-headline">
-                  <span>Tolerance</span>
-                  <strong>{runSettings.tolerance}</strong>
-                </div>
-                <input
-                  className="field"
-                  max={100}
-                  min={0}
-                  onChange={(event) => setRunSettings((current) => ({ ...current, tolerance: Number(event.target.value) }))}
-                  type="range"
-                  value={runSettings.tolerance}
-                />
-                <small>{describeTolerance(runSettings.tolerance)}</small>
-              </label>
-
-              <div className="inline-fields">
-                <label className="field-group">
-                  <span>Min scene gap (ms)</span>
-                  <input
-                    className="field"
-                    min={0}
-                    onChange={(event) =>
-                      setRunSettings((current) => ({ ...current, min_scene_gap_ms: Number(event.target.value) }))
-                    }
-                    type="number"
-                    value={runSettings.min_scene_gap_ms}
-                  />
-                  <small>{describeMinSceneGap(runSettings.min_scene_gap_ms)}</small>
-                </label>
-                <label className="field-group">
-                  <span>Sample fps</span>
-                  <input
-                    className="field"
-                    min={1}
-                    onChange={(event) =>
-                      setRunSettings((current) => ({
-                        ...current,
-                        sample_fps: event.target.value ? Number(event.target.value) : null,
-                      }))
-                    }
-                    type="number"
-                    value={runSettings.sample_fps ?? ''}
-                  />
-                  <small>{describeSampleFps(runSettings.sample_fps)}</small>
-                </label>
-              </div>
-
-              <div className="inline-fields">
-                <label className="field-group">
-                  <span>Detector mode</span>
-                  <select
-                    className="field"
-                    onChange={(event) =>
-                      setRunSettings((current) => ({ ...current, detector_mode: event.target.value as RunSettings['detector_mode'] }))
-                    }
-                    value={runSettings.detector_mode}
-                  >
-                    <option value="content">Content detector</option>
-                    <option value="adaptive">Adaptive detector</option>
-                  </select>
-                  <small>{describeDetectorMode(runSettings.detector_mode)}</small>
-                </label>
-                <label className="field-group">
-                  <span>Extract offset (ms)</span>
-                  <input
-                    className="field"
-                    min={0}
-                    onChange={(event) =>
-                      setRunSettings((current) => ({ ...current, extract_offset_ms: Number(event.target.value) }))
-                    }
-                    type="number"
-                    value={runSettings.extract_offset_ms}
-                  />
-                  <small>{describeExtractOffset(runSettings.extract_offset_ms)}</small>
-                </label>
-              </div>
-
-              <div className="action-row">
-                <button className="primary-button" disabled={createRunMutation.isPending || healthWarning} type="submit">
-                  {createRunMutation.isPending ? 'Starting…' : 'Run Detection'}
-                </button>
-                <span className="helper-inline">If the first pass only finds the opening frame, you will be prompted to run a sensitive fallback.</span>
-              </div>
-            </form>
-
-            <div className="preset-panel stack-gap">
-              <div className="section-header compact">
-                <div>
-                  <h3>Preset Tools</h3>
-                  <p className="muted">
-                    Working preset source: {formatSettingsSource(settingsSource)}. Changes auto-save to this project in this browser.
-                  </p>
-                </div>
-                <span className="status-pill small info">{formatRunSettingsSummary(runSettings)}</span>
-              </div>
-
-              <div className="action-row">
-                <button className="secondary-button small-button" onClick={handleSaveBrowserDefault} type="button">
-                  Save as Browser Default
-                </button>
-                <button
-                  className="secondary-button small-button"
-                  disabled={!globalPreset}
-                  onClick={handleResetToBrowserDefault}
-                  type="button"
-                >
-                  Reset to Browser Default
-                </button>
-                <button className="secondary-button small-button" onClick={handleResetToAppDefaults} type="button">
-                  Reset to App Defaults
-                </button>
-                <button className="secondary-button small-button" onClick={() => void handleCopyPresetText()} type="button">
-                  Copy Preset Text
-                </button>
-              </div>
-
-              {settingsFeedback && <p className="helper-text success-text">{settingsFeedback}</p>}
-
-              <details className="disclosure-card">
-                <summary>Show preset text</summary>
-                <div className="disclosure-body">
-                  <pre className="preset-preview">{presetText}</pre>
-                </div>
-              </details>
-            </div>
-
-            <details className="disclosure-card recording-preview-toggle">
-              <summary>Show selected recording preview and metadata</summary>
-              <div className="recording-preview-layout disclosure-body">
-                <video controls playsInline src={selectedVideoUrl ?? undefined} />
-                <div className="recording-meta-panel">
-                  <div className="meta-block">
-                    <span>Filename</span>
-                    <strong>{selectedRecording.filename}</strong>
-                    <small>{selectedRecording.duration_tc}</small>
-                  </div>
-                  <div className="meta-block">
-                    <span>Frame rate</span>
-                    <strong>{selectedRecording.fps} fps</strong>
-                    <small>{selectedRecording.width}×{selectedRecording.height}</small>
-                  </div>
-                  <div className="meta-block">
-                    <span>Workflow</span>
-                    <strong>Import → detect → review → export</strong>
-                    <small>Runs stay attached to this recording until you delete them.</small>
-                  </div>
-                </div>
-              </div>
-            </details>
-
-            <div className="section-header compact">
-              <div>
-                <h3>Previous Runs</h3>
-                <p className="muted">Expand this section to inspect, abort, or delete earlier runs.</p>
-              </div>
-              <button className="secondary-button small-button" onClick={() => setRunsExpanded((value) => !value)} type="button">
-                {runsExpanded ? 'Hide Runs' : 'Show Runs'}
-              </button>
-            </div>
-
-            {runsExpanded && (
-              <div className="run-list">
-                {selectedRecording.runs.map((run) => (
-                  <RunListItem
-                    key={run.id}
-                    run={run}
-                    isSelected={run.id === selectedRunId}
-                    onAbort={() => abortRunMutation.mutate(run.id)}
-                    onDelete={() => confirmDeleteRun(run.id)}
-                    onSelect={() => setSelectedRunId(run.id)}
-                  />
-                ))}
-                {!selectedRecording.runs.length && <p className="empty-copy">No processing runs yet for this recording.</p>}
-              </div>
-            )}
-
-            {!selectedRun && selectedRecording.runs.length > 0 && (
-              <p className="empty-copy">Choose a run from “Previous Runs” to inspect logs, review screenshots, or export accepted steps.</p>
-            )}
-          </section>
-        )}
-
-        {selectedRun && (
-          <section className="card stack-gap">
-            <div className="run-header">
-              <div>
-                <p className="eyebrow">Selected Run</p>
-                <div className="run-title-row">
-                  <h2>{formatPhase(selectedRun.summary.phase)}</h2>
-                  <span className={`status-pill ${selectedRun.summary.status}`}>{selectedRun.summary.status.replace('_', ' ')}</span>
-                </div>
-                <p className="muted">{selectedRun.summary.message || 'No status message yet.'}</p>
-                <p className="helper-text">{formatRunTiming(selectedRun.summary)}</p>
-              </div>
-              <div className="action-row">
-                {selectedRun.summary.is_abortable && (
-                  <button className="secondary-button" disabled={abortRunMutation.isPending} onClick={() => abortRunMutation.mutate(selectedRun.summary.id)} type="button">
-                    Abort Run
-                  </button>
-                )}
-                {selectedRun.summary.needs_fallback_decision && (
-                  <button
-                    className="primary-button"
-                    disabled={startFallbackMutation.isPending}
-                    onClick={() => startFallbackMutation.mutate(selectedRun.summary.id)}
-                    type="button"
-                  >
-                    {startFallbackMutation.isPending ? 'Starting fallback…' : 'Run Sensitive Fallback'}
-                  </button>
-                )}
-                {selectedRun.summary.needs_fallback_decision && (
-                  <button
-                    className="secondary-button"
-                    disabled={dismissFallbackMutation.isPending}
-                    onClick={() => dismissFallbackMutation.mutate(selectedRun.summary.id)}
-                    type="button"
-                  >
-                    Keep Current Result
-                  </button>
-                )}
-                {selectedRun.summary.is_deletable && (
-                  <button className="danger-button" disabled={deleteRunMutation.isPending} onClick={() => confirmDeleteRun(selectedRun.summary.id)} type="button">
-                    Delete Run
-                  </button>
-                )}
-                <button
-                  className="primary-button"
-                  disabled={!canExport || exportRunMutation.isPending}
-                  onClick={() => exportRunMutation.mutate(selectedRun.summary.id)}
-                  type="button"
-                >
-                  {exportRunMutation.isPending ? 'Exporting…' : 'Export Accepted Steps'}
-                </button>
-              </div>
-            </div>
-
-            <div className="progress-panel">
-              <div className="progress-meta">
-                <strong>{formatPhase(selectedRun.summary.phase)}</strong>
-                <span>{formatPercent(selectedRun.summary.progress)}</span>
-              </div>
-              <div className="progress-track">
-                <div className="progress-fill" style={{ width: formatPercent(selectedRun.summary.progress) }} />
-              </div>
-              <div className="progress-caption">
-                <span>{selectedRun.summary.candidate_count} candidates so far</span>
-                <span>{selectedRun.summary.accepted_count} accepted</span>
-              </div>
-            </div>
-
-            {selectedRun.summary.needs_fallback_decision && (
-              <div className="banner warning-banner banner-block">
-                <strong>Primary pass found only the opening frame.</strong>
-                <span>
-                  Review the current result, keep it as-is, or run a sensitive fallback that rescans the same recording with more permissive settings.
-                </span>
-              </div>
-            )}
-
-            {selectedRun.export_bundle && (
-              <div className="banner success-banner banner-block">
-                <strong>Export ready.</strong>
-                <a href={exportUrl ?? '#'} rel="noreferrer" target="_blank">
-                  Download {selectedRun.export_bundle.item_count} screenshots as ZIP
-                </a>
-                <span className="helper-inline">The ZIP includes PNGs plus `steps.csv` and `steps.json` with timestamps and step metadata.</span>
-              </div>
-            )}
-
-            <details className="disclosure-card" open={['queued', 'running', 'awaiting_fallback'].includes(selectedRun.summary.status)}>
-              <summary>Run log and progress history</summary>
-              <div className="log-list disclosure-body">
-                {selectedRun.events.map((event) => (
-                  <div className={`log-row ${event.level}`} key={event.id}>
-                    <div className="log-meta">
-                      <span className="status-pill small">{formatPhase(event.phase)}</span>
-                      <small>{new Date(event.created_at).toLocaleTimeString()}</small>
-                    </div>
-                    <strong>{event.message}</strong>
-                    {typeof event.progress === 'number' && <small>{formatPercent(event.progress)}</small>}
-                  </div>
-                ))}
-                {!selectedRun.events.length && <p className="empty-copy">Progress messages will appear here once the run starts.</p>}
-              </div>
-            </details>
-
-            <details className="disclosure-card">
-              <summary>Review actions explained</summary>
-              <div className="disclosure-body stack-gap">
-                <p className="helper-text">Keep adds a screenshot to the ordered walkthrough.</p>
-                <p className="helper-text">Reject excludes it from export but leaves it visible for reference.</p>
-                <p className="helper-text">Reset returns it to an undecided state so you can revisit it later.</p>
-                <p className="helper-text">Similar-scene cues mark likely returns to an earlier interface without merging them into one step.</p>
-              </div>
-            </details>
-
-            <div className="review-summary-grid">
-              <div className="summary-block accent">
-                <span>Status</span>
-                <strong>{selectedRun.summary.status.replace('_', ' ')}</strong>
-                <small>{selectedRun.summary.message || 'Awaiting instructions'}</small>
-              </div>
-              <div className="summary-block">
-                <span>Phase</span>
-                <strong>{formatPhase(selectedRun.summary.phase)}</strong>
-                <small>{formatPercent(selectedRun.summary.progress)}</small>
-              </div>
-              <div className="summary-block">
-                <span>Candidates</span>
-                <strong>{selectedRun.candidates.length}</strong>
-                <small>Suggested screenshots</small>
-              </div>
-              <div className="summary-block">
-                <span>Accepted</span>
-                <strong>{selectedRun.accepted_steps.length}</strong>
-                <small>Ordered walkthrough steps</small>
-              </div>
-            </div>
-
-            <div className="run-settings-card stack-gap">
-              <div className="section-header compact">
-                <div>
-                  <h3>Detection Settings Used</h3>
-                  <p className="muted">These are the exact parameters that produced this run.</p>
-                </div>
-                <span className="status-pill small info">{formatDetectorModeLabel(selectedRun.summary.detector_mode)}</span>
-              </div>
-              <div className="run-settings-grid">
-                <div className="meta-block">
-                  <span>Mode</span>
-                  <strong>{formatDetectorModeLabel(selectedRun.summary.detector_mode)}</strong>
-                  <small>{describeDetectorMode(selectedRun.summary.detector_mode)}</small>
-                </div>
-                <div className="meta-block">
-                  <span>Tolerance</span>
-                  <strong>{selectedRun.summary.tolerance}</strong>
-                  <small>{describeTolerance(selectedRun.summary.tolerance)}</small>
-                </div>
-                <div className="meta-block">
-                  <span>Sample fps</span>
-                  <strong>{selectedRun.summary.sample_fps ?? 'Source stream'}</strong>
-                  <small>{describeSampleFps(selectedRun.summary.sample_fps)}</small>
-                </div>
-                <div className="meta-block">
-                  <span>Min scene gap</span>
-                  <strong>{selectedRun.summary.min_scene_gap_ms} ms</strong>
-                  <small>{describeMinSceneGap(selectedRun.summary.min_scene_gap_ms)}</small>
-                </div>
-                <div className="meta-block">
-                  <span>Extract offset</span>
-                  <strong>{selectedRun.summary.extract_offset_ms} ms</strong>
-                  <small>{describeExtractOffset(selectedRun.summary.extract_offset_ms)}</small>
-                </div>
-              </div>
-            </div>
-
-            <div className="accepted-strip-shell">
-              <div className="accepted-strip">
-                {selectedRun.accepted_steps.map((step) => {
-                  const similarityLink = acceptedStepSimilarityLinks.get(step.step_id);
-                  return (
-                    <div className="accepted-step-chip" id={`accepted-step-${step.step_id}`} key={step.step_id} tabIndex={-1}>
-                      <div className="accepted-step-topline">
-                        <span className="status-pill small info">{step.step_id}</span>
-                        <small>{step.timestamp_tc}</small>
-                      </div>
-                      <strong className="accepted-step-title" title={step.title}>
-                        {step.title}
-                      </strong>
-                      {similarityLink ? (
-                        <div className="linked-scene-row">
-                          <span className="status-pill small warning">Returning scene</span>
-                          <button className="inline-link-button" onClick={() => jumpToAnchor(similarityLink.targetId)} type="button">
-                            {similarityLink.label}
-                          </button>
-                        </div>
-                      ) : (
-                        <small>{step.export_filename}</small>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              {!selectedRun.accepted_steps.length && (
-                <p className="empty-copy">Keep screenshots below to build the final walkthrough sequence.</p>
-              )}
-            </div>
-
-            <div className="candidate-grid">
-              {selectedRun.candidates.map((candidate) => (
-                <CandidateCard
-                  candidate={candidate}
-                  key={candidate.id}
-                  onJumpToSimilar={
-                    candidateSimilarityLinks.has(candidate.id)
-                      ? () => jumpToAnchor(candidateSimilarityLinks.get(candidate.id)!.targetId)
-                      : undefined
-                  }
-                  similarLink={candidateSimilarityLinks.get(candidate.id)}
-                  onUpdate={(payload) => updateCandidateMutation.mutate({ candidateId: candidate.id, payload })}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-      </main>
-    </div>
+    <AnalysisScreen
+      acceptedStepSimilarityLinks={acceptedStepSimilarityLinks}
+      abortRunPending={abortRunMutation.isPending}
+      activeProject={activeProject}
+      analysisActionMessage={analysisActionMessage}
+      analysisTaskItems={analysisTaskItems}
+      appError={appError}
+      bulkDeletePending={bulkDeletePending}
+      bulkExportPending={bulkExportPending}
+      canExport={canExport}
+      candidateSimilarityLinks={candidateSimilarityLinks}
+      canLoadPreset={Boolean(globalPreset)}
+      createRunPending={createRunMutation.isPending}
+      deleteRunPending={deleteRunMutation.isPending}
+      dismissFallbackPending={dismissFallbackMutation.isPending}
+      exportRunPending={exportRunMutation.isPending}
+      healthMessage={healthWarning ? healthQuery.data?.message ?? 'Video tools are not ready.' : null}
+      healthWarning={Boolean(healthWarning)}
+      liveMessage={liveMessage}
+      onAbortRun={(runId) => abortRunMutation.mutate(runId)}
+      onDeleteRecording={confirmDeleteRecording}
+      onDeleteRun={confirmDeleteRun}
+      onDeleteSelectedRuns={handleDeleteSelectedRuns}
+      onDismissFallback={(runId) => dismissFallbackMutation.mutate(runId)}
+      onExportRun={(runId) => exportRunMutation.mutate(runId)}
+      onExportTaskRuns={handleExportTaskRuns}
+      onJumpToSelection={handleJumpToAnalysisSelection}
+      onLoadPreset={handleResetToBrowserDefault}
+      onNavigateStage={setProjectStage}
+      onPreviewRecording={handlePreviewRecording}
+      onResetPreset={handleResetToAppDefaults}
+      onSavePreset={handleSaveBrowserDefault}
+      onSelectRecording={handleSelectRecording}
+      onSelectRun={handleSelectTaskRun}
+      onStartFallback={(runId) => startFallbackMutation.mutate(runId)}
+      onStartRun={handleStartAnalysisRun}
+      onUpdateCandidate={(candidateId, payload) => updateCandidateMutation.mutate({ candidateId, payload })}
+      previewRecording={previewRecording}
+      recordings={projectRecordings}
+      selectedRecording={selectedRecording}
+      selectedRecordingId={selectedRecordingId}
+      selectedRecordingSummary={selectedRecordingSummary}
+      selectedRun={selectedRun}
+      settingsFeedback={settingsFeedback}
+      runSettings={runSettings}
+      setRunSettings={setRunSettings}
+      showPresetText={presetText}
+    />
   );
 }
 
@@ -1594,6 +1366,55 @@ interface ImportScreenProps {
   rows: ImportQueueItem[];
 }
 
+interface AnalysisScreenProps {
+  acceptedStepSimilarityLinks: Map<string, SimilarLink>;
+  abortRunPending: boolean;
+  activeProject: Project | null;
+  analysisActionMessage: string;
+  analysisTaskItems: AnalysisTaskItem[];
+  appError: string;
+  bulkDeletePending: boolean;
+  bulkExportPending: boolean;
+  canExport: boolean;
+  candidateSimilarityLinks: Map<string, SimilarLink>;
+  canLoadPreset: boolean;
+  createRunPending: boolean;
+  deleteRunPending: boolean;
+  dismissFallbackPending: boolean;
+  exportRunPending: boolean;
+  healthMessage: string | null;
+  healthWarning: boolean;
+  liveMessage: string;
+  onAbortRun: (runId: string) => void;
+  onDeleteRecording: (recordingId: string, filename: string) => void;
+  onDeleteRun: (runId: string) => void;
+  onDeleteSelectedRuns: (runIds: string[]) => Promise<string[] | null>;
+  onDismissFallback: (runId: string) => void;
+  onExportRun: (runId: string) => void;
+  onExportTaskRuns: (runIds: string[]) => Promise<void>;
+  onJumpToSelection: () => void;
+  onLoadPreset: () => void;
+  onNavigateStage: (stage: WorkflowStage) => void;
+  onPreviewRecording: (recordingId: string) => void;
+  onResetPreset: () => void;
+  onSavePreset: () => void;
+  onSelectRecording: (recordingId: string) => void;
+  onSelectRun: (recordingId: string, runId: string, anchorId?: string) => void;
+  onStartFallback: (runId: string) => void;
+  onStartRun: () => void;
+  onUpdateCandidate: (candidateId: string, payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>>) => void;
+  previewRecording: RecordingSummary | null;
+  recordings: RecordingSummary[];
+  runSettings: RunSettings;
+  selectedRecording: RecordingDetail | null;
+  selectedRecordingId: string | null;
+  selectedRecordingSummary: RecordingSummary | null;
+  selectedRun: RunDetail | null;
+  setRunSettings: React.Dispatch<React.SetStateAction<RunSettings>>;
+  settingsFeedback: string;
+  showPresetText: string;
+}
+
 function StageNavigator({ activeStage, className, disabledStages, onNavigate }: StageNavigatorProps) {
   return (
     <div className={className ? `stage-nav ${className}` : 'stage-nav'}>
@@ -1609,6 +1430,91 @@ function StageNavigator({ activeStage, className, disabledStages, onNavigate }: 
           {stage}
         </button>
       ))}
+    </div>
+  );
+}
+
+interface AnalysisResetDiamondButtonProps {
+  className?: string;
+  label: string;
+  onClick: () => void;
+}
+
+function AnalysisResetDiamondButton({ className, label, onClick }: AnalysisResetDiamondButtonProps) {
+  return (
+    <button
+      aria-label={`Reset ${label} to default`}
+      className={className ? `analysis-dirty-reset ${className}` : 'analysis-dirty-reset'}
+      onClick={onClick}
+      title={`Reset ${label} to default`}
+      type="button"
+    >
+      <span className="analysis-dirty-reset-glyph" />
+    </button>
+  );
+}
+
+interface AnalysisStarResetButtonProps {
+  onClick: () => void;
+}
+
+function AnalysisStarResetButton({ onClick }: AnalysisStarResetButtonProps) {
+  return (
+    <button
+      aria-label="Reset all analysis parameters to defaults"
+      className="analysis-star-reset"
+      onClick={onClick}
+      title="Reset all analysis parameters to defaults"
+      type="button"
+    >
+      <svg aria-hidden="true" className="analysis-star-reset-shape" viewBox="0 0 92 32">
+        <polygon points={analysisResetStarPoints} />
+      </svg>
+      <span className="analysis-star-reset-label">reset</span>
+    </button>
+  );
+}
+
+interface AnalysisStepperInputProps {
+  ariaLabel: string;
+  className: string;
+  max?: number;
+  min?: number;
+  onChange: (rawValue: string) => void;
+  onStep: (direction: -1 | 1) => void;
+  value: number | string;
+}
+
+function AnalysisStepperInput({ ariaLabel, className, max, min, onChange, onStep, value }: AnalysisStepperInputProps) {
+  return (
+    <div className="analysis-stepper-input">
+      <div className="analysis-stepper-controls">
+        <button
+          aria-label={`Increase ${ariaLabel}`}
+          className="analysis-stepper-button"
+          onClick={() => onStep(1)}
+          type="button"
+        >
+          <span aria-hidden="true" className="analysis-stepper-glyph up" />
+        </button>
+        <button
+          aria-label={`Decrease ${ariaLabel}`}
+          className="analysis-stepper-button"
+          onClick={() => onStep(-1)}
+          type="button"
+        >
+          <span aria-hidden="true" className="analysis-stepper-glyph down" />
+        </button>
+      </div>
+      <input
+        aria-label={ariaLabel}
+        className={className}
+        max={max}
+        min={min}
+        onChange={(event) => onChange(event.target.value)}
+        type="number"
+        value={value}
+      />
     </div>
   );
 }
@@ -1712,6 +1618,846 @@ function ImportScreen({
             {!rows.length && <p className="entry-empty-copy import-empty-copy">Selected and uploaded videos will appear here.</p>}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function AnalysisScreen({
+  acceptedStepSimilarityLinks,
+  abortRunPending,
+  activeProject,
+  analysisActionMessage,
+  analysisTaskItems,
+  appError,
+  bulkDeletePending,
+  bulkExportPending,
+  canExport,
+  candidateSimilarityLinks,
+  canLoadPreset,
+  createRunPending,
+  deleteRunPending,
+  dismissFallbackPending,
+  exportRunPending,
+  healthMessage,
+  healthWarning,
+  liveMessage,
+  onAbortRun,
+  onDeleteRecording,
+  onDeleteRun,
+  onDeleteSelectedRuns,
+  onDismissFallback,
+  onExportRun,
+  onExportTaskRuns,
+  onJumpToSelection,
+  onLoadPreset,
+  onNavigateStage,
+  onPreviewRecording,
+  onResetPreset,
+  onSavePreset,
+  onSelectRecording,
+  onSelectRun,
+  onStartFallback,
+  onStartRun,
+  onUpdateCandidate,
+  previewRecording,
+  recordings,
+  runSettings,
+  selectedRecording,
+  selectedRecordingId,
+  selectedRecordingSummary,
+  selectedRun,
+  setRunSettings,
+  settingsFeedback,
+  showPresetText,
+}: AnalysisScreenProps) {
+  const [expandedTaskRunId, setExpandedTaskRunId] = useState<string | null>(null);
+  const [selectedTaskRunIds, setSelectedTaskRunIds] = useState<string[]>([]);
+  const [taskSelectMode, setTaskSelectMode] = useState(false);
+  const [presetCopyFeedback, setPresetCopyFeedback] = useState('');
+  const [showHints, setShowHints] = useState(false);
+  const [focusedHintKey, setFocusedHintKey] = useState<AnalysisHintKey | null>(null);
+  const [hoveredHintKey, setHoveredHintKey] = useState<AnalysisHintKey | null>(null);
+  const [hintCardPosition, setHintCardPosition] = useState<{ left: number; top: number } | null>(null);
+  const parameterColumnRef = useRef<HTMLElement | null>(null);
+
+  const previewVideoUrl = previewRecording ? absoluteApiUrl(previewRecording.source_url) : null;
+  const exportUrl = selectedRun?.export_bundle ? absoluteApiUrl(selectedRun.export_bundle.zip_url) : null;
+  const hintCopy: Record<AnalysisHintKey, string> = {
+    detector_mode: describeDetectorMode(runSettings.detector_mode),
+    extract_offset_ms: describeExtractOffset(runSettings.extract_offset_ms),
+    load: 'Load the browser default preset into the active analysis parameters.',
+    min_scene_gap_ms: describeMinSceneGap(runSettings.min_scene_gap_ms),
+    reset: 'Reset the current analysis parameters back to the built-in defaults.',
+    run: 'Start a new analysis task for the selected video using the current parameter set.',
+    sample_fps: describeSampleFps(runSettings.sample_fps),
+    save: 'Save the current analysis parameters as your browser default preset for future runs.',
+    tolerance: describeTolerance(runSettings.tolerance),
+  };
+  const activeHintKey = focusedHintKey ?? hoveredHintKey;
+  const hintText = showHints && activeHintKey ? hintCopy[activeHintKey] : null;
+  const isToleranceDirty = runSettings.tolerance !== defaultRunSettings.tolerance;
+  const isMinSceneGapDirty = runSettings.min_scene_gap_ms !== defaultRunSettings.min_scene_gap_ms;
+  const isSampleFpsDirty = runSettings.sample_fps !== defaultRunSettings.sample_fps;
+  const isExtractOffsetDirty = runSettings.extract_offset_ms !== defaultRunSettings.extract_offset_ms;
+  const isDetectorModeDirty = runSettings.detector_mode !== defaultRunSettings.detector_mode;
+
+  useEffect(() => {
+    if (!expandedTaskRunId) {
+      return;
+    }
+    if (!analysisTaskItems.some((item) => item.run.id === expandedTaskRunId)) {
+      setExpandedTaskRunId(null);
+    }
+  }, [analysisTaskItems, expandedTaskRunId]);
+
+  useEffect(() => {
+    setSelectedTaskRunIds((current) => current.filter((runId) => analysisTaskItems.some((item) => item.run.id === runId)));
+  }, [analysisTaskItems]);
+
+  useEffect(() => {
+    if (!showHints) {
+      setFocusedHintKey(null);
+      setHoveredHintKey(null);
+      setHintCardPosition(null);
+    }
+  }, [showHints]);
+
+  useEffect(() => {
+    if (!presetCopyFeedback) {
+      return;
+    }
+    const timeoutId = globalThis.setTimeout(() => setPresetCopyFeedback(''), 1800);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [presetCopyFeedback]);
+
+  function updateHintCardPosition(element: HTMLElement) {
+    const container = parameterColumnRef.current;
+    if (!container) {
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+    const maxLeft = Math.max(0, containerRect.width - 220);
+    const left = Math.min(Math.max(0, elementRect.left - containerRect.left), maxLeft);
+    const maxTop = Math.max(0, containerRect.height - 88);
+    const top = Math.min(Math.max(0, elementRect.bottom - containerRect.top + 10), maxTop);
+    setHintCardPosition({ left, top });
+  }
+
+  function bindHint(key: AnalysisHintKey) {
+    if (!showHints) {
+      return {};
+    }
+    return {
+      onBlur: () => {
+        setFocusedHintKey((current) => (current === key ? null : current));
+        setHintCardPosition(null);
+      },
+      onFocus: (event: React.FocusEvent<HTMLElement>) => {
+        updateHintCardPosition(event.currentTarget);
+        setFocusedHintKey(key);
+      },
+      onMouseEnter: (event: React.MouseEvent<HTMLElement>) => {
+        updateHintCardPosition(event.currentTarget);
+        setHoveredHintKey(key);
+      },
+      onMouseLeave: () => {
+        setHoveredHintKey((current) => (current === key ? null : current));
+        setHintCardPosition(null);
+      },
+    };
+  }
+
+  function toggleTaskSelection(runId: string) {
+    setSelectedTaskRunIds((current) => (current.includes(runId) ? current.filter((value) => value !== runId) : [...current, runId]));
+  }
+
+  async function handleDeleteSelectedTasks() {
+    const failedRunIds = await onDeleteSelectedRuns(selectedTaskRunIds);
+    if (failedRunIds === null) {
+      return;
+    }
+    setSelectedTaskRunIds(failedRunIds);
+  }
+
+  async function handleExportSelectedTasks() {
+    await onExportTaskRuns(selectedTaskRunIds);
+  }
+
+  async function handleExportAllCompletedTasks() {
+    await onExportTaskRuns(
+      analysisTaskItems.filter((item) => item.run.status === 'completed').map((item) => item.run.id),
+    );
+  }
+
+  async function handleCopyPresetText() {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      setPresetCopyFeedback('copy unavailable');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(showPresetText);
+      setPresetCopyFeedback('copied');
+    } catch {
+      setPresetCopyFeedback('copy failed');
+    }
+  }
+
+  function renderTaskRow(item: AnalysisTaskItem) {
+    const run = item.run;
+    const isExpanded = expandedTaskRunId === run.id;
+    const isSelected = selectedRun?.summary.id === run.id;
+    const isMarked = selectedTaskRunIds.includes(run.id);
+    const isError = run.status === 'failed';
+    const isDone = run.status === 'completed';
+    const taskSettings = [
+      { key: 'tolerance', label: 'tolerance', value: String(run.tolerance), isDirty: run.tolerance !== defaultRunSettings.tolerance },
+      {
+        key: 'gaps',
+        label: 'gaps',
+        value: String(run.min_scene_gap_ms),
+        isDirty: run.min_scene_gap_ms !== defaultRunSettings.min_scene_gap_ms,
+      },
+      {
+        key: 'fps',
+        label: 'fps',
+        value: run.sample_fps ? String(run.sample_fps) : 'src',
+        valueClassName: 'sample-fps',
+        isDirty: run.sample_fps !== defaultRunSettings.sample_fps,
+      },
+      {
+        key: 'offset',
+        label: 'offset',
+        value: String(run.extract_offset_ms),
+        isDirty: run.extract_offset_ms !== defaultRunSettings.extract_offset_ms,
+      },
+      {
+        key: 'mode',
+        label: 'mode',
+        value: run.detector_mode,
+        valueClassName: 'mode',
+        isDirty: run.detector_mode !== defaultRunSettings.detector_mode,
+      },
+    ];
+    const progressLabel = isDone
+      ? `done${run.candidate_count ? ` • ${run.candidate_count} scenes` : ''}`
+      : isError
+        ? 'error'
+        : run.status === 'cancelled'
+          ? 'ended'
+          : formatPercent(run.progress);
+
+    const secondaryAction =
+      run.is_abortable ? (
+        <button className="analysis-task-link danger" onClick={() => onAbortRun(run.id)} type="button">
+          end
+        </button>
+      ) : run.export_bundle_id ? (
+        <button className="analysis-task-link subtle" onClick={() => onSelectRun(item.recording.id, run.id, 'analysis-run-detail')} type="button">
+          view outputs
+        </button>
+      ) : ['failed', 'completed', 'cancelled'].includes(run.status) ? (
+        <button className="analysis-task-link subtle" onClick={() => onSelectRun(item.recording.id, run.id, 'analysis-run-logs')} type="button">
+          view logs
+        </button>
+      ) : null;
+
+    return (
+      <div className={`analysis-task-row ${isSelected ? 'selected' : ''}`} key={run.id}>
+        <div className="analysis-task-head">
+          <div className="analysis-task-head-primary">
+            {taskSelectMode && (
+              <label className="analysis-task-select-toggle">
+                <input checked={isMarked} onChange={() => toggleTaskSelection(run.id)} type="checkbox" />
+                <span className="analysis-task-select-copy">select task</span>
+              </label>
+            )}
+            <button
+              className={`analysis-task-title ${isError ? 'error' : ''}`}
+              onClick={() => onSelectRun(item.recording.id, run.id, 'analysis-run-detail')}
+              type="button"
+            >
+              {item.recording.filename}
+            </button>
+          </div>
+          <div className="analysis-task-meta">
+            <span className={`analysis-task-progress ${isError ? 'error' : isDone ? 'success' : ''}`}>{progressLabel}</span>
+            <button
+              className={`analysis-task-link ${isExpanded ? 'plain' : ''}`}
+              onClick={() => setExpandedTaskRunId((current) => (current === run.id ? null : run.id))}
+              type="button"
+            >
+              details
+            </button>
+            {secondaryAction}
+          </div>
+        </div>
+
+        {isExpanded && (
+          <>
+            <div className="analysis-task-bar" aria-hidden="true">
+              <div className="analysis-task-bar-fill" style={{ width: isDone ? '100%' : formatPercent(run.progress) }} />
+            </div>
+            <div className="analysis-task-settings">
+              {taskSettings.map((setting) => (
+                <div className={`analysis-task-setting ${setting.key === 'mode' ? 'mode' : ''}`} key={setting.key}>
+                  <span className="analysis-task-setting-label">{setting.label}</span>
+                  <span
+                    className={[
+                      'analysis-task-setting-value',
+                      setting.valueClassName,
+                      setting.isDirty ? 'dirty' : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    {setting.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="entry-screen analysis-screen">
+      <div className="analysis-stage-shell">
+        <div className="analysis-stage-nav">
+          <div className="analysis-stage-nav-cell">
+            <button className="analysis-nav-button" onClick={() => onNavigateStage('projects')} type="button">
+              <span className="analysis-project-path">
+                projects/
+                <span>{activeProject?.name ?? 'Project'}</span>
+              </span>
+            </button>
+            <p className="analysis-project-counts">{activeProject ? formatProjectCounts(activeProject) : ''}</p>
+          </div>
+          <div className="analysis-stage-nav-cell">
+            <button className="analysis-nav-button" onClick={() => onNavigateStage('import')} type="button">
+              import
+            </button>
+          </div>
+          <div className="analysis-stage-nav-cell">
+            <span className="analysis-nav-button active">analysis</span>
+          </div>
+        </div>
+
+        {(healthMessage || appError || liveMessage || settingsFeedback || analysisActionMessage) && (
+          <div className="analysis-notices">
+            {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
+            {appError && <p className="entry-notice error">{appError}</p>}
+            {liveMessage && <p className="entry-notice">{liveMessage}</p>}
+            {settingsFeedback && <p className="entry-notice">{settingsFeedback}</p>}
+            {analysisActionMessage && <p className="entry-notice">{analysisActionMessage}</p>}
+          </div>
+        )}
+
+        <div className="analysis-grid">
+          <section className="analysis-column">
+            <div className="analysis-column-head">
+              <p>videos</p>
+              <button className="analysis-pill analysis-pill-accent" onClick={onJumpToSelection} type="button">
+                jump to selection
+              </button>
+            </div>
+            <div className="analysis-divider" />
+            <div className="analysis-videos">
+              {recordings.map((recording) => {
+                const isSelected = recording.id === selectedRecordingId;
+                const isPreviewing = previewRecording?.id === recording.id;
+                return (
+                  <div className={`analysis-video-row ${isSelected ? 'selected' : ''} ${isPreviewing ? 'previewing' : ''}`} key={recording.id}>
+                    <button className="analysis-video-row-button" onClick={() => onSelectRecording(recording.id)} type="button">
+                      <span>{recording.filename}</span>
+                      <span>{recording.duration_tc}</span>
+                    </button>
+                    <div className="analysis-video-actions">
+                      <button
+                        className="analysis-task-link subtle analysis-video-hover-link analysis-video-preview-link"
+                        onClick={() => onPreviewRecording(recording.id)}
+                        type="button"
+                      >
+                        {isPreviewing ? 'hide preview' : 'preview'}
+                      </button>
+                      <button
+                        className="analysis-task-link danger analysis-video-hover-link"
+                        onClick={() => onDeleteRecording(recording.id, recording.filename)}
+                        type="button"
+                      >
+                        delete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {!recordings.length && <p className="entry-empty-copy">Uploaded videos will appear here.</p>}
+            </div>
+          </section>
+
+          <section className="analysis-column analysis-parameter-column" ref={parameterColumnRef}>
+            <div className="analysis-column-head">
+              <p>parameters</p>
+              <button
+                className={`analysis-task-link subtle ${showHints ? 'active' : ''}`}
+                onClick={() => {
+                  setShowHints((current) => !current);
+                  setFocusedHintKey(null);
+                  setHoveredHintKey(null);
+                  setHintCardPosition(null);
+                }}
+                type="button"
+              >
+                {showHints ? 'hide hints' : 'show hints'}
+              </button>
+            </div>
+            <div className="analysis-divider" />
+
+            <div className="analysis-param-actions">
+              <div className="analysis-param-actions-left">
+                <button className="analysis-pill success" disabled={!canLoadPreset} {...bindHint('load')} onClick={onLoadPreset} type="button">
+                  load
+                </button>
+                <button className="analysis-pill analysis-pill-accent" {...bindHint('save')} onClick={onSavePreset} type="button">
+                  save...
+                </button>
+                <details className="analysis-inline-details analysis-preset-details">
+                  <summary>preset text</summary>
+                  <div className="analysis-preset-card">
+                    <div className="analysis-preset-card-head">
+                      <span>preset text</span>
+                      <button className="analysis-task-link subtle" onClick={() => void handleCopyPresetText()} type="button">
+                        copy
+                      </button>
+                    </div>
+                    <pre className="preset-preview analysis-preset-preview">{showPresetText}</pre>
+                  </div>
+                </details>
+              </div>
+              <div {...bindHint('reset')}>
+                <AnalysisStarResetButton onClick={onResetPreset} />
+              </div>
+            </div>
+
+            <div className="analysis-parameter-box" id="analysis-parameters">
+              <label className="analysis-parameter-row" {...bindHint('tolerance')}>
+                <span>tolerance</span>
+                <div className="analysis-parameter-control">
+                  <AnalysisStepperInput
+                    ariaLabel="tolerance"
+                    className="analysis-parameter-input short"
+                    max={100}
+                    min={0}
+                    onChange={(rawValue) =>
+                      setRunSettings((current) => ({
+                        ...current,
+                        tolerance: clampInteger(rawValue === '' ? 0 : Number(rawValue), 0, 100),
+                      }))
+                    }
+                    onStep={(direction) =>
+                      setRunSettings((current) => ({
+                        ...current,
+                        tolerance: clampInteger(current.tolerance + direction, 0, 100),
+                      }))
+                    }
+                    value={runSettings.tolerance}
+                  />
+                </div>
+                {isToleranceDirty && (
+                  <AnalysisResetDiamondButton
+                    className="outside"
+                    label="tolerance"
+                    onClick={() => setRunSettings((current) => ({ ...current, tolerance: defaultRunSettings.tolerance }))}
+                  />
+                )}
+              </label>
+              <label className="analysis-parameter-row" {...bindHint('min_scene_gap_ms')}>
+                <span>minimum scene gaps</span>
+                <div className="analysis-parameter-control">
+                  <div className="analysis-parameter-input-group">
+                    <AnalysisStepperInput
+                      ariaLabel="minimum scene gaps"
+                      className="analysis-parameter-input long"
+                      min={0}
+                      onChange={(rawValue) =>
+                        setRunSettings((current) => ({
+                          ...current,
+                          min_scene_gap_ms: clampInteger(rawValue === '' ? 0 : Number(rawValue), 0),
+                        }))
+                      }
+                      onStep={(direction) =>
+                        setRunSettings((current) => ({
+                          ...current,
+                          min_scene_gap_ms: clampInteger(current.min_scene_gap_ms + direction, 0),
+                        }))
+                      }
+                      value={runSettings.min_scene_gap_ms}
+                    />
+                    <span className="analysis-parameter-suffix">ms</span>
+                  </div>
+                </div>
+                {isMinSceneGapDirty && (
+                  <AnalysisResetDiamondButton
+                    className="outside"
+                    label="minimum scene gaps"
+                    onClick={() => setRunSettings((current) => ({ ...current, min_scene_gap_ms: defaultRunSettings.min_scene_gap_ms }))}
+                  />
+                )}
+              </label>
+              <label className="analysis-parameter-row" {...bindHint('sample_fps')}>
+                <span>sample fps</span>
+                <div className="analysis-parameter-control">
+                  <AnalysisStepperInput
+                    ariaLabel="sample fps"
+                    className="analysis-parameter-input short"
+                    min={1}
+                    onChange={(rawValue) =>
+                      setRunSettings((current) => ({
+                        ...current,
+                        sample_fps: rawValue ? clampInteger(Number(rawValue), 1) : null,
+                      }))
+                    }
+                    onStep={(direction) =>
+                      setRunSettings((current) => ({
+                        ...current,
+                        sample_fps: clampInteger((current.sample_fps ?? 1) + direction, 1),
+                      }))
+                    }
+                    value={runSettings.sample_fps ?? ''}
+                  />
+                </div>
+                {isSampleFpsDirty && (
+                  <AnalysisResetDiamondButton
+                    className="outside"
+                    label="sample fps"
+                    onClick={() => setRunSettings((current) => ({ ...current, sample_fps: defaultRunSettings.sample_fps }))}
+                  />
+                )}
+              </label>
+              <label className="analysis-parameter-row" {...bindHint('extract_offset_ms')}>
+                <span>extract offset</span>
+                <div className="analysis-parameter-control">
+                  <div className="analysis-parameter-input-group">
+                    <AnalysisStepperInput
+                      ariaLabel="extract offset"
+                      className="analysis-parameter-input long"
+                      min={0}
+                      onChange={(rawValue) =>
+                        setRunSettings((current) => ({
+                          ...current,
+                          extract_offset_ms: clampInteger(rawValue === '' ? 0 : Number(rawValue), 0),
+                        }))
+                      }
+                      onStep={(direction) =>
+                        setRunSettings((current) => ({
+                          ...current,
+                          extract_offset_ms: clampInteger(current.extract_offset_ms + direction, 0),
+                        }))
+                      }
+                      value={runSettings.extract_offset_ms}
+                    />
+                    <span className="analysis-parameter-suffix">ms</span>
+                  </div>
+                </div>
+                {isExtractOffsetDirty && (
+                  <AnalysisResetDiamondButton
+                    className="outside"
+                    label="extract offset"
+                    onClick={() => setRunSettings((current) => ({ ...current, extract_offset_ms: defaultRunSettings.extract_offset_ms }))}
+                  />
+                )}
+              </label>
+            </div>
+
+            <div className="analysis-mode-row" {...bindHint('detector_mode')}>
+              <span>detector mode</span>
+              <div className="analysis-parameter-control">
+                <div className="analysis-mode-toggle">
+                  <button
+                    className={`analysis-mode-button ${runSettings.detector_mode === 'content' ? 'active' : ''}`}
+                    onClick={() => setRunSettings((current) => ({ ...current, detector_mode: 'content' }))}
+                    type="button"
+                  >
+                    content
+                  </button>
+                  <button
+                    className={`analysis-mode-button ${runSettings.detector_mode === 'adaptive' ? 'active' : ''}`}
+                    onClick={() => setRunSettings((current) => ({ ...current, detector_mode: 'adaptive' }))}
+                    type="button"
+                  >
+                    adaptive
+                  </button>
+                </div>
+              </div>
+              {isDetectorModeDirty && (
+                <AnalysisResetDiamondButton
+                  className="outside"
+                  label="detector mode"
+                  onClick={() => setRunSettings((current) => ({ ...current, detector_mode: defaultRunSettings.detector_mode }))}
+                />
+              )}
+            </div>
+
+            <div className="analysis-param-footer">
+              <button
+                className="analysis-pill success analysis-run-button"
+                disabled={!selectedRecordingId || createRunPending || healthWarning}
+                {...bindHint('run')}
+                onClick={onStartRun}
+                type="button"
+              >
+                {createRunPending ? 'running...' : 'run analysis'}
+              </button>
+              {presetCopyFeedback ? <span className="analysis-preset-feedback">{presetCopyFeedback}</span> : null}
+            </div>
+
+            {hintText && hintCardPosition ? (
+              <div
+                className="analysis-hint-float"
+                style={{
+                  left: `${hintCardPosition.left}px`,
+                  top: `${hintCardPosition.top}px`,
+                }}
+              >
+                <p className="analysis-hint-float-copy">{hintText}</p>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="analysis-column">
+            <div className="analysis-column-head">
+              <p>tasks</p>
+              <div className="analysis-task-toolbar">
+                {taskSelectMode ? (
+                  <>
+                    <span className="analysis-task-selection-count">{selectedTaskRunIds.length} selected</span>
+                    <button
+                      className="analysis-task-link subtle"
+                      disabled={!selectedTaskRunIds.length || bulkDeletePending}
+                      onClick={() => void handleDeleteSelectedTasks()}
+                      type="button"
+                    >
+                      {bulkDeletePending ? 'deleting...' : 'delete selected'}
+                    </button>
+                    <button
+                      className="analysis-task-link subtle"
+                      disabled={!selectedTaskRunIds.length || bulkExportPending}
+                      onClick={() => void handleExportSelectedTasks()}
+                      type="button"
+                    >
+                      {bulkExportPending ? 'exporting...' : 'export selected'}
+                    </button>
+                    <button
+                      className="analysis-task-link subtle"
+                      disabled={!analysisTaskItems.some((item) => item.run.status === 'completed') || bulkExportPending}
+                      onClick={() => void handleExportAllCompletedTasks()}
+                      type="button"
+                    >
+                      export all completed
+                    </button>
+                    <button
+                      className="analysis-task-link subtle"
+                      onClick={() => {
+                        setTaskSelectMode(false);
+                        setSelectedTaskRunIds([]);
+                      }}
+                      type="button"
+                    >
+                      done
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="analysis-task-link subtle"
+                    onClick={() => {
+                      setTaskSelectMode(true);
+                      setSelectedTaskRunIds([]);
+                    }}
+                    type="button"
+                  >
+                    select
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="analysis-divider" />
+            <div className="analysis-tasks">
+              {analysisTaskItems.map((item) => renderTaskRow(item))}
+              {!analysisTaskItems.length && <p className="entry-empty-copy">Run summaries will appear here once analysis starts.</p>}
+            </div>
+          </section>
+        </div>
+
+        {previewVideoUrl && (
+          <div className="analysis-lower-grid">
+            <div className="analysis-lower-column">
+              {previewVideoUrl ? (
+                <section className="analysis-panel analysis-preview-panel" id="analysis-video-preview">
+                  <video className="analysis-preview-video" controls playsInline src={previewVideoUrl} />
+                </section>
+              ) : null}
+            </div>
+            <div className="analysis-lower-column" />
+            <div className="analysis-lower-column" />
+          </div>
+        )}
+
+        {selectedRun ? (
+          <section className="analysis-detail-section stack-gap" id="analysis-run-detail">
+            <div className="analysis-detail-header">
+              <div>
+                <p className="analysis-section-eyebrow">selected task</p>
+                <div className="run-title-row">
+                  <h2>{selectedRecordingSummary?.filename ?? selectedRun.summary.recording_id}</h2>
+                  <span className={`status-pill ${selectedRun.summary.status}`}>{selectedRun.summary.status.replace('_', ' ')}</span>
+                </div>
+                <p className="muted">{selectedRun.summary.message || 'No status message yet.'}</p>
+                <p className="analysis-detail-meta">{formatRunTiming(selectedRun.summary)}</p>
+              </div>
+              <div className="action-row">
+                {selectedRun.summary.is_abortable && (
+                  <button className="analysis-pill danger" disabled={abortRunPending} onClick={() => onAbortRun(selectedRun.summary.id)} type="button">
+                    end
+                  </button>
+                )}
+                {selectedRun.summary.needs_fallback_decision && (
+                  <button className="analysis-pill analysis-pill-accent" onClick={() => onStartFallback(selectedRun.summary.id)} type="button">
+                    sensitive fallback
+                  </button>
+                )}
+                {selectedRun.summary.needs_fallback_decision && (
+                  <button
+                    className="analysis-pill analysis-pill-muted"
+                    disabled={dismissFallbackPending}
+                    onClick={() => onDismissFallback(selectedRun.summary.id)}
+                    type="button"
+                  >
+                    keep current
+                  </button>
+                )}
+                {selectedRun.summary.is_deletable && (
+                  <button className="analysis-pill danger" disabled={deleteRunPending} onClick={() => onDeleteRun(selectedRun.summary.id)} type="button">
+                    delete
+                  </button>
+                )}
+                <button
+                  className="analysis-pill success"
+                  disabled={!canExport || exportRunPending}
+                  onClick={() => onExportRun(selectedRun.summary.id)}
+                  type="button"
+                >
+                  {exportRunPending ? 'exporting...' : 'export'}
+                </button>
+              </div>
+            </div>
+
+            <div className="analysis-task-bar" aria-hidden="true">
+              <div className="analysis-task-bar-fill" style={{ width: formatPercent(selectedRun.summary.progress) }} />
+            </div>
+
+            {selectedRun.summary.needs_fallback_decision && (
+              <div className="banner warning-banner banner-block">
+                <strong>Primary pass found only the opening frame.</strong>
+                <span>Run a sensitive fallback if the current result missed meaningful transitions.</span>
+              </div>
+            )}
+
+            {selectedRun.export_bundle && (
+              <div className="banner success-banner banner-block">
+                <strong>Export ready.</strong>
+                <a href={exportUrl ?? '#'} rel="noreferrer" target="_blank">
+                  Download {selectedRun.export_bundle.item_count} screenshots as ZIP
+                </a>
+              </div>
+            )}
+
+            <div className="analysis-run-stats">
+              <div className="summary-block">
+                <span>phase</span>
+                <strong>{formatPhase(selectedRun.summary.phase)}</strong>
+              </div>
+              <div className="summary-block">
+                <span>candidates</span>
+                <strong>{selectedRun.candidates.length}</strong>
+              </div>
+              <div className="summary-block">
+                <span>accepted</span>
+                <strong>{selectedRun.accepted_steps.length}</strong>
+              </div>
+            </div>
+
+            <details className="disclosure-card" id="analysis-run-logs" open={['queued', 'running', 'awaiting_fallback'].includes(selectedRun.summary.status)}>
+              <summary>logs</summary>
+              <div className="log-list disclosure-body">
+                {selectedRun.events.map((event) => (
+                  <div className={`log-row ${event.level}`} key={event.id}>
+                    <div className="log-meta">
+                      <span className="status-pill small">{formatPhase(event.phase)}</span>
+                      <small>{new Date(event.created_at).toLocaleTimeString()}</small>
+                    </div>
+                    <strong>{event.message}</strong>
+                    {typeof event.progress === 'number' && <small>{formatPercent(event.progress)}</small>}
+                  </div>
+                ))}
+                {!selectedRun.events.length && <p className="empty-copy">Progress messages will appear here once the run starts.</p>}
+              </div>
+            </details>
+
+            {selectedRun.accepted_steps.length > 0 && (
+              <div className="accepted-strip-shell">
+                <div className="accepted-strip">
+                  {selectedRun.accepted_steps.map((step) => {
+                    const similarityLink = acceptedStepSimilarityLinks.get(step.step_id);
+                    return (
+                      <div className="accepted-step-chip" id={`accepted-step-${step.step_id}`} key={step.step_id} tabIndex={-1}>
+                        <div className="accepted-step-topline">
+                          <span className="status-pill small info">{step.step_id}</span>
+                          <small>{step.timestamp_tc}</small>
+                        </div>
+                        <strong className="accepted-step-title" title={step.title}>
+                          {step.title}
+                        </strong>
+                        {similarityLink ? (
+                          <div className="linked-scene-row">
+                            <span className="status-pill small warning">Returning scene</span>
+                            <button className="inline-link-button" onClick={() => jumpToAnchor(similarityLink.targetId)} type="button">
+                              {similarityLink.label}
+                            </button>
+                          </div>
+                        ) : (
+                          <small>{step.export_filename}</small>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="candidate-grid">
+              {selectedRun.candidates.map((candidate) => {
+                const similarityLink = candidateSimilarityLinks.get(candidate.id);
+                return (
+                  <CandidateCard
+                    candidate={candidate}
+                    key={candidate.id}
+                    onJumpToSimilar={similarityLink ? () => jumpToAnchor(similarityLink.targetId) : undefined}
+                    similarLink={similarityLink}
+                    onUpdate={(payload) => onUpdateCandidate(candidate.id, payload)}
+                  />
+                );
+              })}
+            </div>
+          </section>
+        ) : selectedRecording ? (
+          <section className="analysis-detail-section empty-state">
+            <h2>{selectedRecording.filename}</h2>
+            <p>Select a video name or a task output/log link to review screenshots, logs, and exports here.</p>
+          </section>
+        ) : null}
       </div>
     </div>
   );
@@ -1874,20 +2620,20 @@ function CandidateCard({ candidate, onJumpToSimilar, similarLink, onUpdate }: Ca
         {similarLink && onJumpToSimilar && (
           <div className="linked-scene-row">
             <span className="status-pill small warning">Returning view</span>
-            <button className="inline-link-button" onClick={onJumpToSimilar} type="button">
+            <button className="inline-link-button" onClick={onJumpToSimilar} title="Jump to the earlier matching scene." type="button">
               {similarLink.label}
             </button>
           </div>
         )}
 
         <div className="action-row compact">
-          <button className="chip-button accept" onClick={() => setStatus('accepted')} type="button">
+          <button className="chip-button accept" onClick={() => setStatus('accepted')} title="Keep this screenshot in the exported walkthrough." type="button">
             Keep
           </button>
-          <button className="chip-button reject" onClick={() => setStatus('rejected')} type="button">
+          <button className="chip-button reject" onClick={() => setStatus('rejected')} title="Exclude this screenshot from the walkthrough." type="button">
             Reject
           </button>
-          <button className="chip-button neutral" onClick={() => setStatus('pending')} type="button">
+          <button className="chip-button neutral" onClick={() => setStatus('pending')} title="Clear the current decision for this screenshot." type="button">
             Reset
           </button>
         </div>
