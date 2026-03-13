@@ -1666,10 +1666,9 @@ a {
 
 .analysis-preview-head {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 12px;
-  flex-wrap: wrap;
 }
 
 .analysis-preview-meta-wrap {
@@ -1688,13 +1687,109 @@ a {
 .analysis-preview-mark-copy {
   color: rgba(0, 0, 0, 0.54);
   font-size: 12px;
-  line-height: 1.2;
+  line-height: 1.3;
 }
 
 .analysis-preview-mark-button {
-  min-width: 122px;
+  position: relative;
+  width: 100%;
+  min-height: 78px;
+  border: none;
+  background: #48af7c;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 22px;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.analysis-preview-mark-button:hover {
+  background: #439f71;
+}
+
+.analysis-preview-mark-button:active {
+  transform: scale(0.992);
+}
+
+.analysis-preview-mark-button:focus-visible {
+  outline: 2px solid rgba(72, 175, 124, 0.28);
+  outline-offset: 4px;
+}
+
+.analysis-preview-mark-button[aria-busy='true'] {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.analysis-preview-mark-main {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  text-align: left;
+}
+
+.analysis-preview-mark-title {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.analysis-preview-mark-subtitle {
+  max-width: 28ch;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.analysis-preview-mark-shortcut,
+.analysis-preview-mark-queue {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  align-self: flex-start;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 12px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.analysis-preview-mark-queue {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  background: rgba(0, 0, 0, 0.16);
+  font-size: 13px;
+}
+
+.analysis-preview-mark-pulse {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.18);
+  animation: analysis-preview-mark-pulse 260ms ease-out;
+  pointer-events: none;
+}
+
+@keyframes analysis-preview-mark-pulse {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.985);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.02);
+  }
 }
 
 .analysis-panel-copy {
