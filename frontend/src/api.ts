@@ -1,6 +1,7 @@
 import type {
   CandidateFrame,
   ExportBundle,
+  ExportMode,
   HealthResponse,
   Project,
   ProjectDetail,
@@ -52,17 +53,36 @@ export function createProject(name: string): Promise<Project> {
   });
 }
 
+export function updateProject(projectId: string, name: string): Promise<Project> {
+  return request<Project>(`/projects/${projectId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
 export function getProject(projectId: string): Promise<ProjectDetail> {
   return request<ProjectDetail>(`/projects/${projectId}`);
 }
 
-export function importRecording(projectId: string, file: File): Promise<RecordingSummary> {
+export function importRecording(projectId: string, file: File, filename?: string): Promise<RecordingSummary> {
   const formData = new FormData();
   formData.set('project_id', projectId);
+  if (filename) {
+    formData.set('filename', filename);
+  }
   formData.set('file', file);
   return request<RecordingSummary>('/recordings/import', {
     method: 'POST',
     body: formData,
+  });
+}
+
+export function updateRecording(recordingId: string, filename: string): Promise<RecordingSummary> {
+  return request<RecordingSummary>(`/recordings/${recordingId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename }),
   });
 }
 
@@ -113,8 +133,12 @@ export function updateCandidate(
   });
 }
 
-export function exportRun(runId: string): Promise<ExportBundle> {
-  return request<ExportBundle>(`/runs/${runId}/export`, { method: 'POST' });
+export function exportRun(runId: string, mode: ExportMode = 'accepted'): Promise<ExportBundle> {
+  return request<ExportBundle>(`/runs/${runId}/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  });
 }
 
 export function health(): Promise<HealthResponse> {

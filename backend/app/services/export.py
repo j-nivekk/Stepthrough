@@ -5,6 +5,7 @@ import json
 import shutil
 from pathlib import Path
 
+from ..models import ExportMode
 from ..storage import absolute_data_path, asset_url, relative_data_path, run_exports_dir
 from ..utils import utc_now
 from .video import export_filename
@@ -51,6 +52,47 @@ def build_accepted_steps(recording_slug: str, candidates: list[dict]) -> list[di
     return accepted_steps
 
 
+def build_all_candidate_rows(recording_slug: str, candidates: list[dict]) -> list[dict]:
+    ordered_candidates = sorted(candidates, key=lambda candidate: (candidate["detector_index"], candidate["timestamp_ms"]))
+    export_rows: list[dict] = []
+
+    for row_index, candidate in enumerate(ordered_candidates, start=1):
+        export_rows.append(
+            {
+                "step_id": f"candidate-{row_index:03d}",
+                "step_index": row_index,
+                "timestamp_ms": candidate["timestamp_ms"],
+                "timestamp_tc": candidate["timestamp_tc"],
+                "image_path": candidate["image_path"],
+                "image_url": asset_url(candidate["image_path"]),
+                "status": candidate["status"],
+                "title": (candidate.get("title") or "").strip() or f"Candidate {row_index}",
+                "notes": candidate.get("notes"),
+                "scene_score": candidate["scene_score"],
+                "revisit_group_id": candidate.get("revisit_group_id"),
+                "similar_to_step_id": None,
+                "similar_to_source_candidate_id": candidate.get("similar_to_candidate_id"),
+                "source_candidate_id": candidate["id"],
+                "export_filename": export_filename(recording_slug, row_index, candidate["timestamp_ms"]),
+            }
+        )
+
+    return export_rows
+
+
+def build_export_rows(recording_slug: str, candidates: list[dict], mode: ExportMode) -> list[dict]:
+    if mode == "all":
+        export_rows = build_all_candidate_rows(recording_slug, candidates)
+        if not export_rows:
+            raise ValueError("No screenshot candidates are available to export.")
+        return export_rows
+
+    accepted_steps = build_accepted_steps(recording_slug, candidates)
+    if not accepted_steps:
+        raise ValueError("Mark at least one screenshot as accepted before exporting.")
+    return accepted_steps
+
+
 def create_export_bundle(
     *,
     bundle_id: str,
@@ -58,10 +100,9 @@ def create_export_bundle(
     recording: dict,
     run: dict,
     candidates: list[dict],
+    mode: ExportMode = "accepted",
 ) -> tuple[str, str, int]:
-    accepted_steps = build_accepted_steps(recording["slug"], candidates)
-    if not accepted_steps:
-        raise ValueError("Mark at least one screenshot as accepted before exporting.")
+    export_rows = build_export_rows(recording["slug"], candidates, mode)
 
     exports_root = run_exports_dir(
         project["slug"],
@@ -74,15 +115,16 @@ def create_export_bundle(
     images_dir = bundle_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    export_rows = []
-    for step in accepted_steps:
-        source_path = absolute_data_path(step["image_path"])
-        target_path = images_dir / step["export_filename"]
+    exported_manifest_rows = []
+    for row in export_rows:
+        source_path = absolute_data_path(row["image_path"])
+        target_path = images_dir / row["export_filename"]
         shutil.copy2(source_path, target_path)
-        export_rows.append({**step, "image_path": f"images/{step['export_filename']}"})
+        exported_manifest_rows.append({**row, "image_path": f"images/{row['export_filename']}"})
 
     manifest = {
         "bundle_id": bundle_id,
+        "export_mode": mode,
         "created_at": utc_now(),
         "project": {
             "id": project["id"],
@@ -100,7 +142,7 @@ def create_export_bundle(
             "detector_mode": run["detector_mode"],
             "tolerance": run["tolerance"],
         },
-        "steps": export_rows,
+        "steps": exported_manifest_rows,
     }
 
     with (bundle_dir / "steps.json").open("w", encoding="utf-8") as output:
@@ -121,13 +163,14 @@ def create_export_bundle(
                 "scene_score",
                 "revisit_group_id",
                 "similar_to_step_id",
+                "similar_to_source_candidate_id",
                 "source_candidate_id",
                 "export_filename",
             ],
             extrasaction="ignore",
         )
         writer.writeheader()
-        writer.writerows(export_rows)
+        writer.writerows(exported_manifest_rows)
 
     archive_path = shutil.make_archive(str(bundle_dir), "zip", root_dir=bundle_dir)
-    return relative_data_path(bundle_dir), relative_data_path(Path(archive_path)), len(export_rows)
+    return relative_data_path(bundle_dir), relative_data_path(Path(archive_path)), len(exported_manifest_rows)

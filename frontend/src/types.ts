@@ -1,5 +1,6 @@
 export type DetectorMode = 'content' | 'adaptive';
 export type CandidateStatus = 'pending' | 'accepted' | 'rejected';
+export type ExportMode = 'accepted' | 'all';
 export type RunStatus = 'queued' | 'running' | 'awaiting_fallback' | 'completed' | 'failed' | 'cancelled';
 export type RunPhase =
   | 'queued'
