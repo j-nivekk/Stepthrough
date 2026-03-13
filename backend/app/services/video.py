@@ -96,6 +96,8 @@ def extract_frame(video_path: Path, output_path: Path, timestamp_ms: int) -> Non
             str(output_path),
         ]
     )
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise VideoToolError("Could not extract a frame at the requested timestamp.")
 
 
 def recording_slug_from_filename(filename: str) -> str:

@@ -5,6 +5,7 @@ import {
   API_BASE,
   absoluteApiUrl,
   abortRun,
+  createManualCandidate,
   createProject,
   createRun,
   deleteRecording,
@@ -42,9 +43,13 @@ const defaultRunSettings: RunSettings = {
   tolerance: 50,
   min_scene_gap_ms: 900,
   sample_fps: 4,
+  allow_high_fps_sampling: false,
   detector_mode: 'content',
   extract_offset_ms: 200,
 };
+
+const contentThresholdRange: [number, number] = [8, 48];
+const adaptiveThresholdRange: [number, number] = [1, 7];
 
 const PRESET_STORAGE_VERSION = 1;
 const GLOBAL_PRESET_STORAGE_KEY = 'stepthrough.run-preset.global.v1';
@@ -76,6 +81,7 @@ interface AnalysisTaskItem {
 }
 
 type AnalysisHintKey =
+  | 'allow_high_fps_sampling'
   | 'detector_mode'
   | 'extract_offset_ms'
   | 'load'
@@ -116,12 +122,13 @@ const phaseLabels: Record<RunPhase, string> = {
 };
 
 function sanitizeRunSettings(settings?: Partial<RunSettings> | null): RunSettings {
-  const tolerance = typeof settings?.tolerance === 'number' ? Math.min(100, Math.max(0, Math.round(settings.tolerance))) : defaultRunSettings.tolerance;
+  const tolerance = typeof settings?.tolerance === 'number' ? Math.min(100, Math.max(1, Math.round(settings.tolerance))) : defaultRunSettings.tolerance;
   const minSceneGap = typeof settings?.min_scene_gap_ms === 'number' ? Math.max(0, Math.round(settings.min_scene_gap_ms)) : defaultRunSettings.min_scene_gap_ms;
   const sampleFps =
     typeof settings?.sample_fps === 'number' && Number.isFinite(settings.sample_fps) && settings.sample_fps > 0
       ? Math.max(1, Math.round(settings.sample_fps))
       : null;
+  const allowHighFpsSampling = settings?.allow_high_fps_sampling === true;
   const detectorMode = settings?.detector_mode === 'adaptive' ? 'adaptive' : 'content';
   const extractOffset =
     typeof settings?.extract_offset_ms === 'number' ? Math.max(0, Math.round(settings.extract_offset_ms)) : defaultRunSettings.extract_offset_ms;
@@ -130,6 +137,7 @@ function sanitizeRunSettings(settings?: Partial<RunSettings> | null): RunSetting
     tolerance,
     min_scene_gap_ms: minSceneGap,
     sample_fps: sampleFps,
+    allow_high_fps_sampling: allowHighFpsSampling,
     detector_mode: detectorMode,
     extract_offset_ms: extractOffset,
   };
@@ -205,14 +213,22 @@ function formatDetectorModeLabel(mode: RunSettings['detector_mode']): string {
   return mode === 'adaptive' ? 'Adaptive' : 'Content';
 }
 
-function describeTolerance(tolerance: number): string {
+function mapToleranceToDetectorThreshold(tolerance: number, detectorMode: RunSettings['detector_mode']): number {
+  const [floor, ceiling] = detectorMode === 'adaptive' ? adaptiveThresholdRange : contentThresholdRange;
+  const normalized = (Math.min(100, Math.max(1, tolerance)) - 1) / 99;
+  return Number((floor + ((ceiling - floor) * normalized)).toFixed(2));
+}
+
+function describeTolerance(tolerance: number, detectorMode: RunSettings['detector_mode']): string {
+  const threshold = mapToleranceToDetectorThreshold(tolerance, detectorMode);
+  const thresholdLabel = detectorMode === 'adaptive' ? `Adaptive threshold ${threshold}.` : `Content threshold ${threshold}.`;
   if (tolerance <= 25) {
-    return 'Very sensitive. Lower this when keyboard changes, small badges, or brief sheets are being missed.';
+    return `${thresholdLabel} Very sensitive. Lower this when keyboard changes, small badges, or brief sheets are being missed.`;
   }
   if (tolerance <= 60) {
-    return 'Balanced. Good default for most walkthrough recordings. Lower it to catch subtler screens, raise it if typing or scrolling creates noise.';
+    return `${thresholdLabel} Balanced. Good default for most walkthrough recordings. Lower it to catch subtler screens, raise it if typing or scrolling creates noise.`;
   }
-  return 'Conservative. Raise this when scrolling or tiny motion creates too many candidates. Lower it if real screens are being missed.';
+  return `${thresholdLabel} Conservative. Raise this when scrolling or tiny motion creates too many candidates. Lower it if real screens are being missed.`;
 }
 
 function describeSampleFps(sampleFps: number | null): string {
@@ -226,6 +242,44 @@ function describeSampleFps(sampleFps: number | null): string {
     return 'Moderate sampling that works well for most recordings. Raise it if short-lived states are missed, lower it if runs get noisy or slow.';
   }
   return 'Dense sampling for rapid interactions. Lower it if scrolling produces too many near-duplicate candidates or processing becomes heavy.';
+}
+
+function getSampleFpsGuardrail(recordingFps: number | null | undefined, allowHighFpsSampling: boolean) {
+  const sourceCeiling = Math.max(1, Math.ceil(recordingFps && Number.isFinite(recordingFps) ? recordingFps : 30));
+  const cappedMax = Math.min(30, sourceCeiling);
+  return {
+    isHighFpsRecording: sourceCeiling > 30,
+    maxSampleFps: allowHighFpsSampling ? sourceCeiling : cappedMax,
+    sourceFpsAvailable: sourceCeiling <= 30 || allowHighFpsSampling,
+    sourceFpsCeiling: sourceCeiling,
+  };
+}
+
+function clampRunSettingsForRecording(settings: RunSettings, recordingFps: number | null | undefined): RunSettings {
+  const sanitized = sanitizeRunSettings(settings);
+  const guardrail = getSampleFpsGuardrail(recordingFps, sanitized.allow_high_fps_sampling);
+  let nextSampleFps = sanitized.sample_fps;
+  if (typeof nextSampleFps === 'number') {
+    nextSampleFps = clampInteger(nextSampleFps, 1, guardrail.maxSampleFps);
+  } else if (!guardrail.sourceFpsAvailable) {
+    nextSampleFps = guardrail.maxSampleFps;
+  }
+
+  return {
+    ...sanitized,
+    sample_fps: nextSampleFps,
+  };
+}
+
+function areRunSettingsEqual(left: RunSettings, right: RunSettings): boolean {
+  return (
+    left.tolerance === right.tolerance &&
+    left.min_scene_gap_ms === right.min_scene_gap_ms &&
+    left.sample_fps === right.sample_fps &&
+    left.allow_high_fps_sampling === right.allow_high_fps_sampling &&
+    left.detector_mode === right.detector_mode &&
+    left.extract_offset_ms === right.extract_offset_ms
+  );
 }
 
 function describeDetectorMode(mode: RunSettings['detector_mode']): string {
@@ -259,9 +313,12 @@ function formatRunSettingsSummary(settings: RunSettings): string {
     formatDetectorModeLabel(settings.detector_mode),
     `tol ${settings.tolerance}`,
     settings.sample_fps ? `${settings.sample_fps} fps` : 'source fps',
+    settings.allow_high_fps_sampling ? 'high fps on' : null,
     `gap ${settings.min_scene_gap_ms} ms`,
     `offset ${settings.extract_offset_ms} ms`,
-  ].join(' · ');
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 function serializeRunPresetText(settings: RunSettings): string {
@@ -271,6 +328,7 @@ function serializeRunPresetText(settings: RunSettings): string {
     `Tolerance: ${settings.tolerance}`,
     `Min scene gap: ${settings.min_scene_gap_ms} ms`,
     `Sample fps: ${settings.sample_fps ?? 'Source stream'}`,
+    `High-fps sampling: ${settings.allow_high_fps_sampling ? 'Enabled' : 'Disabled'}`,
     `Extract offset: ${settings.extract_offset_ms} ms`,
   ].join('\n');
 }
@@ -407,6 +465,17 @@ function normalizeZipFilename(value: string): string | null {
 
   const sanitized = trimmed.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/\s+/g, ' ').trim().replace(/\.zip$/i, '');
   return sanitized ? `${sanitized}.zip` : null;
+}
+
+function formatPlaybackTimestamp(timestampMs: number): string {
+  const safeTimestamp = Math.max(0, Math.round(timestampMs));
+  const totalSeconds = Math.floor(safeTimestamp / 1000);
+  const milliseconds = safeTimestamp % 1000;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const clock = hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}` : `${minutes}:${String(seconds).padStart(2, '0')}`;
+  return `${clock}.${String(milliseconds).padStart(3, '0')}`;
 }
 
 async function triggerNamedDownload(url: string, filename: string): Promise<void> {
@@ -896,6 +965,35 @@ function App() {
     onError: (error: Error) => setAppError(error.message),
   });
 
+  const createManualCandidateMutation = useMutation({
+    mutationFn: ({ runId, timestampMs }: { runId: string; timestampMs: number }) => createManualCandidate(runId, timestampMs),
+    onSuccess: async (candidate) => {
+      setAnalysisActionMessage(`Added manual step at ${candidate.timestamp_tc}.`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['projects'] }),
+        selectedProjectId
+          ? queryClient.fetchQuery({
+              queryKey: ['project', selectedProjectId],
+              queryFn: () => getProject(selectedProjectId),
+            })
+          : Promise.resolve(),
+        queryClient.fetchQuery({
+          queryKey: ['run', candidate.run_id],
+          queryFn: () => getRun(candidate.run_id),
+        }),
+        queryClient.fetchQuery({
+          queryKey: ['recording', candidate.recording_id],
+          queryFn: () => getRecording(candidate.recording_id),
+        }),
+        queryClient.fetchQuery({
+          queryKey: ['recording', candidate.recording_id, 'analysis'],
+          queryFn: () => getRecording(candidate.recording_id),
+        }),
+      ]);
+    },
+    onError: (error: Error) => setAppError(error.message),
+  });
+
   const exportRunMutation = useMutation({
     mutationFn: async ({ downloadName, mode, runId }: { downloadName?: string; mode: ExportMode; runId: string }) => {
       const bundle = await exportRun(runId, mode);
@@ -929,6 +1027,10 @@ function App() {
   const selectedRun = runDetailQuery.data ?? null;
   const selectedRecordingSummary = projectRecordings.find((recording) => recording.id === selectedRecordingId) ?? null;
   const previewRecording = projectRecordings.find((recording) => recording.id === previewRecordingId) ?? null;
+  const effectiveProjectDefaultSettings = useMemo(
+    () => clampRunSettingsForRecording(projectDefaultSettings, selectedRecordingSummary?.fps ?? null),
+    [projectDefaultSettings, selectedRecordingSummary?.fps],
+  );
   const healthWarning = healthQuery.data && healthQuery.data.missing_tools.length > 0;
   const presetText = useMemo(() => serializeRunPresetText(runSettings), [runSettings]);
   const uploadedImportItems = useMemo(() => getUploadedImportItems(importQueue), [importQueue]);
@@ -947,6 +1049,14 @@ function App() {
         return new Date(right.run.created_at).getTime() - new Date(left.run.created_at).getTime();
       });
   }, [analysisRecordingQueries, projectRecordings]);
+
+  useEffect(() => {
+    setRunSettings((current) => {
+      const nextSettings = clampRunSettingsForRecording(current, selectedRecordingSummary?.fps ?? null);
+      return areRunSettingsEqual(current, nextSettings) ? current : nextSettings;
+    });
+  }, [selectedRecordingSummary?.fps, runSettings.allow_high_fps_sampling]);
+
   const latestRunByRecordingId = useMemo(() => {
     const nextMap = new Map<string, RunSummary>();
     analysisTaskItems.forEach((item) => {
@@ -1092,13 +1202,18 @@ function App() {
   }
 
   function handleLoadProjectDefaults() {
-    setRunSettings(projectDefaultSettings);
-    setSettingsFeedback('Loaded this project’s defaults.');
+    setRunSettings(effectiveProjectDefaultSettings);
+    setSettingsFeedback("Loaded this project's defaults.");
   }
 
   function handleResetToProjectDefaults() {
-    setRunSettings({ ...projectDefaultSettings });
-    setSettingsFeedback('Reset the current settings to this project’s defaults.');
+    setRunSettings({ ...effectiveProjectDefaultSettings });
+    setSettingsFeedback("Reset the current settings to this project's defaults.");
+  }
+
+  async function handleCreateManualRunCandidate(runId: string, timestampMs: number) {
+    clearAnalysisMessages();
+    return createManualCandidateMutation.mutateAsync({ runId, timestampMs });
   }
 
   function confirmDeleteRecording(recordingId: string, filename: string) {
@@ -1516,6 +1631,7 @@ function App() {
         bulkDeletePending={bulkDeletePending}
         bulkExportPending={bulkExportPending}
         candidateSimilarityLinks={candidateSimilarityLinks}
+        createManualCandidatePending={createManualCandidateMutation.isPending}
         createRunPending={createRunMutation.isPending}
         dismissFallbackPending={dismissFallbackMutation.isPending}
         exportRunPending={exportRunMutation.isPending}
@@ -1525,6 +1641,7 @@ function App() {
         onAbortRun={(runId) => abortRunMutation.mutate(runId)}
         onDeleteRecording={confirmDeleteRecording}
         onDeleteSelectedRuns={handleDeleteSelectedRuns}
+        onCreateManualCandidate={handleCreateManualRunCandidate}
         onDismissFallback={(runId) => dismissFallbackMutation.mutate(runId)}
         onExportRun={handleExportRun}
         onExportTaskRuns={handleExportTaskRuns}
@@ -1543,7 +1660,7 @@ function App() {
         onStartRun={handleStartAnalysisRun}
         onUpdateCandidate={(candidateId, payload) => updateCandidateMutation.mutate({ candidateId, payload })}
         previewRecording={previewRecording}
-        projectDefaultSettings={projectDefaultSettings}
+        projectDefaultSettings={effectiveProjectDefaultSettings}
         recordings={projectRecordings}
         selectedRecording={selectedRecording}
         selectedRecordingId={selectedRecordingId}
@@ -1610,6 +1727,7 @@ interface AnalysisScreenProps {
   bulkDeletePending: boolean;
   bulkExportPending: boolean;
   candidateSimilarityLinks: Map<string, SimilarLink>;
+  createManualCandidatePending: boolean;
   createRunPending: boolean;
   dismissFallbackPending: boolean;
   exportRunPending: boolean;
@@ -1617,6 +1735,7 @@ interface AnalysisScreenProps {
   healthWarning: boolean;
   liveMessage: string;
   onAbortRun: (runId: string) => void;
+  onCreateManualCandidate: (runId: string, timestampMs: number) => Promise<CandidateFrame>;
   onDeleteRecording: (recordingId: string, filename: string) => void;
   onDeleteSelectedRuns: (runIds: string[]) => Promise<string[] | null>;
   onDismissFallback: (runId: string) => void;
@@ -2145,6 +2264,7 @@ function AnalysisScreen({
   bulkDeletePending,
   bulkExportPending,
   candidateSimilarityLinks,
+  createManualCandidatePending,
   createRunPending,
   dismissFallbackPending,
   exportRunPending,
@@ -2152,6 +2272,7 @@ function AnalysisScreen({
   healthWarning,
   liveMessage,
   onAbortRun,
+  onCreateManualCandidate,
   onDeleteRecording,
   onDeleteSelectedRuns,
   onDismissFallback,
@@ -2192,6 +2313,7 @@ function AnalysisScreen({
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [activeCandidateFilter, setActiveCandidateFilter] = useState<CandidateFilter>('all');
   const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
+  const [pendingManualMarkTimestampMs, setPendingManualMarkTimestampMs] = useState<number | null>(null);
   const [expandedAnnotationCandidateId, setExpandedAnnotationCandidateId] = useState<string | null>(null);
   const [exportNameDraft, setExportNameDraft] = useState('');
   const [previewPlaybackMs, setPreviewPlaybackMs] = useState(0);
@@ -2208,7 +2330,11 @@ function AnalysisScreen({
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
 
   const previewVideoUrl = previewRecording ? absoluteApiUrl(previewRecording.source_url) : null;
+  const sampleFpsGuardrail = getSampleFpsGuardrail(selectedRecordingSummary?.fps ?? null, runSettings.allow_high_fps_sampling);
   const hintCopy: Record<AnalysisHintKey, string> = {
+    allow_high_fps_sampling: sampleFpsGuardrail.isHighFpsRecording
+      ? `Turn this on to sample above 30 fps or use source fps for this ${sampleFpsGuardrail.sourceFpsCeiling} fps recording.`
+      : 'Use this only when you need denser sampling on recordings above 30 fps.',
     detector_mode: describeDetectorMode(runSettings.detector_mode),
     extract_offset_ms: describeExtractOffset(runSettings.extract_offset_ms),
     load: 'Load this project\'s saved defaults into the active analysis parameters.',
@@ -2217,7 +2343,7 @@ function AnalysisScreen({
     run: 'Start a new analysis task for the selected video using the current parameter set.',
     sample_fps: describeSampleFps(runSettings.sample_fps),
     save: 'Save the current analysis parameters for this project or as universal defaults.',
-    tolerance: describeTolerance(runSettings.tolerance),
+    tolerance: describeTolerance(runSettings.tolerance, runSettings.detector_mode),
   };
   const activeHintKey = focusedHintKey ?? hoveredHintKey;
   const hintText = showHints && activeHintKey ? hintCopy[activeHintKey] : null;
@@ -2231,8 +2357,18 @@ function AnalysisScreen({
   const isToleranceDirty = runSettings.tolerance !== projectDefaultSettings.tolerance;
   const isMinSceneGapDirty = runSettings.min_scene_gap_ms !== projectDefaultSettings.min_scene_gap_ms;
   const isSampleFpsDirty = runSettings.sample_fps !== projectDefaultSettings.sample_fps;
+  const isHighFpsDirty = runSettings.allow_high_fps_sampling !== projectDefaultSettings.allow_high_fps_sampling;
   const isExtractOffsetDirty = runSettings.extract_offset_ms !== projectDefaultSettings.extract_offset_ms;
   const isDetectorModeDirty = runSettings.detector_mode !== projectDefaultSettings.detector_mode;
+  const canAddManualCandidate = Boolean(
+    previewMatchesSelectedRun && selectedRun && ['completed', 'failed', 'cancelled'].includes(selectedRun.summary.status),
+  );
+  const showHighFpsWarning = Boolean(selectedRecordingSummary && sampleFpsGuardrail.isHighFpsRecording && !runSettings.allow_high_fps_sampling);
+  const showLowCandidateHint = Boolean(
+    selectedRun &&
+      (selectedRun.summary.needs_fallback_decision ||
+        (['completed', 'failed', 'cancelled'].includes(selectedRun.summary.status) && selectedRun.candidates.length <= 2)),
+  );
   const filteredAnalysisTaskItems = useMemo(() => {
     if (taskFilter === 'all') {
       return analysisTaskItems;
@@ -2314,6 +2450,10 @@ function AnalysisScreen({
 
   useEffect(() => {
     setShowExportMenu(false);
+  }, [selectedRun?.summary.id]);
+
+  useEffect(() => {
+    setPendingManualMarkTimestampMs(null);
   }, [selectedRun?.summary.id]);
 
   useEffect(() => {
@@ -2427,6 +2567,26 @@ function AnalysisScreen({
     return () => window.removeEventListener('keydown', handleReviewKeydown);
   }, [activeCandidate, canReviewCandidates, filteredCandidates]);
 
+  useEffect(() => {
+    if (!canAddManualCandidate) {
+      return;
+    }
+
+    function handleManualTagKeydown(event: KeyboardEvent) {
+      if (isEditableElement(event.target) || event.metaKey || event.ctrlKey || event.altKey || event.repeat) {
+        return;
+      }
+      if (event.key.toLowerCase() !== 'k') {
+        return;
+      }
+      event.preventDefault();
+      void handleCreateManualCandidate();
+    }
+
+    window.addEventListener('keydown', handleManualTagKeydown);
+    return () => window.removeEventListener('keydown', handleManualTagKeydown);
+  }, [canAddManualCandidate, previewPlaybackMs, selectedRun?.summary.id]);
+
   function updateHintCardPosition(element: HTMLElement) {
     const container = parameterColumnRef.current;
     if (!container) {
@@ -2505,6 +2665,45 @@ function AnalysisScreen({
       setPresetCopyFeedback('copied');
     } catch {
       setPresetCopyFeedback('copy failed');
+    }
+  }
+
+  function getCurrentPreviewTimestampMs() {
+    const previewDurationMs = previewRecording?.duration_ms ?? selectedRecordingSummary?.duration_ms ?? null;
+    const directSeconds = previewVideoRef.current?.currentTime;
+    const fallbackSeconds = previewPlaybackMs / 1000;
+    const rawSeconds =
+      typeof directSeconds === 'number' && Number.isFinite(directSeconds)
+        ? directSeconds
+        : Number.isFinite(fallbackSeconds)
+          ? fallbackSeconds
+          : null;
+    if (rawSeconds === null) {
+      return null;
+    }
+
+    const clampedSeconds =
+      previewDurationMs && previewDurationMs > 0
+        ? Math.min(rawSeconds, Math.max(0, (previewDurationMs - 1) / 1000))
+        : Math.max(0, rawSeconds);
+    return Math.max(0, Math.round(clampedSeconds * 1000));
+  }
+
+  async function handleCreateManualCandidate(timestampOverrideMs?: number) {
+    if (!selectedRun || !canAddManualCandidate) {
+      return;
+    }
+
+    const timestampMs = timestampOverrideMs ?? getCurrentPreviewTimestampMs();
+    if (timestampMs === null) {
+      return;
+    }
+    setPendingManualMarkTimestampMs(timestampMs);
+    try {
+      await onCreateManualCandidate(selectedRun.summary.id, timestampMs);
+      setPendingManualMarkTimestampMs(null);
+    } catch {
+      setPendingManualMarkTimestampMs(null);
     }
   }
 
@@ -2892,17 +3091,17 @@ function AnalysisScreen({
                     ariaLabel="tolerance"
                     className="analysis-parameter-input short"
                     max={100}
-                    min={0}
+                    min={1}
                     onChange={(rawValue) =>
                       setRunSettings((current) => ({
                         ...current,
-                        tolerance: clampInteger(rawValue === '' ? 0 : Number(rawValue), 0, 100),
+                        tolerance: clampInteger(rawValue === '' ? 1 : Number(rawValue), 1, 100),
                       }))
                     }
                     onStep={(direction) =>
                       setRunSettings((current) => ({
                         ...current,
-                        tolerance: clampInteger(current.tolerance + direction, 0, 100),
+                        tolerance: clampInteger(current.tolerance + direction, 1, 100),
                       }))
                     }
                     value={runSettings.tolerance}
@@ -2955,18 +3154,33 @@ function AnalysisScreen({
                   <AnalysisStepperInput
                     ariaLabel="sample fps"
                     className="analysis-parameter-input short"
+                    max={sampleFpsGuardrail.maxSampleFps}
                     min={1}
                     onChange={(rawValue) =>
-                      setRunSettings((current) => ({
-                        ...current,
-                        sample_fps: rawValue ? clampInteger(Number(rawValue), 1) : null,
-                      }))
+                      setRunSettings((current) =>
+                        clampRunSettingsForRecording(
+                          {
+                            ...current,
+                            sample_fps: rawValue
+                              ? clampInteger(Number(rawValue), 1, sampleFpsGuardrail.maxSampleFps)
+                              : sampleFpsGuardrail.sourceFpsAvailable
+                                ? null
+                                : sampleFpsGuardrail.maxSampleFps,
+                          },
+                          selectedRecordingSummary?.fps ?? null,
+                        ),
+                      )
                     }
                     onStep={(direction) =>
-                      setRunSettings((current) => ({
-                        ...current,
-                        sample_fps: clampInteger((current.sample_fps ?? 1) + direction, 1),
-                      }))
+                      setRunSettings((current) =>
+                        clampRunSettingsForRecording(
+                          {
+                            ...current,
+                            sample_fps: clampInteger((current.sample_fps ?? 1) + direction, 1, sampleFpsGuardrail.maxSampleFps),
+                          },
+                          selectedRecordingSummary?.fps ?? null,
+                        ),
+                      )
                     }
                     value={runSettings.sample_fps ?? ''}
                   />
@@ -3014,6 +3228,65 @@ function AnalysisScreen({
               </label>
             </div>
 
+            <div className="analysis-mode-row" {...bindHint('allow_high_fps_sampling')}>
+              <span>high-fps sampling</span>
+              <div className="analysis-parameter-control">
+                <div className="analysis-mode-toggle">
+                  <button
+                    className={`analysis-mode-button ${runSettings.allow_high_fps_sampling ? '' : 'active'}`}
+                    onClick={() =>
+                      setRunSettings((current) =>
+                        clampRunSettingsForRecording(
+                          {
+                            ...current,
+                            allow_high_fps_sampling: false,
+                          },
+                          selectedRecordingSummary?.fps ?? null,
+                        ),
+                      )
+                    }
+                    type="button"
+                  >
+                    off
+                  </button>
+                  <button
+                    className={`analysis-mode-button ${runSettings.allow_high_fps_sampling ? 'active' : ''}`}
+                    onClick={() =>
+                      setRunSettings((current) =>
+                        clampRunSettingsForRecording(
+                          {
+                            ...current,
+                            allow_high_fps_sampling: true,
+                          },
+                          selectedRecordingSummary?.fps ?? null,
+                        ),
+                      )
+                    }
+                    type="button"
+                  >
+                    on
+                  </button>
+                </div>
+              </div>
+              {isHighFpsDirty && (
+                <AnalysisResetDiamondButton
+                  className="outside"
+                  label="high-fps sampling"
+                  onClick={() =>
+                    setRunSettings((current) =>
+                      clampRunSettingsForRecording(
+                        {
+                          ...current,
+                          allow_high_fps_sampling: projectDefaultSettings.allow_high_fps_sampling,
+                        },
+                        selectedRecordingSummary?.fps ?? null,
+                      ),
+                    )
+                  }
+                />
+              )}
+            </div>
+
             <div className="analysis-mode-row" {...bindHint('detector_mode')}>
               <span>detector mode</span>
               <div className="analysis-parameter-control">
@@ -3048,6 +3321,24 @@ function AnalysisScreen({
               <span className="analysis-parallel-value">across videos only</span>
             </div>
             <p className="analysis-parallel-copy">Different videos can process in parallel. Each video keeps one active task at a time.</p>
+
+            <div className="analysis-guidance-block">
+              <p className="analysis-guidance-copy">
+                If steps are missing, raise sample fps first, then lower tolerance, then lower minimum scene gaps. Use extract
+                offset only to improve screenshot timing.
+              </p>
+              {showHighFpsWarning ? (
+                <p className="analysis-guidance-copy warning">
+                  This video is {sampleFpsGuardrail.sourceFpsCeiling} fps. Turn on high-fps sampling to use source fps or go above
+                  30 fps.
+                </p>
+              ) : null}
+              {showLowCandidateHint ? (
+                <p className="analysis-guidance-copy warning">
+                  This run found very few scenes. Try higher sample fps first, then lower tolerance or minimum scene gaps.
+                </p>
+              ) : null}
+            </div>
 
             <div className="analysis-param-footer">
               <button
@@ -3161,6 +3452,47 @@ function AnalysisScreen({
             <div className="analysis-lower-column">
               {previewVideoUrl ? (
                 <section className="analysis-panel analysis-preview-panel" id="analysis-video-preview">
+                  <div className="analysis-preview-head">
+                    <div className="analysis-preview-meta-wrap">
+                      <span className="analysis-preview-meta">
+                        {previewRecording?.filename} · {formatPlaybackTimestamp(previewPlaybackMs)}
+                      </span>
+                      {canAddManualCandidate ? (
+                        <span className="analysis-preview-mark-copy">
+                          {pendingManualMarkTimestampMs !== null
+                            ? `marking ${formatPlaybackTimestamp(pendingManualMarkTimestampMs)}…`
+                            : 'marks the current frame immediately'}
+                        </span>
+                      ) : null}
+                    </div>
+                    {canAddManualCandidate ? (
+                      <button
+                        className="analysis-pill success analysis-preview-mark-button"
+                        disabled={createManualCandidatePending}
+                        onClick={(event) => {
+                          if (event.detail !== 0) {
+                            return;
+                          }
+                          void handleCreateManualCandidate();
+                        }}
+                        onPointerDown={(event) => {
+                          if (event.button !== 0) {
+                            return;
+                          }
+                          event.preventDefault();
+                          const timestampMs = getCurrentPreviewTimestampMs();
+                          if (timestampMs === null) {
+                            return;
+                          }
+                          void handleCreateManualCandidate(timestampMs);
+                        }}
+                        title="Mark the current preview frame as a new step."
+                        type="button"
+                      >
+                        {createManualCandidatePending ? 'marking…' : 'mark step (K)'}
+                      </button>
+                    ) : null}
+                  </div>
                   <video
                     className="analysis-preview-video"
                     controls
@@ -3331,7 +3663,7 @@ function AnalysisScreen({
                         />
                       ) : null}
                       {timelineCandidates.map((candidate) => {
-                        const tooltip = `candidate ${candidate.detector_index} • ${candidate.timestamp_tc} • ${candidate.status}`;
+                        const tooltip = `${candidate.candidate_origin === 'manual' ? 'manual' : 'candidate'} ${candidate.detector_index} • ${candidate.timestamp_tc} • ${candidate.status}`;
                         return (
                           <button
                             aria-label={tooltip}
@@ -3347,6 +3679,16 @@ function AnalysisScreen({
                           />
                         );
                       })}
+                      {pendingManualMarkTimestampMs !== null ? (
+                        <span
+                          aria-hidden="true"
+                          className="candidate-timeline-pin pending manual-pending active"
+                          data-tooltip={`marking step • ${formatPlaybackTimestamp(pendingManualMarkTimestampMs)}`}
+                          style={{
+                            left: `${Math.min(100, Math.max(0, (pendingManualMarkTimestampMs / Math.max(1, selectedRecordingSummary?.duration_ms ?? 1)) * 100))}%`,
+                          }}
+                        />
+                      ) : null}
                     </div>
                   </div>
                 ) : null}
@@ -3731,8 +4073,11 @@ function CandidateCard({
       <div className="candidate-body">
         <div className="candidate-headline">
           <div className="candidate-heading-copy">
-            <strong className="candidate-title">candidate {candidate.detector_index}</strong>
-            <span className={`candidate-status-copy ${candidate.status}`}>{candidate.status}</span>
+            <strong className="candidate-title">{candidate.candidate_origin === 'manual' ? 'manual step' : 'candidate'} {candidate.detector_index}</strong>
+            <div className="candidate-heading-meta">
+              <span className={`candidate-status-copy ${candidate.status}`}>{candidate.status}</span>
+              {candidate.candidate_origin === 'manual' ? <span className="candidate-origin-copy">manual</span> : null}
+            </div>
           </div>
           <div className="candidate-decision-row">
             <CandidateDecisionButton

@@ -1483,6 +1483,23 @@ a {
   font-size: 12px;
 }
 
+.analysis-guidance-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analysis-guidance-copy {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.analysis-guidance-copy.warning {
+  color: #cd6d1e;
+}
+
 .analysis-mode-button {
   color: rgba(0, 0, 0, 0.6);
   font-size: 14px;
@@ -1640,6 +1657,44 @@ a {
   min-height: 0;
   padding: 0;
   background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.analysis-preview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.analysis-preview-meta-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.analysis-preview-meta {
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.analysis-preview-mark-copy {
+  color: rgba(0, 0, 0, 0.54);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.analysis-preview-mark-button {
+  min-width: 122px;
+  justify-content: center;
+  align-self: flex-start;
 }
 
 .analysis-panel-copy {
@@ -2573,6 +2628,11 @@ button:disabled {
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
 }
 
+.candidate-timeline-pin.manual-pending {
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(72, 175, 124, 0.24);
+}
+
 .candidate-timeline-pin::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -2746,6 +2806,13 @@ button:disabled {
   min-width: 0;
 }
 
+.candidate-heading-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .candidate-title {
   color: #000;
   font-size: 14px;
@@ -2765,6 +2832,12 @@ button:disabled {
 
 .candidate-status-copy.rejected {
   color: #bf2725;
+}
+
+.candidate-origin-copy {
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .candidate-decision-row {

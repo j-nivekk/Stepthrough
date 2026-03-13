@@ -133,6 +133,14 @@ export function updateCandidate(
   });
 }
 
+export function createManualCandidate(runId: string, timestampMs: number): Promise<CandidateFrame> {
+  return request<CandidateFrame>(`/runs/${runId}/candidates/manual`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ timestamp_ms: timestampMs }),
+  });
+}
+
 export function exportRun(runId: string, mode: ExportMode = 'accepted'): Promise<ExportBundle> {
   return request<ExportBundle>(`/runs/${runId}/export`, {
     method: 'POST',

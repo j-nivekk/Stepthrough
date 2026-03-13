@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import shutil
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,7 @@ from .models import (
     DetectionRunDetail,
     DetectionRunSummary,
     HealthResponse,
+    ManualCandidateCreate,
     ProjectCreate,
     ProjectResponse,
     ProjectUpdate,
@@ -65,12 +67,15 @@ from .services.detection import (
 )
 from .services.export import build_accepted_steps, create_export_bundle
 from .services.jobs import JobManager
+from .services.similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string
 from .services.video import (
     VideoToolError,
     display_timecode,
+    extract_frame,
     probe_video,
     recording_slug_from_filename,
     save_upload_file,
+    slug_timecode,
 )
 from .storage import (
     absolute_data_path,
@@ -141,6 +146,7 @@ def _serialize_run_summary(row: dict) -> DetectionRunSummary:
         tolerance=row["tolerance"],
         min_scene_gap_ms=row["min_scene_gap_ms"],
         sample_fps=row["sample_fps"],
+        allow_high_fps_sampling=bool(row.get("allow_high_fps_sampling")),
         extract_offset_ms=row["extract_offset_ms"],
         progress=row["progress"],
         message=row.get("message"),
@@ -179,6 +185,7 @@ def _serialize_candidate(row: dict) -> CandidateFrameResponse:
         run_id=row["run_id"],
         recording_id=row["recording_id"],
         detector_index=row["detector_index"],
+        candidate_origin=row.get("candidate_origin") or "detected",
         timestamp_ms=row["timestamp_ms"],
         timestamp_tc=row["timestamp_tc"],
         image_path=row["image_path"],
@@ -299,6 +306,59 @@ def _apply_candidate_paths(candidates: list[dict[str, Any]], frames_path: Path) 
     return normalized
 
 
+def _sample_fps_guardrail(recording_fps: float, allow_high_fps_sampling: bool) -> tuple[int, bool]:
+    source_ceiling = max(1, math.ceil(recording_fps or 30))
+    if allow_high_fps_sampling:
+        return source_ceiling, True
+    return min(30, source_ceiling), source_ceiling <= 30
+
+
+def _validate_run_settings_for_recording(recording: dict[str, Any], settings: RunSettings) -> None:
+    max_sample_fps, source_allowed = _sample_fps_guardrail(recording["fps"], settings.allow_high_fps_sampling)
+    if settings.sample_fps is None:
+        if not source_allowed:
+            raise HTTPException(
+                status_code=422,
+                detail="Source-fps sampling for recordings above 30 fps requires high-fps sampling to be enabled.",
+            )
+        return
+
+    if settings.sample_fps > max_sample_fps:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Sample fps must be {max_sample_fps} or lower for this recording.",
+        )
+
+
+def _resequence_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    ordered_candidates = sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate["timestamp_ms"],
+            candidate.get("detector_index", 0),
+            1 if candidate.get("candidate_origin") == "manual" else 0,
+            candidate["id"],
+        ),
+    )
+    updated_at = utc_now()
+    normalized: list[dict[str, Any]] = []
+    for index, candidate in enumerate(ordered_candidates, start=1):
+        normalized.append(
+            {
+                **candidate,
+                "detector_index": index,
+                "candidate_origin": candidate.get("candidate_origin") or "detected",
+                "timestamp_tc": display_timecode(candidate["timestamp_ms"]),
+                "scene_score": 0.0,
+                "revisit_group_id": None,
+                "similar_to_candidate_id": None,
+                "similarity_distance": None,
+                "updated_at": updated_at,
+            }
+        )
+    return annotate_candidate_similarity(normalized)
+
+
 def _run_artifact_paths(project: dict, recording: dict, run_id: str) -> tuple[Path, Path]:
     current_run_dir = run_dir(project["slug"], project["id"], recording["slug"], recording["id"], run_id)
     return current_run_dir, current_run_dir / "frames"
@@ -313,6 +373,7 @@ def _run_detection_job(run_id: str, *, stage: str = "primary") -> None:
             tolerance=run["tolerance"],
             min_scene_gap_ms=run["min_scene_gap_ms"],
             sample_fps=run["sample_fps"],
+            allow_high_fps_sampling=bool(run.get("allow_high_fps_sampling")),
             detector_mode=run["detector_mode"],
             extract_offset_ms=run["extract_offset_ms"],
         )
@@ -553,6 +614,7 @@ def runs_create(recording_id: str, settings: RunSettings) -> DetectionRunSummary
     recording = get_recording(recording_id)
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
+    _validate_run_settings_for_recording(recording, settings)
     run = create_run(recording_id, settings)
     _emit_run_event(run["id"], phase="queued", level="info", message="Run queued", progress=0.0)
     _job_manager().start(run["id"], lambda: _run_detection_job(run["id"], stage="primary"))
@@ -662,6 +724,66 @@ def candidates_update(candidate_id: str, payload: CandidateUpdate) -> CandidateF
         updates["notes"] = updates["notes"].strip() or None
     candidate = update_candidate(candidate_id, **updates)
     return _serialize_candidate(candidate)
+
+
+@app.post("/runs/{run_id}/candidates/manual", response_model=CandidateFrameResponse)
+def runs_add_manual_candidate(run_id: str, payload: ManualCandidateCreate) -> CandidateFrameResponse:
+    project, recording, run = _run_context(run_id)
+    if run["status"] not in {"completed", "failed", "cancelled"}:
+        raise HTTPException(status_code=409, detail="Manual steps can only be added to completed, failed, or cancelled runs")
+    if payload.timestamp_ms >= recording["duration_ms"]:
+        raise HTTPException(status_code=422, detail="Manual step timestamp must be inside the recording duration")
+
+    current_run_dir, frames_path = _run_artifact_paths(project, recording, run_id)
+    current_run_dir.mkdir(parents=True, exist_ok=True)
+    frames_path.mkdir(parents=True, exist_ok=True)
+
+    candidate_id = uuid4().hex
+    timestamp_ms = payload.timestamp_ms
+    timestamp_tc = display_timecode(timestamp_ms)
+    image_path = frames_path / f"manual-{candidate_id[:8]}__{slug_timecode(timestamp_ms)}.png"
+
+    try:
+        extract_frame(absolute_data_path(recording["source_path"]), image_path, timestamp_ms)
+        fingerprint = fingerprint_image(image_path)
+    except (VideoToolError, FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=500, detail=f"Could not add a manual step at {timestamp_tc}. Try seeking to a nearby frame.") from exc
+    now = utc_now()
+    manual_candidate = {
+        "id": candidate_id,
+        "run_id": run_id,
+        "recording_id": recording["id"],
+        "detector_index": 0,
+        "candidate_origin": "manual",
+        "timestamp_ms": timestamp_ms,
+        "timestamp_tc": timestamp_tc,
+        "image_path": relative_data_path(image_path),
+        "scene_score": 0.0,
+        "status": "pending",
+        "title": None,
+        "notes": None,
+        "image_hash": hash_to_hex(fingerprint.ahash),
+        "histogram_signature": histogram_to_string(fingerprint.histogram),
+        "revisit_group_id": None,
+        "similar_to_candidate_id": None,
+        "similarity_distance": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    updated_candidates = _resequence_candidates([*list_candidates(run_id), manual_candidate])
+    replace_candidates(run_id, recording["id"], updated_candidates)
+    clear_export_bundle_for_run(run_id)
+    update_run(run_id, candidate_count=len(updated_candidates))
+    _emit_run_event(
+        run_id,
+        phase=run.get("phase") or "completed",
+        level="info",
+        message=f"Added manual step at {timestamp_tc}",
+        progress=run.get("progress"),
+    )
+    manual_row = next(candidate for candidate in list_candidates(run_id) if candidate["id"] == candidate_id)
+    return _serialize_candidate(manual_row)
 
 
 @app.post("/runs/{run_id}/export")
