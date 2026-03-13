@@ -80,6 +80,11 @@ interface AnalysisTaskItem {
   run: RunSummary;
 }
 
+interface PendingManualMark {
+  id: string;
+  timestampMs: number;
+}
+
 type AnalysisHintKey =
   | 'allow_high_fps_sampling'
   | 'detector_mode'
@@ -2313,7 +2318,8 @@ function AnalysisScreen({
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [activeCandidateFilter, setActiveCandidateFilter] = useState<CandidateFilter>('all');
   const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
-  const [pendingManualMarkTimestampMs, setPendingManualMarkTimestampMs] = useState<number | null>(null);
+  const [queuedManualMarkItems, setQueuedManualMarkItems] = useState<PendingManualMark[]>([]);
+  const [manualCapturePulseToken, setManualCapturePulseToken] = useState(0);
   const [expandedAnnotationCandidateId, setExpandedAnnotationCandidateId] = useState<string | null>(null);
   const [exportNameDraft, setExportNameDraft] = useState('');
   const [previewPlaybackMs, setPreviewPlaybackMs] = useState(0);
@@ -2328,6 +2334,7 @@ function AnalysisScreen({
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const saveMenuRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
+  const activeManualMarkIdRef = useRef<string | null>(null);
 
   const previewVideoUrl = previewRecording ? absoluteApiUrl(previewRecording.source_url) : null;
   const sampleFpsGuardrail = getSampleFpsGuardrail(selectedRecordingSummary?.fps ?? null, runSettings.allow_high_fps_sampling);
@@ -2453,7 +2460,9 @@ function AnalysisScreen({
   }, [selectedRun?.summary.id]);
 
   useEffect(() => {
-    setPendingManualMarkTimestampMs(null);
+    setQueuedManualMarkItems([]);
+    activeManualMarkIdRef.current = null;
+    setManualCapturePulseToken(0);
   }, [selectedRun?.summary.id]);
 
   useEffect(() => {
@@ -2495,6 +2504,27 @@ function AnalysisScreen({
     }
     setActiveCandidateId(filteredCandidates[0].id);
   }, [activeCandidateId, filteredCandidates]);
+
+  useEffect(() => {
+    if (!selectedRun || !queuedManualMarkItems.length) {
+      return;
+    }
+    if (activeManualMarkIdRef.current) {
+      return;
+    }
+
+    const nextMark = queuedManualMarkItems[0];
+    activeManualMarkIdRef.current = nextMark.id;
+
+    void (async () => {
+      try {
+        await onCreateManualCandidate(selectedRun.summary.id, nextMark.timestampMs);
+      } finally {
+        activeManualMarkIdRef.current = null;
+        setQueuedManualMarkItems((current) => current.filter((item) => item.id !== nextMark.id));
+      }
+    })();
+  }, [onCreateManualCandidate, queuedManualMarkItems, selectedRun]);
 
   useEffect(() => {
     if (!selectedRun || selectedRun.summary.status !== 'completed') {
@@ -2689,7 +2719,7 @@ function AnalysisScreen({
     return Math.max(0, Math.round(clampedSeconds * 1000));
   }
 
-  async function handleCreateManualCandidate(timestampOverrideMs?: number) {
+  function handleCreateManualCandidate(timestampOverrideMs?: number) {
     if (!selectedRun || !canAddManualCandidate) {
       return;
     }
@@ -2698,13 +2728,8 @@ function AnalysisScreen({
     if (timestampMs === null) {
       return;
     }
-    setPendingManualMarkTimestampMs(timestampMs);
-    try {
-      await onCreateManualCandidate(selectedRun.summary.id, timestampMs);
-      setPendingManualMarkTimestampMs(null);
-    } catch {
-      setPendingManualMarkTimestampMs(null);
-    }
+    setManualCapturePulseToken((current) => current + 1);
+    setQueuedManualMarkItems((current) => [...current, { id: createLocalId('manual-mark'), timestampMs }]);
   }
 
   function handleToggleCandidateAnnotation(candidateId: string) {
@@ -3458,22 +3483,18 @@ function AnalysisScreen({
                         {previewRecording?.filename} · {formatPlaybackTimestamp(previewPlaybackMs)}
                       </span>
                       {canAddManualCandidate ? (
-                        <span className="analysis-preview-mark-copy">
-                          {pendingManualMarkTimestampMs !== null
-                            ? `marking ${formatPlaybackTimestamp(pendingManualMarkTimestampMs)}…`
-                            : 'marks the current frame immediately'}
-                        </span>
+                        <span className="analysis-preview-mark-copy">click anywhere in the button or press K to mark the current frame</span>
                       ) : null}
                     </div>
                     {canAddManualCandidate ? (
                       <button
-                        className="analysis-pill success analysis-preview-mark-button"
-                        disabled={createManualCandidatePending}
+                        className="analysis-preview-mark-button"
+                        aria-busy={createManualCandidatePending || queuedManualMarkItems.length > 0}
                         onClick={(event) => {
                           if (event.detail !== 0) {
                             return;
                           }
-                          void handleCreateManualCandidate();
+                          handleCreateManualCandidate();
                         }}
                         onPointerDown={(event) => {
                           if (event.button !== 0) {
@@ -3484,12 +3505,22 @@ function AnalysisScreen({
                           if (timestampMs === null) {
                             return;
                           }
-                          void handleCreateManualCandidate(timestampMs);
+                          handleCreateManualCandidate(timestampMs);
                         }}
                         title="Mark the current preview frame as a new step."
                         type="button"
                       >
-                        {createManualCandidatePending ? 'marking…' : 'mark step (K)'}
+                        {manualCapturePulseToken > 0 ? (
+                          <span aria-hidden="true" className="analysis-preview-mark-pulse" key={manualCapturePulseToken} />
+                        ) : null}
+                        <span className="analysis-preview-mark-main">
+                          <span className="analysis-preview-mark-title">mark step</span>
+                          <span className="analysis-preview-mark-subtitle">captures this moment immediately while the video plays</span>
+                        </span>
+                        <span className="analysis-preview-mark-shortcut">K</span>
+                        {queuedManualMarkItems.length > 0 ? (
+                          <span className="analysis-preview-mark-queue">{queuedManualMarkItems.length}</span>
+                        ) : null}
                       </button>
                     ) : null}
                   </div>
@@ -3679,16 +3710,17 @@ function AnalysisScreen({
                           />
                         );
                       })}
-                      {pendingManualMarkTimestampMs !== null ? (
+                      {queuedManualMarkItems.map((item) => (
                         <span
                           aria-hidden="true"
                           className="candidate-timeline-pin pending manual-pending active"
-                          data-tooltip={`marking step • ${formatPlaybackTimestamp(pendingManualMarkTimestampMs)}`}
+                          data-tooltip={`manual mark • ${formatPlaybackTimestamp(item.timestampMs)}`}
+                          key={item.id}
                           style={{
-                            left: `${Math.min(100, Math.max(0, (pendingManualMarkTimestampMs / Math.max(1, selectedRecordingSummary?.duration_ms ?? 1)) * 100))}%`,
+                            left: `${Math.min(100, Math.max(0, (item.timestampMs / Math.max(1, selectedRecordingSummary?.duration_ms ?? 1)) * 100))}%`,
                           }}
                         />
-                      ) : null}
+                      ))}
                     </div>
                   </div>
                 ) : null}
