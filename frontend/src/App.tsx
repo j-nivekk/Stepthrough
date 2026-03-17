@@ -63,6 +63,7 @@ const workflowViewportMinimums: Record<WorkflowStage, { height: number; width: n
 
 type SimilarLink = { targetId: string; label: string };
 type WorkflowStage = 'projects' | 'import' | 'analysis';
+type ProjectEntryTarget = Exclude<WorkflowStage, 'projects'>;
 type ImportQueueStatus = 'pending' | 'uploading' | 'uploaded' | 'error';
 
 interface ImportQueueItem {
@@ -78,6 +79,11 @@ interface ImportQueueItem {
 interface AnalysisTaskItem {
   recording: RecordingSummary;
   run: RunSummary;
+}
+
+interface AnalysisTaskGroup {
+  recording: RecordingSummary;
+  runs: AnalysisTaskItem[];
 }
 
 interface PendingManualMark {
@@ -96,6 +102,7 @@ type AnalysisHintKey =
   | 'sample_fps'
   | 'save'
   | 'tolerance';
+type AnalysisPopoverKey = 'export' | 'load' | 'preset' | 'reset' | 'save';
 type AnalysisTaskFilter = 'all' | 'active' | 'completed' | 'failed';
 type CandidateFilter = CandidateStatus | 'all';
 
@@ -103,6 +110,21 @@ const workflowStages: WorkflowStage[] = ['projects', 'import', 'analysis'];
 const activeRunStatuses: RunSummary['status'][] = ['queued', 'running'];
 const candidateFilters: CandidateFilter[] = ['all', 'pending', 'accepted', 'rejected'];
 const analysisTaskFilters: AnalysisTaskFilter[] = ['all', 'active', 'completed', 'failed'];
+const commonAspectRatios = [
+  { height: 9, label: '16:9', width: 16 },
+  { height: 16, label: '9:16', width: 9 },
+  { height: 3, label: '4:3', width: 4 },
+  { height: 4, label: '3:4', width: 3 },
+  { height: 2, label: '3:2', width: 3 },
+  { height: 3, label: '2:3', width: 2 },
+  { height: 1, label: '1:1', width: 1 },
+  { height: 9, label: '19.5:9', width: 19.5 },
+  { height: 19.5, label: '9:19.5', width: 9 },
+  { height: 9, label: '18:9', width: 18 },
+  { height: 18, label: '9:18', width: 9 },
+  { height: 4, label: '5:4', width: 5 },
+  { height: 5, label: '4:5', width: 4 },
+];
 const analysisResetStarPoints = Array.from({ length: 34 }, (_value, index) => {
   const angle = -Math.PI / 2 + (Math.PI * index) / 17;
   const radiusX = index % 2 === 0 ? 43 : 35;
@@ -227,8 +249,9 @@ function mapToleranceToDetectorThreshold(tolerance: number, detectorMode: RunSet
 function describeTolerance(tolerance: number, detectorMode: RunSettings['detector_mode']): string {
   const threshold = mapToleranceToDetectorThreshold(tolerance, detectorMode);
   const thresholdLabel = detectorMode === 'adaptive' ? `Adaptive threshold ${threshold}.` : `Content threshold ${threshold}.`;
+  
   if (tolerance <= 25) {
-    return `${thresholdLabel} Very sensitive. Lower this when keyboard changes, small badges, or brief sheets are being missed.`;
+    return `${thresholdLabel} Very sensitive. Lower this when keyboard changes, small badges, or brief sheets are being missed. Interacts closely with sample fps.`;
   }
   if (tolerance <= 60) {
     return `${thresholdLabel} Balanced. Good default for most walkthrough recordings. Lower it to catch subtler screens, raise it if typing or scrolling creates noise.`;
@@ -236,17 +259,39 @@ function describeTolerance(tolerance: number, detectorMode: RunSettings['detecto
   return `${thresholdLabel} Conservative. Raise this when scrolling or tiny motion creates too many candidates. Lower it if real screens are being missed.`;
 }
 
-function describeSampleFps(sampleFps: number | null): string {
+function describeSampleFps(sampleFps: number | null, sourceFps: number | null): string {
   if (!sampleFps) {
-    return 'No custom sampling limit. Raise this when brief overlays, menus, or quick transitions are being missed.';
+    return 'Processing every available frame from the source video.';
   }
-  if (sampleFps <= 3) {
-    return 'Light sampling for faster processing. Increase it for brief overlays, keyboards, or quick menu states.';
+  let skipText = '';
+  if (sourceFps) {
+    const skip = Math.max(1, Math.round(sourceFps / sampleFps));
+    skipText = skip > 1 ? ` (~every ${ordinal(skip)} frame)` : ' (~every frame)';
   }
-  if (sampleFps <= 8) {
-    return 'Moderate sampling that works well for most recordings. Raise it if short-lived states are missed, lower it if runs get noisy or slow.';
+  return `Sampling ~${sampleFps} fps from the source video${skipText}. Raise this when brief overlays, menus, or quick transitions are being missed.`;
+}
+
+function describeDetectorMode(mode: RunSettings['detector_mode']): string {
+  if (mode === 'adaptive') {
+    return 'Compares against a rolling average of recent frames. Better for fading UI menus. Adaptive threshold scales from 1 to 7.';
   }
-  return 'Dense sampling for rapid interactions. Lower it if scrolling produces too many near-duplicate candidates or processing becomes heavy.';
+  return 'Strictly compares against the immediately previous sampled frame. Better for cuts and hard UI changes. Content threshold scales from 8 to 48.';
+}
+
+function describeMinSceneGap(minSceneGapMs: number): string {
+  if (minSceneGapMs === 0) {
+    return '0ms limits candidates loosely based only on timeline offsets rather than enforcing hard breaks.';
+  }
+  const seconds = (minSceneGapMs / 1000).toFixed(1).replace(/\.0$/, '');
+  return `${minSceneGapMs}ms (~${seconds}s) on the original timeline. Minimum required time gap between detected scene candidates.`;
+}
+
+function describeExtractOffset(offsetMs: number): string {
+  if (offsetMs === 0) {
+    return 'Extracts exactly on the first frame of a suspected new scene candidate.';
+  }
+  const seconds = (offsetMs / 1000).toFixed(1).replace(/\.0$/, '');
+  return `Skips ahead ${offsetMs}ms (${seconds}s) past the detection cut to pull the screenshot, avoiding mid-animation frames.`;
 }
 
 function getSampleFpsGuardrail(recordingFps: number | null | undefined, allowHighFpsSampling: boolean) {
@@ -287,31 +332,7 @@ function areRunSettingsEqual(left: RunSettings, right: RunSettings): boolean {
   );
 }
 
-function describeDetectorMode(mode: RunSettings['detector_mode']): string {
-  return mode === 'adaptive'
-    ? 'Adaptive is better when scrolling or motion dominates the video. Switch here if movement keeps triggering false scenes.'
-    : 'Content is the best starting point for tap-driven UI recordings. Stay here unless scrolling or motion is the main source of noise.';
-}
 
-function describeMinSceneGap(minSceneGapMs: number): string {
-  if (minSceneGapMs <= 350) {
-    return 'Tight spacing. Lower values help catch fast back-to-back screens, but may create more adjacent duplicates.';
-  }
-  if (minSceneGapMs <= 900) {
-    return 'Balanced spacing. Lower it if quick navigation steps are being merged, raise it if scrolling creates clusters of similar screenshots.';
-  }
-  return 'Wide spacing. Raise this when one interaction produces too many nearby screenshots. Lower it if rapid state changes are being skipped.';
-}
-
-function describeExtractOffset(extractOffsetMs: number): string {
-  if (extractOffsetMs <= 150) {
-    return 'Early capture. Raise this if screenshots are caught mid-animation, blurred, or between interface states.';
-  }
-  if (extractOffsetMs <= 400) {
-    return 'Balanced for most mobile interfaces. Raise it for animations, lower it if brief overlays disappear before capture.';
-  }
-  return 'Late capture after a detected change. Lower this if short-lived menus, banners, or sheets vanish before the screenshot is taken.';
-}
 
 function formatRunSettingsSummary(settings: RunSettings): string {
   return [
@@ -336,6 +357,100 @@ function serializeRunPresetText(settings: RunSettings): string {
     `High-fps sampling: ${settings.allow_high_fps_sampling ? 'Enabled' : 'Disabled'}`,
     `Extract offset: ${settings.extract_offset_ms} ms`,
   ].join('\n');
+}
+
+function parseRunPresetText(rawText: string): { error: string } | { settings: RunSettings } {
+  const normalizedLines = rawText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!normalizedLines.length) {
+    return { error: 'Paste a Stepthrough preset block to apply it.' };
+  }
+
+  const lines =
+    normalizedLines[0]?.toLowerCase() === 'stepthrough detection preset'
+      ? normalizedLines.slice(1)
+      : normalizedLines;
+
+  const fieldValues = new Map<string, string>();
+  const supportedFields = new Set([
+    'mode',
+    'tolerance',
+    'min scene gap',
+    'sample fps',
+    'high-fps sampling',
+    'extract offset',
+  ]);
+
+  for (const line of lines) {
+    const separatorIndex = line.indexOf(':');
+    if (separatorIndex === -1) {
+      return { error: `Couldn't parse "${line}". Use "Label: Value" lines.` };
+    }
+
+    const label = line.slice(0, separatorIndex).trim().toLowerCase();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (!supportedFields.has(label)) {
+      return { error: `Couldn't parse "${line}".` };
+    }
+    if (!value) {
+      return { error: `Add a value for "${label}".` };
+    }
+    if (fieldValues.has(label)) {
+      return { error: `"${label}" is listed more than once.` };
+    }
+
+    fieldValues.set(label, value);
+  }
+
+  const missingFields = [...supportedFields].filter((label) => !fieldValues.has(label));
+  if (missingFields.length) {
+    return { error: `Preset text is missing ${missingFields.join(', ')}.` };
+  }
+
+  const modeValue = fieldValues.get('mode')!.toLowerCase();
+  if (modeValue !== 'content' && modeValue !== 'adaptive') {
+    return { error: 'Mode must be Content or Adaptive.' };
+  }
+
+  const toleranceValue = fieldValues.get('tolerance')!;
+  if (!/^-?\d+$/.test(toleranceValue)) {
+    return { error: 'Tolerance must be a whole number.' };
+  }
+
+  const minSceneGapValue = fieldValues.get('min scene gap')!;
+  if (!/^-?\d+\s*ms$/i.test(minSceneGapValue)) {
+    return { error: 'Min scene gap must end with "ms".' };
+  }
+
+  const sampleFpsValue = fieldValues.get('sample fps')!;
+  if (!/^source stream$/i.test(sampleFpsValue) && !/^-?\d+$/.test(sampleFpsValue)) {
+    return { error: 'Sample fps must be a whole number or "Source stream".' };
+  }
+
+  const highFpsValue = fieldValues.get('high-fps sampling')!.toLowerCase();
+  if (highFpsValue !== 'enabled' && highFpsValue !== 'disabled') {
+    return { error: 'High-fps sampling must be Enabled or Disabled.' };
+  }
+
+  const extractOffsetValue = fieldValues.get('extract offset')!;
+  if (!/^-?\d+\s*ms$/i.test(extractOffsetValue)) {
+    return { error: 'Extract offset must end with "ms".' };
+  }
+
+  return {
+    settings: sanitizeRunSettings({
+      detector_mode: modeValue,
+      tolerance: Number.parseInt(toleranceValue, 10),
+      min_scene_gap_ms: Number.parseInt(minSceneGapValue, 10),
+      sample_fps: /^source stream$/i.test(sampleFpsValue) ? null : Number.parseInt(sampleFpsValue, 10),
+      allow_high_fps_sampling: highFpsValue === 'enabled',
+      extract_offset_ms: Number.parseInt(extractOffsetValue, 10),
+    }),
+  };
 }
 
 function formatPercent(progress: number): string {
@@ -400,6 +515,79 @@ function formatProjectCounts(project: Project): string {
   return `${videoLabel} • ${runLabel}`;
 }
 
+function greatestCommonDivisor(left: number, right: number): number {
+  let a = Math.abs(Math.round(left));
+  let b = Math.abs(Math.round(right));
+  while (b !== 0) {
+    const remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+  return a || 1;
+}
+
+function formatAspectRatio(width: number, height: number): string {
+  if (!width || !height) {
+    return 'unknown';
+  }
+
+  const normalizedRatio = width / height;
+  const closestCommonRatio = commonAspectRatios.find((ratio) => Math.abs(normalizedRatio - ratio.width / ratio.height) <= 0.03);
+  if (closestCommonRatio) {
+    return closestCommonRatio.label;
+  }
+
+  const divisor = greatestCommonDivisor(width, height);
+  return `${Math.round(width / divisor)}:${Math.round(height / divisor)}`;
+}
+
+function formatRecordingContextBadge(recording: RecordingSummary): string {
+  return `${recording.width}×${recording.height} · ${formatAspectRatio(recording.width, recording.height)}`;
+}
+
+function formatRunShortTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+
+  const now = new Date();
+  const includeYear = date.getFullYear() !== now.getFullYear();
+  return date.toLocaleString([], {
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    month: 'short',
+    ...(includeYear ? { year: 'numeric' as const } : {}),
+  });
+}
+
+function formatRelativeTime(timestamp: string, nowMs: number): string {
+  const parsedTimestamp = new Date(timestamp).getTime();
+  if (Number.isNaN(parsedTimestamp)) {
+    return timestamp;
+  }
+
+  const deltaMs = Math.max(0, nowMs - parsedTimestamp);
+  const minuteMs = 60 * 1000;
+  const hourMs = 60 * minuteMs;
+  const dayMs = 24 * hourMs;
+
+  if (deltaMs < minuteMs) {
+    return 'just now';
+  }
+  if (deltaMs < hourMs) {
+    return `${Math.floor(deltaMs / minuteMs)}m ago`;
+  }
+  if (deltaMs < dayMs) {
+    return `${Math.floor(deltaMs / hourMs)}h ago`;
+  }
+  if (deltaMs < 7 * dayMs) {
+    return `${Math.floor(deltaMs / dayMs)}d ago`;
+  }
+  return formatRunShortTimestamp(timestamp);
+}
+
 function jumpToAnchor(anchorId: string): void {
   if (typeof document === 'undefined') {
     return;
@@ -434,6 +622,12 @@ function clampInteger(value: number, min?: number, max?: number): number {
     nextValue = Math.min(max, nextValue);
   }
   return nextValue;
+}
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
 function triggerDownload(url: string): void {
@@ -667,6 +861,7 @@ function App() {
   const [projectName, setProjectName] = useState('');
   const [workflowStage, setWorkflowStage] = useState<WorkflowStage>('projects');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [pendingAnalysisProjectId, setPendingAnalysisProjectId] = useState<string | null>(null);
   const [selectedRecordingId, setSelectedRecordingId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runSettings, setRunSettings] = useState<RunSettings>(defaultRunSettings);
@@ -728,6 +923,7 @@ function App() {
       setSettingsFeedback('');
       setImportQueue([]);
       setImportSelectionFeedback('');
+      setPendingAnalysisProjectId(null);
       setPreviewRecordingId(null);
       setWorkflowStage('projects');
       return;
@@ -759,6 +955,31 @@ function App() {
     }
     setImportQueue((current) => syncImportQueueWithRecordings(current, projectDetailQuery.data?.recordings ?? []));
   }, [projectDetailQuery.data?.recordings, selectedProjectId]);
+
+  useEffect(() => {
+    if (!pendingAnalysisProjectId || pendingAnalysisProjectId !== selectedProjectId) {
+      return;
+    }
+
+    const recordings = projectDetailQuery.data?.recordings ?? [];
+    if (recordings.length > 0) {
+      setSelectedRecordingId(recordings[0].id);
+      setSelectedRunId(null);
+      setPendingAnalysisProjectId(null);
+      return;
+    }
+
+    if (projectDetailQuery.isFetched && !projectDetailQuery.isFetching) {
+      setWorkflowStage('import');
+      setPendingAnalysisProjectId(null);
+    }
+  }, [
+    pendingAnalysisProjectId,
+    projectDetailQuery.data?.recordings,
+    projectDetailQuery.isFetched,
+    projectDetailQuery.isFetching,
+    selectedProjectId,
+  ]);
 
   useEffect(() => {
     if (!importSelectionFeedback) {
@@ -825,7 +1046,7 @@ function App() {
     mutationFn: createProject,
     onSuccess: (project) => {
       setProjectName('');
-      enterProject(project.id);
+      openProject(project.id, 'import');
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['project', project.id] });
     },
@@ -1007,6 +1228,11 @@ function App() {
     },
     onSuccess: ({ runId }) => {
       queryClient.invalidateQueries({ queryKey: ['run', runId] });
+      const task = analysisTaskItemByRunId.get(runId);
+      if (task) {
+        queryClient.invalidateQueries({ queryKey: ['recording', task.run.recording_id] });
+        queryClient.invalidateQueries({ queryKey: ['recording', task.run.recording_id, 'analysis'] });
+      }
     },
     onError: (error: Error) => setAppError(error.message),
   });
@@ -1015,6 +1241,8 @@ function App() {
     return projectsQuery.data?.find((project) => project.id === selectedProjectId) ?? null;
   }, [projectsQuery.data, selectedProjectId]);
   const activeProject = projectDetailQuery.data?.project ?? selectedProject;
+  const selectedProjectSummary = activeProject?.id === selectedProjectId ? activeProject : selectedProject;
+  const selectedProjectCanJumpToAnalysis = Boolean(selectedProjectSummary?.recording_count);
   const hasSelectedProject = Boolean(selectedProjectId);
   const activeViewportStage: WorkflowStage = workflowStage === 'projects' || !hasSelectedProject ? 'projects' : workflowStage;
   const viewportMinimum = workflowViewportMinimums[activeViewportStage];
@@ -1040,6 +1268,10 @@ function App() {
   const presetText = useMemo(() => serializeRunPresetText(runSettings), [runSettings]);
   const uploadedImportItems = useMemo(() => getUploadedImportItems(importQueue), [importQueue]);
   const canCompleteImport = uploadedImportItems.length > 0;
+  const analysisRecordingsLoading =
+    workflowStage === 'analysis' &&
+    pendingAnalysisProjectId === selectedProjectId &&
+    (!projectDetailQuery.data || projectDetailQuery.data.recordings.length === 0);
   const analysisTaskItems = useMemo<AnalysisTaskItem[]>(() => {
     return projectRecordings
       .flatMap((recording, index) => {
@@ -1143,11 +1375,13 @@ function App() {
     setAnalysisActionMessage('');
   }
 
-  function enterProject(projectId: string) {
+  function openProject(projectId: string, targetStage: ProjectEntryTarget) {
     setSelectedProjectId(projectId);
+    setPendingAnalysisProjectId(targetStage === 'analysis' ? projectId : null);
     setSelectedRecordingId(null);
     setSelectedRunId(null);
-    setWorkflowStage('import');
+    setPreviewRecordingId(null);
+    setWorkflowStage(targetStage);
     clearAnalysisMessages();
   }
 
@@ -1206,14 +1440,21 @@ function App() {
     setSettingsFeedback('Saved the current settings as universal defaults.');
   }
 
-  function handleLoadProjectDefaults() {
-    setRunSettings(effectiveProjectDefaultSettings);
-    setSettingsFeedback("Loaded this project's defaults.");
+  function applyAnalysisSettings(nextSettings: RunSettings, feedback: string) {
+    setRunSettings(clampRunSettingsForRecording(sanitizeRunSettings(nextSettings), selectedRecordingSummary?.fps ?? null));
+    setSettingsFeedback(feedback);
   }
 
   function handleResetToProjectDefaults() {
-    setRunSettings({ ...effectiveProjectDefaultSettings });
-    setSettingsFeedback("Reset the current settings to this project's defaults.");
+    applyAnalysisSettings(effectiveProjectDefaultSettings, "Reset the current settings to this project's defaults.");
+  }
+
+  function handleResetToUniversalDefaults() {
+    applyAnalysisSettings(globalPreset?.settings ?? defaultRunSettings, 'Reset the current settings to the universal defaults.');
+  }
+
+  function handleApplyImportedPreset(settings: RunSettings) {
+    applyAnalysisSettings(settings, 'Applied preset text to the active analysis parameters.');
   }
 
   async function handleCreateManualRunCandidate(runId: string, timestampMs: number) {
@@ -1263,16 +1504,28 @@ function App() {
 
   function setProjectStage(stage: WorkflowStage) {
     if (stage === 'projects') {
+      setPendingAnalysisProjectId(null);
       setWorkflowStage('projects');
       return;
     }
-    if (stage === 'import') {
-      if (!selectedProjectId) {
+    if (!selectedProjectId) {
+      return;
+    }
+
+    if (workflowStage === 'projects') {
+      if (stage === 'analysis' && !selectedProjectCanJumpToAnalysis) {
         return;
       }
+      openProject(selectedProjectId, stage);
+      return;
+    }
+
+    if (stage === 'import') {
+      setPendingAnalysisProjectId(null);
       setWorkflowStage('import');
       return;
     }
+
     handleNavigateToAnalysis(true);
   }
 
@@ -1388,6 +1641,7 @@ function App() {
 
     const persistedRows = uploadedRows;
     const nextRecordingId = persistedRows[persistedRows.length - 1]?.recordingId ?? projectDetailQuery.data?.recordings[0]?.id ?? null;
+    setPendingAnalysisProjectId(null);
     setImportQueue(persistedRows);
     setSelectedRecordingId(nextRecordingId);
     setSelectedRunId(null);
@@ -1397,6 +1651,53 @@ function App() {
   async function handleExportRun(runId: string, mode: ExportMode, downloadName?: string): Promise<void> {
     clearAnalysisMessages();
     await exportRunMutation.mutateAsync({ downloadName, mode, runId });
+    setAnalysisActionMessage(mode === 'accepted' ? 'Exported accepted steps.' : 'Exported all steps.');
+  }
+
+  async function handleBulkUpdateCandidates(
+    runId: string,
+    recordingId: string,
+    candidateIds: string[],
+    status: CandidateStatus,
+  ): Promise<string[]> {
+    const uniqueCandidateIds = Array.from(new Set(candidateIds));
+    if (!uniqueCandidateIds.length) {
+      return [];
+    }
+
+    clearAnalysisMessages();
+
+    const results = await Promise.allSettled(uniqueCandidateIds.map((candidateId) => updateCandidate(candidateId, { status })));
+    const failedCandidateIds: string[] = [];
+
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        return;
+      }
+      failedCandidateIds.push(uniqueCandidateIds[index]);
+    });
+
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['run', runId] }),
+      queryClient.invalidateQueries({ queryKey: ['recording', recordingId] }),
+      queryClient.invalidateQueries({ queryKey: ['recording', recordingId, 'analysis'] }),
+    ]);
+
+    const successCount = uniqueCandidateIds.length - failedCandidateIds.length;
+    if (successCount > 0) {
+      setAnalysisActionMessage(
+        `${status === 'accepted' ? 'Accepted' : status === 'rejected' ? 'Rejected' : 'Updated'} ${successCount} ${
+          successCount === 1 ? 'candidate' : 'candidates'
+        }.`,
+      );
+    }
+    if (failedCandidateIds.length > 0) {
+      setAppError(
+        `Could not update ${failedCandidateIds.length === 1 ? '1 selected candidate' : `${failedCandidateIds.length} selected candidates`}.`,
+      );
+    }
+
+    return failedCandidateIds;
   }
 
   async function handleExportTaskRuns(runIds: string[]): Promise<void> {
@@ -1584,12 +1885,13 @@ function App() {
           isCreating={createProjectMutation.isPending}
           onCreate={handleCreateProject}
           onNavigateStage={setProjectStage}
+          onOpenProject={openProject}
           onProjectNameChange={setProjectName}
           onRenameProject={handleRenameProject}
-          onSelectProject={enterProject}
           projectName={projectName}
           projects={projectsQuery.data ?? []}
           projectsLoading={projectsQuery.isLoading}
+          selectedProjectCanJumpToAnalysis={selectedProjectCanJumpToAnalysis}
           selectedProjectId={selectedProjectId}
         />
         <AppWatermark />
@@ -1644,19 +1946,21 @@ function App() {
         healthWarning={Boolean(healthWarning)}
         liveMessage={liveMessage}
         onAbortRun={(runId) => abortRunMutation.mutate(runId)}
+        onBulkUpdateCandidates={handleBulkUpdateCandidates}
         onDeleteRecording={confirmDeleteRecording}
         onDeleteSelectedRuns={handleDeleteSelectedRuns}
         onCreateManualCandidate={handleCreateManualRunCandidate}
         onDismissFallback={(runId) => dismissFallbackMutation.mutate(runId)}
+        onApplyImportedPreset={handleApplyImportedPreset}
         onExportRun={handleExportRun}
         onExportTaskRuns={handleExportTaskRuns}
         onJumpToSelection={handleJumpToAnalysisSelection}
-        onLoadProjectPreset={handleLoadProjectDefaults}
         onNavigateStage={setProjectStage}
         onPreviewRecording={handlePreviewRecording}
         onRenameProject={handleRenameProject}
         onRenameRecording={handleRenameRecording}
-        onResetPreset={handleResetToProjectDefaults}
+        onResetToProjectDefaults={handleResetToProjectDefaults}
+        onResetToUniversalDefaults={handleResetToUniversalDefaults}
         onSaveProjectPreset={handleSaveProjectDefault}
         onSaveUniversalPreset={handleSaveBrowserDefault}
         onSelectRecording={handleSelectRecording}
@@ -1667,6 +1971,7 @@ function App() {
         previewRecording={previewRecording}
         projectDefaultSettings={effectiveProjectDefaultSettings}
         recordings={projectRecordings}
+        recordingsLoading={analysisRecordingsLoading}
         selectedRecording={selectedRecording}
         selectedRecordingId={selectedRecordingId}
         selectedRecordingSummary={selectedRecordingSummary}
@@ -1688,12 +1993,13 @@ interface EntryScreenProps {
   isCreating: boolean;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
   onNavigateStage: (stage: WorkflowStage) => void;
+  onOpenProject: (projectId: string, targetStage: ProjectEntryTarget) => void;
   onProjectNameChange: (value: string) => void;
   onRenameProject: (projectId: string, name: string) => Promise<void>;
-  onSelectProject: (projectId: string) => void;
   projectName: string;
   projects: Project[];
   projectsLoading: boolean;
+  selectedProjectCanJumpToAnalysis: boolean;
   selectedProjectId: string | null;
 }
 
@@ -1740,19 +2046,21 @@ interface AnalysisScreenProps {
   healthWarning: boolean;
   liveMessage: string;
   onAbortRun: (runId: string) => void;
+  onBulkUpdateCandidates: (runId: string, recordingId: string, candidateIds: string[], status: CandidateStatus) => Promise<string[]>;
   onCreateManualCandidate: (runId: string, timestampMs: number) => Promise<CandidateFrame>;
   onDeleteRecording: (recordingId: string, filename: string) => void;
   onDeleteSelectedRuns: (runIds: string[]) => Promise<string[] | null>;
+  onApplyImportedPreset: (settings: RunSettings) => void;
   onDismissFallback: (runId: string) => void;
   onExportRun: (runId: string, mode: ExportMode, downloadName?: string) => Promise<void>;
   onExportTaskRuns: (runIds: string[]) => Promise<void>;
   onJumpToSelection: () => void;
-  onLoadProjectPreset: () => void;
   onNavigateStage: (stage: WorkflowStage) => void;
   onPreviewRecording: (recordingId: string) => void;
   onRenameProject: (projectId: string, name: string) => Promise<void>;
   onRenameRecording: (recordingId: string, filename: string) => Promise<void>;
-  onResetPreset: () => void;
+  onResetToProjectDefaults: () => void;
+  onResetToUniversalDefaults: () => void;
   onSaveProjectPreset: () => void;
   onSaveUniversalPreset: () => void;
   onSelectRecording: (recordingId: string) => void;
@@ -1763,6 +2071,7 @@ interface AnalysisScreenProps {
   previewRecording: RecordingSummary | null;
   projectDefaultSettings: RunSettings;
   recordings: RecordingSummary[];
+  recordingsLoading: boolean;
   runSettings: RunSettings;
   selectedRecording: RecordingDetail | null;
   selectedRecordingId: string | null;
@@ -1813,16 +2122,18 @@ function AnalysisResetDiamondButton({ className, label, onClick }: AnalysisReset
 }
 
 interface AnalysisStarResetButtonProps {
+  expanded?: boolean;
   onClick: () => void;
 }
 
-function AnalysisStarResetButton({ onClick }: AnalysisStarResetButtonProps) {
+function AnalysisStarResetButton({ expanded = false, onClick }: AnalysisStarResetButtonProps) {
   return (
     <button
-      aria-label="Reset all analysis parameters to defaults"
+      aria-label="Open reset defaults menu"
+      aria-expanded={expanded}
       className="analysis-star-reset"
       onClick={onClick}
-      title="Reset all analysis parameters to defaults"
+      title="Open reset defaults menu"
       type="button"
     >
       <svg aria-hidden="true" className="analysis-star-reset-shape" viewBox="0 0 92 32">
@@ -2276,7 +2587,9 @@ function AnalysisScreen({
   healthMessage,
   healthWarning,
   liveMessage,
+  onApplyImportedPreset,
   onAbortRun,
+  onBulkUpdateCandidates,
   onCreateManualCandidate,
   onDeleteRecording,
   onDeleteSelectedRuns,
@@ -2284,12 +2597,12 @@ function AnalysisScreen({
   onExportRun,
   onExportTaskRuns,
   onJumpToSelection,
-  onLoadProjectPreset,
   onNavigateStage,
   onPreviewRecording,
   onRenameProject,
   onRenameRecording,
-  onResetPreset,
+  onResetToProjectDefaults,
+  onResetToUniversalDefaults,
   onSaveProjectPreset,
   onSaveUniversalPreset,
   onSelectRecording,
@@ -2300,6 +2613,7 @@ function AnalysisScreen({
   previewRecording,
   projectDefaultSettings,
   recordings,
+  recordingsLoading,
   runSettings,
   selectedRecording,
   selectedRecordingId,
@@ -2314,14 +2628,17 @@ function AnalysisScreen({
   const [taskFilter, setTaskFilter] = useState<AnalysisTaskFilter>('all');
   const [taskSelectMode, setTaskSelectMode] = useState(false);
   const [videoRenameRequest, setVideoRenameRequest] = useState<{ id: string; nonce: number } | null>(null);
-  const [showSaveMenu, setShowSaveMenu] = useState(false);
-  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [openPopover, setOpenPopover] = useState<AnalysisPopoverKey | null>(null);
   const [activeCandidateFilter, setActiveCandidateFilter] = useState<CandidateFilter>('all');
   const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
+  const [bulkCandidatePending, setBulkCandidatePending] = useState(false);
   const [queuedManualMarkItems, setQueuedManualMarkItems] = useState<PendingManualMark[]>([]);
   const [manualCapturePulseToken, setManualCapturePulseToken] = useState(0);
   const [expandedAnnotationCandidateId, setExpandedAnnotationCandidateId] = useState<string | null>(null);
   const [exportNameDraft, setExportNameDraft] = useState('');
+  const [presetImportDraft, setPresetImportDraft] = useState('');
+  const [presetImportError, setPresetImportError] = useState('');
   const [previewPlaybackMs, setPreviewPlaybackMs] = useState(0);
   const [showRunLogs, setShowRunLogs] = useState(false);
   const [presetCopyFeedback, setPresetCopyFeedback] = useState('');
@@ -2333,6 +2650,9 @@ function AnalysisScreen({
   const parameterColumnRef = useRef<HTMLElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const saveMenuRef = useRef<HTMLDivElement | null>(null);
+  const loadMenuRef = useRef<HTMLDivElement | null>(null);
+  const resetMenuRef = useRef<HTMLDivElement | null>(null);
+  const presetMenuRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const activeManualMarkIdRef = useRef<string | null>(null);
 
@@ -2340,15 +2660,15 @@ function AnalysisScreen({
   const sampleFpsGuardrail = getSampleFpsGuardrail(selectedRecordingSummary?.fps ?? null, runSettings.allow_high_fps_sampling);
   const hintCopy: Record<AnalysisHintKey, string> = {
     allow_high_fps_sampling: sampleFpsGuardrail.isHighFpsRecording
-      ? `Turn this on to sample above 30 fps or use source fps for this ${sampleFpsGuardrail.sourceFpsCeiling} fps recording.`
+      ? `Turn this on to sample above 30 fps or use source fps for this ~${sampleFpsGuardrail.sourceFpsCeiling} fps recording.`
       : 'Use this only when you need denser sampling on recordings above 30 fps.',
     detector_mode: describeDetectorMode(runSettings.detector_mode),
     extract_offset_ms: describeExtractOffset(runSettings.extract_offset_ms),
-    load: 'Load this project\'s saved defaults into the active analysis parameters.',
+    load: 'Paste Stepthrough preset text to load a saved parameter set into the active analysis controls.',
     min_scene_gap_ms: describeMinSceneGap(runSettings.min_scene_gap_ms),
-    reset: 'Reset the current analysis parameters back to this project\'s defaults.',
+    reset: 'Reset the current analysis parameters to this project or universal defaults.',
     run: 'Start a new analysis task for the selected video using the current parameter set.',
-    sample_fps: describeSampleFps(runSettings.sample_fps),
+    sample_fps: describeSampleFps(runSettings.sample_fps, selectedRecordingSummary?.fps ?? null),
     save: 'Save the current analysis parameters for this project or as universal defaults.',
     tolerance: describeTolerance(runSettings.tolerance, runSettings.detector_mode),
   };
@@ -2388,6 +2708,59 @@ function AnalysisScreen({
     }
     return analysisTaskItems.filter((item) => ['failed', 'cancelled'].includes(item.run.status));
   }, [analysisTaskItems, taskFilter]);
+  const runNumberById = useMemo(() => {
+    const nextMap = new Map<string, number>();
+    const itemsByRecordingId = new Map<string, AnalysisTaskItem[]>();
+
+    analysisTaskItems.forEach((item) => {
+      const bucket = itemsByRecordingId.get(item.recording.id);
+      if (bucket) {
+        bucket.push(item);
+        return;
+      }
+      itemsByRecordingId.set(item.recording.id, [item]);
+    });
+
+    itemsByRecordingId.forEach((items) => {
+      items
+        .slice()
+        .sort((left, right) => new Date(left.run.created_at).getTime() - new Date(right.run.created_at).getTime())
+        .forEach((item, index) => {
+          nextMap.set(item.run.id, index + 1);
+        });
+    });
+
+    return nextMap;
+  }, [analysisTaskItems]);
+  const groupedTaskItems = useMemo<AnalysisTaskGroup[]>(() => {
+    const groups = new Map<string, AnalysisTaskGroup>();
+
+    filteredAnalysisTaskItems.forEach((item) => {
+      const existingGroup = groups.get(item.recording.id);
+      if (existingGroup) {
+        existingGroup.runs.push(item);
+        return;
+      }
+
+      groups.set(item.recording.id, {
+        recording: item.recording,
+        runs: [item],
+      });
+    });
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        runs: group.runs
+          .slice()
+          .sort((left, right) => new Date(right.run.created_at).getTime() - new Date(left.run.created_at).getTime()),
+      }))
+      .sort((left, right) => {
+        const leftTimestamp = new Date(left.runs[0]?.run.created_at ?? 0).getTime();
+        const rightTimestamp = new Date(right.runs[0]?.run.created_at ?? 0).getTime();
+        return rightTimestamp - leftTimestamp;
+      });
+  }, [filteredAnalysisTaskItems]);
   const candidateCounts = useMemo(() => {
     const candidates = selectedRun?.candidates ?? [];
     return {
@@ -2415,6 +2788,12 @@ function AnalysisScreen({
     }
     return selectedRun.candidates.find((candidate) => candidate.id === activeCandidateId) ?? null;
   }, [activeCandidateId, selectedRun]);
+  const selectablePendingCandidateIds = useMemo(() => {
+    return new Set(filteredCandidates.filter((candidate) => candidate.status === 'pending').map((candidate) => candidate.id));
+  }, [filteredCandidates]);
+  const selectedPendingCandidateIds = useMemo(() => {
+    return selectedCandidateIds.filter((candidateId) => selectablePendingCandidateIds.has(candidateId));
+  }, [selectedCandidateIds, selectablePendingCandidateIds]);
   const canShowTimeline =
     Boolean(
       isCompletedReview &&
@@ -2424,6 +2803,16 @@ function AnalysisScreen({
     );
   const canExportAccepted = Boolean(selectedRun && selectedRun.summary.status === 'completed' && selectedRun.accepted_steps.length > 0);
   const canExportAll = Boolean(selectedRun && selectedRun.summary.status === 'completed' && selectedRun.candidates.length > 0);
+  const selectedRunExportLabel = useMemo(() => {
+    if (!selectedRun?.summary.export_bundle_id) {
+      return null;
+    }
+    if (selectedRun.export_bundle?.created_at) {
+      return `last exported ${formatRelativeTime(selectedRun.export_bundle.created_at, taskClockMs)}`;
+    }
+    return 'exported';
+  }, [selectedRun, taskClockMs]);
+  const resolvedExportFilenamePreview = normalizeZipFilename(exportNameDraft);
 
   useEffect(() => {
     if (!expandedTaskRunId) {
@@ -2439,6 +2828,10 @@ function AnalysisScreen({
   }, [analysisTaskItems]);
 
   useEffect(() => {
+    setSelectedCandidateIds((current) => current.filter((candidateId) => selectablePendingCandidateIds.has(candidateId)));
+  }, [selectablePendingCandidateIds]);
+
+  useEffect(() => {
     if (!showHints) {
       setFocusedHintKey(null);
       setHoveredHintKey(null);
@@ -2447,8 +2840,16 @@ function AnalysisScreen({
   }, [showHints]);
 
   useEffect(() => {
+    if (!focusedHintKey && !hoveredHintKey) {
+      setHintCardPosition(null);
+    }
+  }, [focusedHintKey, hoveredHintKey]);
+
+  useEffect(() => {
     setActiveCandidateFilter(canReviewCandidates ? 'all' : 'pending');
     setExpandedAnnotationCandidateId(null);
+    setSelectedCandidateIds([]);
+    setBulkCandidatePending(false);
   }, [canReviewCandidates, selectedRun?.summary.id]);
 
   useEffect(() => {
@@ -2456,7 +2857,7 @@ function AnalysisScreen({
   }, [selectedRun?.summary.id]);
 
   useEffect(() => {
-    setShowExportMenu(false);
+    setOpenPopover((current) => (current === 'export' ? null : current));
   }, [selectedRun?.summary.id]);
 
   useEffect(() => {
@@ -2466,22 +2867,27 @@ function AnalysisScreen({
   }, [selectedRun?.summary.id]);
 
   useEffect(() => {
-    if (!showSaveMenu && !showExportMenu) {
+    if (!openPopover) {
       return;
     }
 
     function handlePointerDown(event: MouseEvent) {
       const target = event.target as Node;
-      if (saveMenuRef.current?.contains(target) || exportMenuRef.current?.contains(target)) {
+      if (
+        saveMenuRef.current?.contains(target) ||
+        loadMenuRef.current?.contains(target) ||
+        resetMenuRef.current?.contains(target) ||
+        presetMenuRef.current?.contains(target) ||
+        exportMenuRef.current?.contains(target)
+      ) {
         return;
       }
-      setShowSaveMenu(false);
-      setShowExportMenu(false);
+      setOpenPopover(null);
     }
 
     window.addEventListener('pointerdown', handlePointerDown);
     return () => window.removeEventListener('pointerdown', handlePointerDown);
-  }, [showExportMenu, showSaveMenu]);
+  }, [openPopover]);
 
   useEffect(() => {
     setPreviewPlaybackMs(0);
@@ -2542,6 +2948,15 @@ function AnalysisScreen({
     const timeoutId = globalThis.setTimeout(() => setPresetCopyFeedback(''), 1800);
     return () => globalThis.clearTimeout(timeoutId);
   }, [presetCopyFeedback]);
+
+  useEffect(() => {
+    if (openPopover !== 'load' && presetImportError) {
+      setPresetImportError('');
+    }
+    if (openPopover !== 'preset' && presetCopyFeedback) {
+      setPresetCopyFeedback('');
+    }
+  }, [openPopover, presetCopyFeedback, presetImportError]);
 
   useEffect(() => {
     const intervalId = globalThis.setInterval(() => setTaskClockMs(Date.now()), 1000);
@@ -2638,7 +3053,6 @@ function AnalysisScreen({
     return {
       onBlur: () => {
         setFocusedHintKey((current) => (current === key ? null : current));
-        setHintCardPosition(null);
       },
       onFocus: (event: React.FocusEvent<HTMLElement>) => {
         updateHintCardPosition(event.currentTarget);
@@ -2646,13 +3060,41 @@ function AnalysisScreen({
       },
       onMouseEnter: (event: React.MouseEvent<HTMLElement>) => {
         updateHintCardPosition(event.currentTarget);
+        setFocusedHintKey(null);
         setHoveredHintKey(key);
       },
       onMouseLeave: () => {
         setHoveredHintKey((current) => (current === key ? null : current));
-        setHintCardPosition(null);
       },
     };
+  }
+
+  function togglePopover(key: AnalysisPopoverKey) {
+    setOpenPopover((current) => (current === key ? null : key));
+  }
+
+  function closePopover() {
+    setOpenPopover(null);
+  }
+
+  function handlePresetImportDraftChange(nextValue: string) {
+    setPresetImportDraft(nextValue);
+    if (presetImportError) {
+      setPresetImportError('');
+    }
+  }
+
+  function handleApplyImportedPreset() {
+    const parseResult = parseRunPresetText(presetImportDraft);
+    if ('error' in parseResult) {
+      setPresetImportError(parseResult.error);
+      return;
+    }
+
+    onApplyImportedPreset(parseResult.settings);
+    setPresetImportDraft('');
+    setPresetImportError('');
+    closePopover();
   }
 
   function toggleTaskSelection(runId: string) {
@@ -2682,7 +3124,7 @@ function AnalysisScreen({
       return;
     }
     await onExportRun(selectedRun.summary.id, mode, exportNameDraft);
-    setShowExportMenu(false);
+    closePopover();
   }
 
   async function handleCopyPresetText() {
@@ -2695,6 +3137,31 @@ function AnalysisScreen({
       setPresetCopyFeedback('copied');
     } catch {
       setPresetCopyFeedback('copy failed');
+    }
+  }
+
+  function toggleCandidateSelection(candidateId: string) {
+    setSelectedCandidateIds((current) =>
+      current.includes(candidateId) ? current.filter((value) => value !== candidateId) : [...current, candidateId],
+    );
+  }
+
+  async function handleBulkCandidateStatusChange(status: Extract<CandidateStatus, 'accepted' | 'rejected'>) {
+    if (!selectedRun || !selectedPendingCandidateIds.length) {
+      return;
+    }
+
+    setBulkCandidatePending(true);
+    try {
+      const failedCandidateIds = await onBulkUpdateCandidates(
+        selectedRun.summary.id,
+        selectedRun.summary.recording_id,
+        selectedPendingCandidateIds,
+        status,
+      );
+      setSelectedCandidateIds(failedCandidateIds);
+    } finally {
+      setBulkCandidatePending(false);
     }
   }
 
@@ -2757,6 +3224,9 @@ function AnalysisScreen({
 
   function handleCandidateStatusChange(candidate: CandidateFrame, status: CandidateStatus) {
     setActiveCandidateId(candidate.id);
+    if (status !== 'pending') {
+      setSelectedCandidateIds((current) => current.filter((candidateId) => candidateId !== candidate.id));
+    }
     onUpdateCandidate(candidate.id, { status });
     if (status === 'pending') {
       return;
@@ -2782,12 +3252,15 @@ function AnalysisScreen({
 
   function renderTaskRow(item: AnalysisTaskItem) {
     const run = item.run;
+    const runNumber = runNumberById.get(run.id) ?? 1;
     const isExpanded = expandedTaskRunId === run.id;
     const isSelected = selectedRun?.summary.id === run.id;
     const isMarked = selectedTaskRunIds.includes(run.id);
     const isError = run.status === 'failed';
     const isDone = run.status === 'completed';
     const hasCandidates = run.candidate_count > 0;
+    const hasExported = Boolean(run.export_bundle_id);
+    const runTimestampLabel = formatRunShortTimestamp(run.started_at ?? run.created_at);
     const actionButtons: Array<{ anchorId?: string; label: string; tone?: 'danger' | 'subtle' }> = [];
     const taskSettings = [
       { key: 'tolerance', label: 'tolerance', value: String(run.tolerance), isDirty: run.tolerance !== projectDefaultSettings.tolerance },
@@ -2847,15 +3320,19 @@ function AnalysisScreen({
                 <span className="analysis-task-select-copy">select task</span>
               </label>
             )}
-            <button
-              className={`analysis-task-title ${isError ? 'error' : ''}`}
-              onClick={() => onSelectRun(item.recording.id, run.id, 'analysis-run-detail')}
-              type="button"
-            >
-              {item.recording.filename}
-            </button>
+            <div className="analysis-task-title-wrap">
+              <button
+                className={`analysis-task-title ${isError ? 'error' : ''}`}
+                onClick={() => onSelectRun(item.recording.id, run.id, 'analysis-run-detail')}
+                type="button"
+              >
+                {`run #${runNumber}`}
+              </button>
+              <span className="analysis-task-subtitle">{runTimestampLabel}</span>
+            </div>
           </div>
           <div className="analysis-task-meta">
+            {hasExported ? <span className="analysis-task-export-badge">exported</span> : null}
             <span className={`analysis-task-progress ${isError ? 'error' : isDone ? 'success' : ''}`}>{progressLabel}</span>
             {elapsedLabel ? <span className="analysis-task-elapsed">{elapsedLabel}</span> : null}
             <button
@@ -2918,6 +3395,21 @@ function AnalysisScreen({
     );
   }
 
+  function renderTaskGroup(group: AnalysisTaskGroup) {
+    const visibleRunCountLabel = `${group.runs.length} ${group.runs.length === 1 ? 'run' : 'runs'}`;
+    return (
+      <div className="analysis-task-group" key={group.recording.id}>
+        <div className="analysis-task-group-header">
+          <span className="analysis-task-group-title" title={group.recording.filename}>
+            {group.recording.filename}
+          </span>
+          <span className="analysis-task-group-count">{visibleRunCountLabel}</span>
+        </div>
+        <div className="analysis-task-group-rows">{group.runs.map((item) => renderTaskRow(item))}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="entry-screen analysis-screen">
       <div className="analysis-stage-shell">
@@ -2953,7 +3445,7 @@ function AnalysisScreen({
         </div>
 
         {(healthMessage || appError || liveMessage || settingsFeedback || analysisActionMessage) && (
-          <div className="analysis-notices">
+          <div aria-atomic="true" aria-live="polite" className="analysis-notices" role="status">
             {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
             {appError && <p className="entry-notice error">{appError}</p>}
             {liveMessage && <p className="entry-notice">{liveMessage}</p>}
@@ -2990,7 +3482,10 @@ function AnalysisScreen({
                         textClassName="analysis-video-name-text"
                         value={recording.filename}
                       />
-                      <span className="analysis-video-duration">{recording.duration_tc}</span>
+                      <div className="analysis-video-meta">
+                        <span className="analysis-video-duration">{recording.duration_tc}</span>
+                        <span className="analysis-video-context-badge">{formatRecordingContextBadge(recording)}</span>
+                      </div>
                     </div>
                     <div className="analysis-video-actions">
                       <button
@@ -3023,7 +3518,7 @@ function AnalysisScreen({
                   </div>
                 );
               })}
-              {!recordings.length && <p className="entry-empty-copy">Uploaded videos will appear here.</p>}
+              {!recordings.length && <p className="entry-empty-copy">{recordingsLoading ? 'Loading videos…' : 'Uploaded videos will appear here.'}</p>}
             </div>
           </section>
 
@@ -3047,30 +3542,65 @@ function AnalysisScreen({
 
             <div className="analysis-param-actions">
               <div className="analysis-param-actions-left">
-                <button className="analysis-pill success" {...bindHint('load')} onClick={onLoadProjectPreset} type="button">
-                  load
-                </button>
-                <div className="analysis-save-shell" ref={saveMenuRef}>
+                <div className="analysis-toolbar-shell" ref={loadMenuRef}>
                   <button
-                    aria-expanded={showSaveMenu}
+                    aria-expanded={openPopover === 'load'}
+                    className="analysis-pill success"
+                    {...bindHint('load')}
+                    onClick={() => togglePopover('load')}
+                    type="button"
+                  >
+                    load
+                  </button>
+                  {openPopover === 'load' ? (
+                    <div className="analysis-toolbar-popover analysis-toolbar-popover-wide">
+                      <div className="analysis-toolbar-popover-head">
+                        <span>load preset text</span>
+                      </div>
+                      <p className="analysis-toolbar-copy">
+                        Paste preset text from Stepthrough to apply it to the active analysis controls.
+                      </p>
+                      <textarea
+                        aria-label="Load preset text"
+                        className="analysis-preset-import-field"
+                        onChange={(event) => handlePresetImportDraftChange(event.target.value)}
+                        onKeyDown={(event) => {
+                          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                            event.preventDefault();
+                            handleApplyImportedPreset();
+                          }
+                        }}
+                        placeholder={showPresetText}
+                        rows={8}
+                        value={presetImportDraft}
+                      />
+                      {presetImportError ? <p className="analysis-toolbar-feedback error">{presetImportError}</p> : null}
+                      <div className="analysis-toolbar-action-row">
+                        <button className="analysis-pill success" onClick={handleApplyImportedPreset} type="button">
+                          apply
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="analysis-toolbar-shell" ref={saveMenuRef}>
+                  <button
+                    aria-expanded={openPopover === 'save'}
                     className="analysis-pill analysis-pill-accent"
                     {...bindHint('save')}
-                    onClick={() => {
-                      setShowExportMenu(false);
-                      setShowSaveMenu((current) => !current);
-                    }}
+                    onClick={() => togglePopover('save')}
                     type="button"
                   >
                     save...
                   </button>
-                  {showSaveMenu ? (
-                    <div className="analysis-save-popover">
-                      <div className="analysis-save-option-list">
+                  {openPopover === 'save' ? (
+                    <div className="analysis-toolbar-popover">
+                      <div className="analysis-toolbar-option-list">
                         <button
                           className="analysis-task-link subtle"
                           onClick={() => {
                             onSaveProjectPreset();
-                            setShowSaveMenu(false);
+                            closePopover();
                           }}
                           type="button"
                         >
@@ -3080,7 +3610,7 @@ function AnalysisScreen({
                           className="analysis-task-link subtle"
                           onClick={() => {
                             onSaveUniversalPreset();
-                            setShowSaveMenu(false);
+                            closePopover();
                           }}
                           type="button"
                         >
@@ -3090,134 +3620,195 @@ function AnalysisScreen({
                     </div>
                   ) : null}
                 </div>
-                <details className="analysis-inline-details analysis-preset-details">
-                  <summary>preset text</summary>
-                  <div className="analysis-preset-card">
-                    <div className="analysis-preset-card-head">
-                      <span>preset text</span>
-                      <button className="analysis-task-link subtle" onClick={() => void handleCopyPresetText()} type="button">
-                        copy
+                <div className="analysis-toolbar-shell" ref={presetMenuRef}>
+                  <button
+                    aria-expanded={openPopover === 'preset'}
+                    className={`analysis-task-link subtle ${openPopover === 'preset' ? 'active' : ''}`}
+                    onClick={() => togglePopover('preset')}
+                    type="button"
+                  >
+                    preset text
+                  </button>
+                  {openPopover === 'preset' ? (
+                    <div className="analysis-toolbar-popover analysis-toolbar-popover-wide">
+                      <div className="analysis-toolbar-popover-head">
+                        <span>preset text</span>
+                        <button className="analysis-task-link subtle" onClick={() => void handleCopyPresetText()} type="button">
+                          copy
+                        </button>
+                      </div>
+                      <pre className="analysis-preset-preview">{showPresetText}</pre>
+                      {presetCopyFeedback ? <p className="analysis-toolbar-feedback">{presetCopyFeedback}</p> : null}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <div className="analysis-toolbar-shell analysis-toolbar-shell-right" ref={resetMenuRef} {...bindHint('reset')}>
+                <AnalysisStarResetButton expanded={openPopover === 'reset'} onClick={() => togglePopover('reset')} />
+                {openPopover === 'reset' ? (
+                  <div className="analysis-toolbar-popover analysis-toolbar-popover-purple analysis-toolbar-popover-right">
+                    <div className="analysis-toolbar-popover-head">
+                      <span>reset</span>
+                    </div>
+                    <p className="analysis-toolbar-copy">Choose which defaults should replace the active analysis parameters.</p>
+                    <div className="analysis-toolbar-option-list">
+                      <button
+                        className="analysis-task-link subtle"
+                        onClick={() => {
+                          onResetToProjectDefaults();
+                          closePopover();
+                        }}
+                        type="button"
+                      >
+                        reset to project defaults
+                      </button>
+                      <button
+                        className="analysis-task-link subtle"
+                        onClick={() => {
+                          onResetToUniversalDefaults();
+                          closePopover();
+                        }}
+                        type="button"
+                      >
+                        reset to universal defaults
                       </button>
                     </div>
-                    <pre className="preset-preview analysis-preset-preview">{showPresetText}</pre>
                   </div>
-                </details>
-              </div>
-              <div {...bindHint('reset')}>
-                <AnalysisStarResetButton onClick={onResetPreset} />
+                ) : null}
               </div>
             </div>
 
             <div className="analysis-parameter-box" id="analysis-parameters">
-              <label className="analysis-parameter-row" {...bindHint('tolerance')}>
-                <span>tolerance</span>
-                <div className="analysis-parameter-control">
-                  <AnalysisStepperInput
-                    ariaLabel="tolerance"
-                    className="analysis-parameter-input short"
-                    max={100}
-                    min={1}
-                    onChange={(rawValue) =>
-                      setRunSettings((current) => ({
-                        ...current,
-                        tolerance: clampInteger(rawValue === '' ? 1 : Number(rawValue), 1, 100),
-                      }))
-                    }
-                    onStep={(direction) =>
-                      setRunSettings((current) => ({
-                        ...current,
-                        tolerance: clampInteger(current.tolerance + direction, 1, 100),
-                      }))
-                    }
-                    value={runSettings.tolerance}
-                  />
-                </div>
-                {isToleranceDirty && (
-                  <AnalysisResetDiamondButton
-                    className="outside"
-                    label="tolerance"
-                    onClick={() => setRunSettings((current) => ({ ...current, tolerance: projectDefaultSettings.tolerance }))}
-                  />
-                )}
-              </label>
-              <label className="analysis-parameter-row" {...bindHint('min_scene_gap_ms')}>
-                <span>minimum scene gaps</span>
-                <div className="analysis-parameter-control">
-                  <div className="analysis-parameter-input-group">
+              <div className="analysis-parameter-group">
+                <label className="analysis-parameter-row" {...bindHint('tolerance')}>
+                  <span>tolerance</span>
+                  <div className="analysis-parameter-control">
                     <AnalysisStepperInput
-                      ariaLabel="minimum scene gaps"
-                      className="analysis-parameter-input long"
-                      min={0}
+                      ariaLabel="tolerance"
+                      className="analysis-parameter-input short"
+                      max={100}
+                      min={1}
                       onChange={(rawValue) =>
                         setRunSettings((current) => ({
                           ...current,
-                          min_scene_gap_ms: clampInteger(rawValue === '' ? 0 : Number(rawValue), 0),
+                          tolerance: clampInteger(rawValue === '' ? 1 : Number(rawValue), 1, 100),
                         }))
                       }
                       onStep={(direction) =>
                         setRunSettings((current) => ({
                           ...current,
-                          min_scene_gap_ms: clampInteger(current.min_scene_gap_ms + direction, 0),
+                          tolerance: clampInteger(current.tolerance + direction, 1, 100),
                         }))
                       }
-                      value={runSettings.min_scene_gap_ms}
+                      value={runSettings.tolerance}
                     />
-                    <span className="analysis-parameter-suffix">ms</span>
                   </div>
-                </div>
-                {isMinSceneGapDirty && (
-                  <AnalysisResetDiamondButton
-                    className="outside"
-                    label="minimum scene gaps"
-                    onClick={() => setRunSettings((current) => ({ ...current, min_scene_gap_ms: projectDefaultSettings.min_scene_gap_ms }))}
-                  />
-                )}
-              </label>
-              <label className="analysis-parameter-row" {...bindHint('sample_fps')}>
-                <span>sample fps</span>
-                <div className="analysis-parameter-control">
-                  <AnalysisStepperInput
-                    ariaLabel="sample fps"
-                    className="analysis-parameter-input short"
-                    max={sampleFpsGuardrail.maxSampleFps}
-                    min={1}
-                    onChange={(rawValue) =>
-                      setRunSettings((current) =>
-                        clampRunSettingsForRecording(
-                          {
+                  {isToleranceDirty && (
+                    <AnalysisResetDiamondButton
+                      className="outside"
+                      label="tolerance"
+                      onClick={() => setRunSettings((current) => ({ ...current, tolerance: projectDefaultSettings.tolerance }))}
+                    />
+                  )}
+                </label>
+                <span className="analysis-parameter-annotation">
+                  {runSettings.detector_mode === 'adaptive' ? 'adaptive' : 'content'} threshold: {mapToleranceToDetectorThreshold(runSettings.tolerance, runSettings.detector_mode)}
+                </span>
+              </div>
+              <div className="analysis-parameter-group">
+                <label className="analysis-parameter-row" {...bindHint('min_scene_gap_ms')}>
+                  <span>minimum scene gaps</span>
+                  <div className="analysis-parameter-control">
+                    <div className="analysis-parameter-input-group">
+                      <AnalysisStepperInput
+                        ariaLabel="minimum scene gaps"
+                        className="analysis-parameter-input long"
+                        min={0}
+                        onChange={(rawValue) =>
+                          setRunSettings((current) => ({
                             ...current,
-                            sample_fps: rawValue
-                              ? clampInteger(Number(rawValue), 1, sampleFpsGuardrail.maxSampleFps)
-                              : sampleFpsGuardrail.sourceFpsAvailable
-                                ? null
-                                : sampleFpsGuardrail.maxSampleFps,
-                          },
-                          selectedRecordingSummary?.fps ?? null,
-                        ),
-                      )
-                    }
-                    onStep={(direction) =>
-                      setRunSettings((current) =>
-                        clampRunSettingsForRecording(
-                          {
+                            min_scene_gap_ms: clampInteger(rawValue === '' ? 0 : Number(rawValue), 0),
+                          }))
+                        }
+                        onStep={(direction) =>
+                          setRunSettings((current) => ({
                             ...current,
-                            sample_fps: clampInteger((current.sample_fps ?? 1) + direction, 1, sampleFpsGuardrail.maxSampleFps),
-                          },
-                          selectedRecordingSummary?.fps ?? null,
-                        ),
-                      )
-                    }
-                    value={runSettings.sample_fps ?? ''}
-                  />
-                </div>
-                {isSampleFpsDirty && (
-                  <AnalysisResetDiamondButton
-                    className="outside"
-                    label="sample fps"
-                    onClick={() => setRunSettings((current) => ({ ...current, sample_fps: projectDefaultSettings.sample_fps }))}
-                  />
-                )}
-              </label>
+                            min_scene_gap_ms: clampInteger(current.min_scene_gap_ms + direction, 0),
+                          }))
+                        }
+                        value={runSettings.min_scene_gap_ms}
+                      />
+                      <span className="analysis-parameter-suffix">ms</span>
+                    </div>
+                  </div>
+                  {isMinSceneGapDirty && (
+                    <AnalysisResetDiamondButton
+                      className="outside"
+                      label="minimum scene gaps"
+                      onClick={() => setRunSettings((current) => ({ ...current, min_scene_gap_ms: projectDefaultSettings.min_scene_gap_ms }))}
+                    />
+                  )}
+                </label>
+                <span className="analysis-parameter-annotation">
+                  {(runSettings.min_scene_gap_ms / 1000).toFixed(1).replace(/\.0$/, '')}s on original timeline
+                </span>
+              </div>
+              <div className="analysis-parameter-group">
+                <label className="analysis-parameter-row" {...bindHint('sample_fps')}>
+                  <span>sample fps</span>
+                  <div className="analysis-parameter-control">
+                    <AnalysisStepperInput
+                      ariaLabel="sample fps"
+                      className="analysis-parameter-input short"
+                      max={sampleFpsGuardrail.maxSampleFps}
+                      min={1}
+                      onChange={(rawValue) =>
+                        setRunSettings((current) =>
+                          clampRunSettingsForRecording(
+                            {
+                              ...current,
+                              sample_fps: rawValue
+                                ? clampInteger(Number(rawValue), 1, sampleFpsGuardrail.maxSampleFps)
+                                : sampleFpsGuardrail.sourceFpsAvailable
+                                  ? null
+                                  : sampleFpsGuardrail.maxSampleFps,
+                            },
+                            selectedRecordingSummary?.fps ?? null,
+                          ),
+                        )
+                      }
+                      onStep={(direction) =>
+                        setRunSettings((current) =>
+                          clampRunSettingsForRecording(
+                            {
+                              ...current,
+                              sample_fps: clampInteger((current.sample_fps ?? 1) + direction, 1, sampleFpsGuardrail.maxSampleFps),
+                            },
+                            selectedRecordingSummary?.fps ?? null,
+                          ),
+                        )
+                      }
+                      value={runSettings.sample_fps ?? ''}
+                    />
+                  </div>
+                  {isSampleFpsDirty && (
+                    <AnalysisResetDiamondButton
+                      className="outside"
+                      label="sample fps"
+                      onClick={() => setRunSettings((current) => ({ ...current, sample_fps: projectDefaultSettings.sample_fps }))}
+                    />
+                  )}
+                </label>
+                <span className="analysis-parameter-annotation">
+                  {(() => {
+                    const sourceFps = selectedRecordingSummary?.fps ?? null;
+                    const sampleFps = runSettings.sample_fps;
+                    if (!sampleFps || !sourceFps) return sourceFps ? `every frame (~${Math.round(sourceFps)} fps source)` : null;
+                    const skip = Math.max(1, Math.round(sourceFps / sampleFps));
+                    return skip > 1 ? `~every ${ordinal(skip)} frame (~${Math.round(sourceFps)} fps source)` : `every frame (~${Math.round(sourceFps)} fps source)`;
+                  })()}
+                </span>
+              </div>
               <label className="analysis-parameter-row" {...bindHint('extract_offset_ms')}>
                 <span>extract offset</span>
                 <div className="analysis-parameter-control">
@@ -3312,40 +3903,42 @@ function AnalysisScreen({
               )}
             </div>
 
-            <div className="analysis-mode-row" {...bindHint('detector_mode')}>
-              <span>detector mode</span>
-              <div className="analysis-parameter-control">
-                <div className="analysis-mode-toggle">
-                  <button
-                    className={`analysis-mode-button ${runSettings.detector_mode === 'content' ? 'active' : ''}`}
-                    onClick={() => setRunSettings((current) => ({ ...current, detector_mode: 'content' }))}
-                    type="button"
-                  >
-                    content
-                  </button>
-                  <button
-                    className={`analysis-mode-button ${runSettings.detector_mode === 'adaptive' ? 'active' : ''}`}
-                    onClick={() => setRunSettings((current) => ({ ...current, detector_mode: 'adaptive' }))}
-                    type="button"
-                  >
-                    adaptive
-                  </button>
+            <div className="analysis-parameter-group">
+              <div className="analysis-mode-row" {...bindHint('detector_mode')}>
+                <span>detector mode</span>
+                <div className="analysis-parameter-control">
+                  <div className="analysis-mode-toggle">
+                    <button
+                      className={`analysis-mode-button ${runSettings.detector_mode === 'content' ? 'active' : ''}`}
+                      onClick={() => setRunSettings((current) => ({ ...current, detector_mode: 'content' }))}
+                      type="button"
+                    >
+                      content
+                    </button>
+                    <button
+                      className={`analysis-mode-button ${runSettings.detector_mode === 'adaptive' ? 'active' : ''}`}
+                      onClick={() => setRunSettings((current) => ({ ...current, detector_mode: 'adaptive' }))}
+                      type="button"
+                    >
+                      adaptive
+                    </button>
+                  </div>
                 </div>
+                {isDetectorModeDirty && (
+                  <AnalysisResetDiamondButton
+                    className="outside"
+                    label="detector mode"
+                    onClick={() => setRunSettings((current) => ({ ...current, detector_mode: projectDefaultSettings.detector_mode }))}
+                  />
+                )}
               </div>
-              {isDetectorModeDirty && (
-                <AnalysisResetDiamondButton
-                  className="outside"
-                  label="detector mode"
-                  onClick={() => setRunSettings((current) => ({ ...current, detector_mode: projectDefaultSettings.detector_mode }))}
-                />
-              )}
+              <span className="analysis-parameter-annotation">
+                {runSettings.detector_mode === 'adaptive'
+                  ? 'compares against recent frames · threshold range 1–7'
+                  : 'compares to previous frame · threshold range 8–48'}
+              </span>
             </div>
 
-            <div className="analysis-mode-row analysis-parallel-row">
-              <span>parallel processing</span>
-              <span className="analysis-parallel-value">across videos only</span>
-            </div>
-            <p className="analysis-parallel-copy">Different videos can process in parallel. Each video keeps one active task at a time.</p>
 
             <div className="analysis-guidance-block">
               <p className="analysis-guidance-copy">
@@ -3375,7 +3968,6 @@ function AnalysisScreen({
               >
                 {createRunPending ? 'running...' : 'run analysis'}
               </button>
-              {presetCopyFeedback ? <span className="analysis-preset-feedback">{presetCopyFeedback}</span> : null}
             </div>
 
             {hintText && hintCardPosition ? (
@@ -3412,7 +4004,7 @@ function AnalysisScreen({
                     <>
                       <span className="analysis-task-selection-count">{selectedTaskRunIds.length} selected</span>
                       <button
-                        className="analysis-task-link subtle"
+                        className="analysis-task-link danger"
                         disabled={!selectedTaskRunIds.length || bulkDeletePending}
                         onClick={() => void handleDeleteSelectedTasks()}
                         type="button"
@@ -3463,9 +4055,9 @@ function AnalysisScreen({
             </div>
             <div className="analysis-divider" />
             <div className="analysis-tasks">
-              {filteredAnalysisTaskItems.map((item) => renderTaskRow(item))}
+              {groupedTaskItems.map((group) => renderTaskGroup(group))}
               {!analysisTaskItems.length && <p className="entry-empty-copy">Run summaries will appear here once analysis starts.</p>}
-              {Boolean(analysisTaskItems.length) && !filteredAnalysisTaskItems.length && (
+              {Boolean(analysisTaskItems.length) && !groupedTaskItems.length && (
                 <p className="entry-empty-copy">No tasks in this filter yet.</p>
               )}
             </div>
@@ -3761,54 +4353,93 @@ function AnalysisScreen({
                       </button>
                     </div>
                   </div>
-                  {isCompletedReview ? (
+                  {selectedPendingCandidateIds.length > 0 || isCompletedReview ? (
                     <div className="candidate-review-actions">
-                      <label className="candidate-export-name-wrap">
-                        <span className="sr-only">Export zip name</span>
-                        <input
-                          aria-label="Export zip name"
-                          className="candidate-export-name-field"
-                          onChange={(event) => setExportNameDraft(event.target.value)}
-                          placeholder="Use server filename"
-                          value={exportNameDraft}
-                        />
-                        <span className="candidate-export-name-suffix">.zip</span>
-                      </label>
-                      <div className="candidate-export-shell" ref={exportMenuRef}>
-                        <button
-                          className="analysis-pill success"
-                          disabled={!canExportAll || exportRunPending}
-                          onClick={() => {
-                            setShowSaveMenu(false);
-                            setShowExportMenu((current) => !current);
-                          }}
-                          type="button"
-                        >
-                          {exportRunPending ? 'exporting...' : 'export'}
-                        </button>
-                        {showExportMenu ? (
-                          <div className="candidate-export-popover">
-                            <div className="candidate-export-option-list">
-                              <button
-                                className="analysis-task-link subtle"
-                                disabled={!canExportAccepted || exportRunPending}
-                                onClick={() => void handleSelectedRunExport('accepted')}
-                                type="button"
-                              >
-                                export accepted
-                              </button>
-                              <button
-                                className="analysis-task-link subtle"
-                                disabled={!canExportAll || exportRunPending}
-                                onClick={() => void handleSelectedRunExport('all')}
-                                type="button"
-                              >
-                                export all
-                              </button>
-                            </div>
+                      {selectedPendingCandidateIds.length > 0 ? (
+                        <div className="candidate-bulk-actions">
+                          <span className="candidate-bulk-count">
+                            {selectedPendingCandidateIds.length} {selectedPendingCandidateIds.length === 1 ? 'candidate selected' : 'candidates selected'}
+                          </span>
+                          <button
+                            className="analysis-task-link subtle"
+                            disabled={bulkCandidatePending}
+                            onClick={() => void handleBulkCandidateStatusChange('accepted')}
+                            type="button"
+                          >
+                            {bulkCandidatePending ? 'working...' : 'accept selected'}
+                          </button>
+                          <button
+                            className="analysis-task-link subtle"
+                            disabled={bulkCandidatePending}
+                            onClick={() => void handleBulkCandidateStatusChange('rejected')}
+                            type="button"
+                          >
+                            {bulkCandidatePending ? 'working...' : 'reject selected'}
+                          </button>
+                          <button
+                            className="analysis-task-link subtle"
+                            disabled={bulkCandidatePending}
+                            onClick={() => setSelectedCandidateIds([])}
+                            type="button"
+                          >
+                            clear selection
+                          </button>
+                        </div>
+                      ) : null}
+                      {isCompletedReview ? (
+                        <>
+                          <div className="candidate-export-name-stack">
+                            <label className="candidate-export-name-wrap">
+                              <span className="sr-only">Export zip name</span>
+                              <input
+                                aria-label="Export zip name"
+                                className="candidate-export-name-field"
+                                onChange={(event) => setExportNameDraft(event.target.value)}
+                                placeholder="Use server filename"
+                                value={exportNameDraft}
+                              />
+                              <span className="candidate-export-name-suffix">.zip</span>
+                            </label>
+                            <span className="candidate-export-name-preview">
+                              {resolvedExportFilenamePreview ? `→ ${resolvedExportFilenamePreview}` : '→ server-generated filename'}
+                            </span>
                           </div>
-                        ) : null}
-                      </div>
+                          {selectedRunExportLabel ? <span className="analysis-export-status">{selectedRunExportLabel}</span> : null}
+                          <div className="candidate-export-shell" ref={exportMenuRef}>
+                            <button
+                              aria-expanded={openPopover === 'export'}
+                              className="analysis-pill success"
+                              disabled={!canExportAll || exportRunPending}
+                              onClick={() => togglePopover('export')}
+                              type="button"
+                            >
+                              {exportRunPending ? 'exporting...' : 'export'}
+                            </button>
+                            {openPopover === 'export' ? (
+                              <div className="candidate-export-popover">
+                                <div className="candidate-export-option-list">
+                                  <button
+                                    className="analysis-task-link subtle"
+                                    disabled={!canExportAccepted || exportRunPending}
+                                    onClick={() => void handleSelectedRunExport('accepted')}
+                                    type="button"
+                                  >
+                                    export accepted
+                                  </button>
+                                  <button
+                                    className="analysis-task-link subtle"
+                                    disabled={!canExportAll || exportRunPending}
+                                    onClick={() => void handleSelectedRunExport('all')}
+                                    type="button"
+                                  >
+                                    export all
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -3822,10 +4453,13 @@ function AnalysisScreen({
                           candidate={candidate}
                           isActive={activeCandidateId === candidate.id}
                           isAnnotationExpanded={expandedAnnotationCandidateId === candidate.id}
+                          isSelected={selectedPendingCandidateIds.includes(candidate.id)}
+                          isSelectable={candidate.status === 'pending'}
                           key={candidate.id}
                           onActivate={() => setActiveCandidateId(candidate.id)}
                           onJumpToSimilar={similarityLink ? () => jumpToAnchor(similarityLink.targetId) : undefined}
                           onSetStatus={(status) => handleCandidateStatusChange(candidate, status)}
+                          onToggleSelection={() => toggleCandidateSelection(candidate.id)}
                           onToggleAnnotation={() => handleToggleCandidateAnnotation(candidate.id)}
                           onUpdate={(payload) => onUpdateCandidate(candidate.id, payload)}
                           similarLink={similarityLink}
@@ -3862,12 +4496,13 @@ function EntryScreen({
   isCreating,
   onCreate,
   onNavigateStage,
+  onOpenProject,
   onProjectNameChange,
   onRenameProject,
-  onSelectProject,
   projectName,
   projects,
   projectsLoading,
+  selectedProjectCanJumpToAnalysis,
   selectedProjectId,
 }: EntryScreenProps) {
   const [projectSearch, setProjectSearch] = useState('');
@@ -3894,7 +4529,7 @@ function EntryScreen({
         <StageNavigator
           activeStage="projects"
           className="entry-stage-nav"
-          disabledStages={{ analysis: !selectedProjectId, import: !selectedProjectId }}
+          disabledStages={{ analysis: !selectedProjectId || !selectedProjectCanJumpToAnalysis, import: !selectedProjectId }}
           onNavigate={onNavigateStage}
         />
 
@@ -3950,19 +4585,35 @@ function EntryScreen({
               {visibleProjects.map((project) => (
                 <div className={`entry-project-row-shell ${project.id === selectedProjectId ? 'selected' : ''}`} key={project.id}>
                   <div className="entry-project-row">
-                    <EditableName
-                      buttonClassName="entry-rename-button"
-                      containerClassName="entry-project-name"
-                      displayButtonClassName="entry-project-select-button"
-                      onDisplayClick={() => onSelectProject(project.id)}
-                      onSave={(nextValue) => onRenameProject(project.id, nextValue)}
-                      renameLabel={`Rename project ${project.name}`}
-                      textClassName="entry-project-name-text"
-                      value={project.name}
-                    />
-                    <button className="entry-project-summary-button" onClick={() => onSelectProject(project.id)} type="button">
-                      <small>{formatProjectSummary(project)}</small>
-                    </button>
+                    <div className="entry-project-row-copy">
+                      <EditableName
+                        buttonClassName="entry-rename-button"
+                        containerClassName="entry-project-name"
+                        displayButtonClassName="entry-project-select-button"
+                        onDisplayClick={() => onOpenProject(project.id, 'import')}
+                        onSave={(nextValue) => onRenameProject(project.id, nextValue)}
+                        renameLabel={`Rename project ${project.name}`}
+                        textClassName="entry-project-name-text"
+                        value={project.name}
+                      />
+                      <button className="entry-project-summary-button" onClick={() => onOpenProject(project.id, 'import')} type="button">
+                        <small>{formatProjectSummary(project)}</small>
+                      </button>
+                    </div>
+                    <div className="entry-project-actions">
+                      <button className="analysis-pill success entry-project-action-pill" onClick={() => onOpenProject(project.id, 'import')} type="button">
+                        import
+                      </button>
+                      {project.recording_count > 0 ? (
+                        <button
+                          className="analysis-pill analysis-pill-accent entry-project-action-pill"
+                          onClick={() => onOpenProject(project.id, 'analysis')}
+                          type="button"
+                        >
+                          analysis
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -4021,9 +4672,12 @@ interface CandidateCardProps {
   candidate: CandidateFrame;
   isActive: boolean;
   isAnnotationExpanded: boolean;
+  isSelected: boolean;
+  isSelectable: boolean;
   onActivate: () => void;
   onJumpToSimilar?: (() => void) | undefined;
   onSetStatus: (status: CandidateStatus) => void;
+  onToggleSelection: () => void;
   onToggleAnnotation: () => void;
   similarLink?: SimilarLink | undefined;
   onUpdate: (payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>>) => void;
@@ -4063,9 +4717,12 @@ function CandidateCard({
   candidate,
   isActive,
   isAnnotationExpanded,
+  isSelected,
+  isSelectable,
   onActivate,
   onJumpToSimilar,
   onSetStatus,
+  onToggleSelection,
   onToggleAnnotation,
   similarLink,
   onUpdate,
@@ -4090,7 +4747,7 @@ function CandidateCard({
 
   return (
     <article
-      className={`candidate-card ${candidate.status} ${isActive ? 'active' : ''}`}
+      className={`candidate-card ${candidate.status} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}`}
       id={`candidate-${candidate.id}`}
       onClick={onActivate}
       onFocus={onActivate}
@@ -4100,6 +4757,20 @@ function CandidateCard({
         <img alt={`Candidate screenshot at ${candidate.timestamp_tc}`} src={absoluteApiUrl(candidate.image_url)} />
         <div className="candidate-overlay">
           <span className="candidate-timecode">{candidate.timestamp_tc}</span>
+          {isSelectable ? (
+            <label
+              className="candidate-select-toggle"
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <input
+                aria-label={`Select candidate ${candidate.detector_index}`}
+                checked={isSelected}
+                onChange={onToggleSelection}
+                type="checkbox"
+              />
+            </label>
+          ) : null}
         </div>
       </div>
       <div className="candidate-body">
