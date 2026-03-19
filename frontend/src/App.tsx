@@ -10,7 +10,6 @@ import {
   createRun,
   deleteRecording,
   deleteRun,
-  dismissFallback,
   exportRun,
   getProject,
   getRecording,
@@ -18,7 +17,6 @@ import {
   health,
   importRecording,
   listProjects,
-  startFallback,
   updateCandidate,
   updateProject,
   updateRecording,
@@ -137,12 +135,9 @@ const analysisResetStarPoints = Array.from({ length: 34 }, (_value, index) => {
 const phaseLabels: Record<RunPhase, string> = {
   queued: 'Queued',
   probing: 'Preparing',
-  primary_scan: 'Scan',
-  primary_extract: 'Extract',
-  awaiting_fallback: 'Awaiting fallback',
-  fallback_scan: 'Fallback scan',
-  fallback_extract: 'Fallback extract',
-  exporting: 'Exporting',
+  primary_scan: 'Scanning scene changes',
+  primary_extract: 'Extracting candidate screenshots',
+  exporting: 'Exporting assets',
   completed: 'Completed',
   failed: 'Failed',
   cancelled: 'Aborted',
@@ -826,16 +821,13 @@ function getAnalysisTaskStatusRank(status: RunSummary['status']): number {
   if (status === 'queued') {
     return 1;
   }
-  if (status === 'awaiting_fallback') {
+  if (status === 'completed') {
     return 2;
   }
-  if (status === 'completed') {
+  if (status === 'failed') {
     return 3;
   }
-  if (status === 'failed') {
-    return 4;
-  }
-  return 5;
+  return 4;
 }
 
 function candidateMatchesFilter(candidate: CandidateFrame, filter: CandidateFilter): boolean {
@@ -1155,25 +1147,6 @@ function App() {
 
   const abortRunMutation = useMutation({
     mutationFn: abortRun,
-    onSuccess: (run) => {
-      queryClient.invalidateQueries({ queryKey: ['run', run.id] });
-      queryClient.invalidateQueries({ queryKey: ['recording', run.recording_id] });
-    },
-    onError: (error: Error) => setAppError(error.message),
-  });
-
-  const startFallbackMutation = useMutation({
-    mutationFn: startFallback,
-    onSuccess: (run) => {
-      setSelectedRunId(run.id);
-      queryClient.invalidateQueries({ queryKey: ['run', run.id] });
-      queryClient.invalidateQueries({ queryKey: ['recording', run.recording_id] });
-    },
-    onError: (error: Error) => setAppError(error.message),
-  });
-
-  const dismissFallbackMutation = useMutation({
-    mutationFn: dismissFallback,
     onSuccess: (run) => {
       queryClient.invalidateQueries({ queryKey: ['run', run.id] });
       queryClient.invalidateQueries({ queryKey: ['recording', run.recording_id] });
@@ -1940,7 +1913,6 @@ function App() {
         candidateSimilarityLinks={candidateSimilarityLinks}
         createManualCandidatePending={createManualCandidateMutation.isPending}
         createRunPending={createRunMutation.isPending}
-        dismissFallbackPending={dismissFallbackMutation.isPending}
         exportRunPending={exportRunMutation.isPending}
         healthMessage={healthWarning ? healthQuery.data?.message ?? 'Video tools are not ready.' : null}
         healthWarning={Boolean(healthWarning)}
@@ -1950,7 +1922,6 @@ function App() {
         onDeleteRecording={confirmDeleteRecording}
         onDeleteSelectedRuns={handleDeleteSelectedRuns}
         onCreateManualCandidate={handleCreateManualRunCandidate}
-        onDismissFallback={(runId) => dismissFallbackMutation.mutate(runId)}
         onApplyImportedPreset={handleApplyImportedPreset}
         onExportRun={handleExportRun}
         onExportTaskRuns={handleExportTaskRuns}
@@ -1965,7 +1936,6 @@ function App() {
         onSaveUniversalPreset={handleSaveBrowserDefault}
         onSelectRecording={handleSelectRecording}
         onSelectRun={handleSelectTaskRun}
-        onStartFallback={(runId) => startFallbackMutation.mutate(runId)}
         onStartRun={handleStartAnalysisRun}
         onUpdateCandidate={(candidateId, payload) => updateCandidateMutation.mutate({ candidateId, payload })}
         previewRecording={previewRecording}
@@ -2040,7 +2010,6 @@ interface AnalysisScreenProps {
   candidateSimilarityLinks: Map<string, SimilarLink>;
   createManualCandidatePending: boolean;
   createRunPending: boolean;
-  dismissFallbackPending: boolean;
   exportRunPending: boolean;
   healthMessage: string | null;
   healthWarning: boolean;
@@ -2051,7 +2020,6 @@ interface AnalysisScreenProps {
   onDeleteRecording: (recordingId: string, filename: string) => void;
   onDeleteSelectedRuns: (runIds: string[]) => Promise<string[] | null>;
   onApplyImportedPreset: (settings: RunSettings) => void;
-  onDismissFallback: (runId: string) => void;
   onExportRun: (runId: string, mode: ExportMode, downloadName?: string) => Promise<void>;
   onExportTaskRuns: (runIds: string[]) => Promise<void>;
   onJumpToSelection: () => void;
@@ -2065,7 +2033,6 @@ interface AnalysisScreenProps {
   onSaveUniversalPreset: () => void;
   onSelectRecording: (recordingId: string) => void;
   onSelectRun: (recordingId: string, runId: string, anchorId?: string) => void;
-  onStartFallback: (runId: string) => void;
   onStartRun: () => void;
   onUpdateCandidate: (candidateId: string, payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>>) => void;
   previewRecording: RecordingSummary | null;
@@ -2582,7 +2549,6 @@ function AnalysisScreen({
   candidateSimilarityLinks,
   createManualCandidatePending,
   createRunPending,
-  dismissFallbackPending,
   exportRunPending,
   healthMessage,
   healthWarning,
@@ -2593,7 +2559,6 @@ function AnalysisScreen({
   onCreateManualCandidate,
   onDeleteRecording,
   onDeleteSelectedRuns,
-  onDismissFallback,
   onExportRun,
   onExportTaskRuns,
   onJumpToSelection,
@@ -2607,7 +2572,6 @@ function AnalysisScreen({
   onSaveUniversalPreset,
   onSelectRecording,
   onSelectRun,
-  onStartFallback,
   onStartRun,
   onUpdateCandidate,
   previewRecording,
@@ -2693,15 +2657,15 @@ function AnalysisScreen({
   const showHighFpsWarning = Boolean(selectedRecordingSummary && sampleFpsGuardrail.isHighFpsRecording && !runSettings.allow_high_fps_sampling);
   const showLowCandidateHint = Boolean(
     selectedRun &&
-      (selectedRun.summary.needs_fallback_decision ||
-        (['completed', 'failed', 'cancelled'].includes(selectedRun.summary.status) && selectedRun.candidates.length <= 2)),
+      (selectedRun.summary.status === 'completed' || selectedRun.summary.status === 'failed' || selectedRun.summary.status === 'cancelled') &&
+      selectedRun.candidates.length <= 2,
   );
   const filteredAnalysisTaskItems = useMemo(() => {
     if (taskFilter === 'all') {
       return analysisTaskItems;
     }
     if (taskFilter === 'active') {
-      return analysisTaskItems.filter((item) => ['queued', 'running', 'awaiting_fallback'].includes(item.run.status));
+      return analysisTaskItems.filter((item) => ['queued', 'running'].includes(item.run.status));
     }
     if (taskFilter === 'completed') {
       return analysisTaskItems.filter((item) => item.run.status === 'completed');
@@ -3956,6 +3920,11 @@ function AnalysisScreen({
                   This run found very few scenes. Try higher sample fps first, then lower tolerance or minimum scene gaps.
                 </p>
               ) : null}
+              {runSettings.tolerance <= 15 ? (
+                <p className="analysis-guidance-copy warning">
+                  Note: A very low tolerance makes the detector highly sensitive. You may get many false positives from video compression noise or subtle background changes.
+                </p>
+              ) : null}
             </div>
 
             <div className="analysis-param-footer">
@@ -4180,26 +4149,11 @@ function AnalysisScreen({
                   </div>
                 </div>
               </div>
-              {selectedRun.summary.is_abortable || selectedRun.summary.needs_fallback_decision ? (
+              {selectedRun.summary.is_abortable ? (
                 <div className="action-row">
                   {selectedRun.summary.is_abortable && (
                     <button className="analysis-pill danger" disabled={abortRunPending} onClick={() => onAbortRun(selectedRun.summary.id)} type="button">
                       end
-                    </button>
-                  )}
-                  {selectedRun.summary.needs_fallback_decision && (
-                    <button className="analysis-pill analysis-pill-accent" onClick={() => onStartFallback(selectedRun.summary.id)} type="button">
-                      sensitive fallback
-                    </button>
-                  )}
-                  {selectedRun.summary.needs_fallback_decision && (
-                    <button
-                      className="analysis-pill analysis-pill-muted"
-                      disabled={dismissFallbackPending}
-                      onClick={() => onDismissFallback(selectedRun.summary.id)}
-                      type="button"
-                    >
-                      keep current
                     </button>
                   )}
                 </div>
@@ -4212,12 +4166,7 @@ function AnalysisScreen({
               </div>
             ) : null}
 
-            {selectedRun.summary.needs_fallback_decision && (
-              <div className="banner warning-banner banner-block">
-                <strong>Primary pass found only the opening frame.</strong>
-                <span>Run a sensitive fallback if the current result missed meaningful transitions.</span>
-              </div>
-            )}
+
 
             {canReviewCandidates ? (
               <>

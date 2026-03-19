@@ -25,7 +25,7 @@ def _import_video(client: TestClient, project_id: str, path) -> dict:
 
 
 
-def test_single_scene_run_waits_for_fallback_and_persists_log_events(client: TestClient, video_factory, wait_for_run) -> None:
+def test_single_scene_run_completes_and_persists_log_events(client: TestClient, video_factory, wait_for_run) -> None:
     project = _create_project(client)
     video = video_factory('single-scene.mp4', ['red'])
     recording = _import_video(client, project['id'], video)
@@ -37,38 +37,12 @@ def test_single_scene_run_waits_for_fallback_and_persists_log_events(client: Tes
 
     detail = wait_for_run(client, run['id'])
 
-    assert detail['summary']['status'] == 'awaiting_fallback'
-    assert detail['summary']['phase'] == 'awaiting_fallback'
-    assert detail['summary']['needs_fallback_decision'] is True
-    assert detail['summary']['progress'] < 1.0
+    assert detail['summary']['status'] == 'completed'
+    assert detail['summary']['phase'] == 'completed'
+    assert detail['summary']['progress'] == 1.0
     assert detail['summary']['candidate_count'] == 1
     assert any(event['phase'] == 'primary_scan' for event in detail['events'])
-    assert any(event['phase'] == 'awaiting_fallback' for event in detail['events'])
-
-
-
-def test_fallback_can_complete_and_delete_run(client: TestClient, video_factory, wait_for_run) -> None:
-    project = _create_project(client)
-    video = video_factory('fallback-scene.mp4', ['red'])
-    recording = _import_video(client, project['id'], video)
-
-    run = client.post(
-        f"/recordings/{recording['id']}/runs",
-        json={'tolerance': 50, 'min_scene_gap_ms': 900, 'sample_fps': 4, 'detector_mode': 'content', 'extract_offset_ms': 200},
-    ).json()
-    waiting = wait_for_run(client, run['id'])
-    assert waiting['summary']['status'] == 'awaiting_fallback'
-
-    start_fallback = client.post(f"/runs/{run['id']}/fallback")
-    assert start_fallback.status_code == 200
-
-    detail = wait_for_run(client, run['id'], {'completed', 'failed', 'cancelled'})
-    assert detail['summary']['status'] == 'completed'
-    assert any(event['phase'] == 'fallback_scan' for event in detail['events'])
-
-    delete_response = client.delete(f"/runs/{run['id']}")
-    assert delete_response.status_code == 204
-    assert client.get(f"/recordings/{recording['id']}").status_code == 200
+    assert any(event['phase'] == 'completed' for event in detail['events'])
 
 
 

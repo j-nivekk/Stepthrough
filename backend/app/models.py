@@ -103,7 +103,7 @@ class DetectionRunSummary(BaseModel):
     export_bundle_id: str | None = None
     is_abortable: bool
     is_deletable: bool
-    needs_fallback_decision: bool
+
 
 
 class CandidateFrameResponse(BaseModel):

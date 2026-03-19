@@ -2,15 +2,12 @@ export type DetectorMode = 'content' | 'adaptive';
 export type CandidateStatus = 'pending' | 'accepted' | 'rejected';
 export type CandidateOrigin = 'detected' | 'manual';
 export type ExportMode = 'accepted' | 'all';
-export type RunStatus = 'queued' | 'running' | 'awaiting_fallback' | 'completed' | 'failed' | 'cancelled';
+export type RunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type RunPhase =
   | 'queued'
   | 'probing'
   | 'primary_scan'
   | 'primary_extract'
-  | 'awaiting_fallback'
-  | 'fallback_scan'
-  | 'fallback_extract'
   | 'exporting'
   | 'completed'
   | 'failed'
@@ -75,7 +72,7 @@ export interface RunSummary {
   export_bundle_id?: string | null;
   is_abortable: boolean;
   is_deletable: boolean;
-  needs_fallback_decision: boolean;
+
 }
 
 export interface RecordingDetail extends RecordingSummary {

@@ -2573,9 +2573,7 @@ button:disabled {
 .status-pill.exporting,
 .status-pill.probing,
 .status-pill.primary_scan,
-.status-pill.primary_extract,
-.status-pill.fallback_scan,
-.status-pill.fallback_extract {
+.status-pill.primary_extract {
   background: rgba(47, 100, 130, 0.14);
   color: var(--info);
 }
