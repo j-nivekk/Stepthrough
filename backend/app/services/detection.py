@@ -29,13 +29,8 @@ class DetectorConfiguration:
 
 ProgressCallback = Callable[[str, str, float, str], None]
 CancellationCallback = Callable[[], bool]
-DetectionStage = Literal["primary", "fallback"]
-
-
 PRIMARY_SCAN_RANGE = (0.1, 0.46)
 PRIMARY_EXTRACT_RANGE = (0.48, 0.66)
-FALLBACK_SCAN_RANGE = (0.72, 0.9)
-FALLBACK_EXTRACT_RANGE = (0.91, 0.97)
 CONTENT_THRESHOLD_RANGE = (8.0, 48.0)
 ADAPTIVE_THRESHOLD_RANGE = (1.0, 7.0)
 
@@ -61,34 +56,13 @@ def map_run_settings(settings: RunSettings, fps: float) -> DetectorConfiguration
     )
 
 
-def should_request_fallback(candidate_count: int) -> bool:
-    return candidate_count <= 1
-
-
-def build_sensitive_fallback_settings(settings: RunSettings) -> RunSettings:
-    return RunSettings(
-        detector_mode="adaptive",
-        tolerance=20,
-        min_scene_gap_ms=300,
-        sample_fps=settings.sample_fps if settings.allow_high_fps_sampling else 8,
-        allow_high_fps_sampling=settings.allow_high_fps_sampling,
-        extract_offset_ms=settings.extract_offset_ms,
-    )
-
 
 def _pick_timestamp(start_ms: int, end_ms: int, duration_ms: int, extract_offset_ms: int) -> int:
     latest_safe = max(start_ms, min(end_ms - 80, duration_ms - 1))
     return clamp(start_ms + extract_offset_ms, start_ms, latest_safe)
 
 
-def _stage_phase(stage: DetectionStage, activity: Literal["scan", "extract"]) -> str:
-    return f"{stage}_{activity}"
 
-
-def _stage_progress(stage: DetectionStage) -> tuple[tuple[float, float], tuple[float, float]]:
-    if stage == "fallback":
-        return FALLBACK_SCAN_RANGE, FALLBACK_EXTRACT_RANGE
-    return PRIMARY_SCAN_RANGE, PRIMARY_EXTRACT_RANGE
 
 
 def detect_candidates(
@@ -98,7 +72,6 @@ def detect_candidates(
     duration_ms: int,
     fps: float,
     settings: RunSettings,
-    stage: DetectionStage,
     progress_callback: ProgressCallback | None = None,
     cancellation_callback: CancellationCallback | None = None,
 ) -> list[dict]:
@@ -106,9 +79,10 @@ def detect_candidates(
     cancellation_callback = cancellation_callback or (lambda: False)
 
     detector_config = map_run_settings(settings, fps)
-    scan_range, extract_range = _stage_progress(stage)
-    scan_phase = _stage_phase(stage, "scan")
-    extract_phase = _stage_phase(stage, "extract")
+    scan_range = PRIMARY_SCAN_RANGE
+    extract_range = PRIMARY_EXTRACT_RANGE
+    scan_phase = "primary_scan"
+    extract_phase = "primary_extract"
 
     video = open_video(str(video_path))
     scene_manager = SceneManager()
@@ -159,7 +133,7 @@ def detect_candidates(
                 return
             publish_scan_progress(video.position.get_frames())
 
-    polling_thread = Thread(target=poll_scan_progress, name=f"stepthrough-scan-progress-{stage}", daemon=True)
+    polling_thread = Thread(target=poll_scan_progress, name="stepthrough-scan-progress-primary", daemon=True)
     polling_thread.start()
     try:
         scene_manager.detect_scenes(video, frame_skip=detector_config.frame_skip, show_progress=False)

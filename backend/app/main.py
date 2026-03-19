@@ -61,9 +61,7 @@ from .repository import (
 )
 from .services.detection import (
     CancellationRequested,
-    build_sensitive_fallback_settings,
     detect_candidates,
-    should_request_fallback,
 )
 from .services.export import build_accepted_steps, create_export_bundle
 from .services.jobs import JobManager
@@ -87,7 +85,7 @@ from .storage import (
 )
 from .utils import sanitize_filename, utc_now
 
-TERMINAL_WEBSOCKET_STATES = {"completed", "failed", "cancelled", "awaiting_fallback"}
+TERMINAL_WEBSOCKET_STATES = {"completed", "failed", "cancelled"}
 
 app = FastAPI(title="Stepthrough API", version="0.2.0")
 app.add_middleware(
@@ -128,10 +126,6 @@ def _run_is_deletable(run: dict[str, Any]) -> bool:
     return run["status"] not in ACTIVE_RUN_STATUSES
 
 
-def _run_needs_fallback(run: dict[str, Any]) -> bool:
-    return run["status"] == "awaiting_fallback"
-
-
 def _serialize_project(row: dict) -> ProjectResponse:
     return ProjectResponse(**row)
 
@@ -159,7 +153,6 @@ def _serialize_run_summary(row: dict) -> DetectionRunSummary:
         export_bundle_id=row.get("export_bundle_id"),
         is_abortable=_run_is_abortable(row),
         is_deletable=_run_is_deletable(row),
-        needs_fallback_decision=_run_needs_fallback(row),
     )
 
 
@@ -364,12 +357,12 @@ def _run_artifact_paths(project: dict, recording: dict, run_id: str) -> tuple[Pa
     return current_run_dir, current_run_dir / "frames"
 
 
-def _run_detection_job(run_id: str, *, stage: str = "primary") -> None:
+def _run_detection_job(run_id: str) -> None:
     manager = _job_manager()
     temp_root: Path | None = None
     try:
         project, recording, run = _run_context(run_id)
-        base_settings = RunSettings(
+        settings = RunSettings(
             tolerance=run["tolerance"],
             min_scene_gap_ms=run["min_scene_gap_ms"],
             sample_fps=run["sample_fps"],
@@ -377,37 +370,21 @@ def _run_detection_job(run_id: str, *, stage: str = "primary") -> None:
             detector_mode=run["detector_mode"],
             extract_offset_ms=run["extract_offset_ms"],
         )
-        settings = build_sensitive_fallback_settings(base_settings) if stage == "fallback" else base_settings
         current_run_dir, target_frames_dir = _run_artifact_paths(project, recording, run_id)
         current_run_dir.mkdir(parents=True, exist_ok=True)
 
-        if stage == "fallback":
-            temp_root = current_run_dir / "_fallback_work"
-            shutil.rmtree(temp_root, ignore_errors=True)
-            frames_path = temp_root / "frames"
-            frames_path.mkdir(parents=True, exist_ok=True)
-            _set_run_state(
-                run_id,
-                status="running",
-                phase="probing",
-                progress=0.68,
-                message="Starting sensitive fallback detection",
-                level="warning",
-                completed_at=None,
-            )
-        else:
-            frames_path = target_frames_dir
-            frames_path.mkdir(parents=True, exist_ok=True)
-            _set_run_state(
-                run_id,
-                status="running",
-                phase="probing",
-                progress=0.04,
-                message="Preparing detection job",
-                level="info",
-                started_at=run.get("started_at") or utc_now(),
-                completed_at=None,
-            )
+        frames_path = target_frames_dir
+        frames_path.mkdir(parents=True, exist_ok=True)
+        _set_run_state(
+            run_id,
+            status="running",
+            phase="probing",
+            progress=0.04,
+            message="Preparing detection job",
+            level="info",
+            started_at=run.get("started_at") or utc_now(),
+            completed_at=None,
+        )
 
         video_path = absolute_data_path(recording["source_path"])
 
@@ -420,50 +397,30 @@ def _run_detection_job(run_id: str, *, stage: str = "primary") -> None:
             duration_ms=recording["duration_ms"],
             fps=recording["fps"],
             settings=settings,
-            stage="fallback" if stage == "fallback" else "primary",
             progress_callback=publish_progress,
             cancellation_callback=lambda: manager.is_cancelled(run_id),
         )
         if manager.is_cancelled(run_id):
             raise CancellationRequested("Run cancelled")
 
-        if stage == "fallback":
-            shutil.rmtree(target_frames_dir, ignore_errors=True)
-            shutil.move(str(frames_path), str(target_frames_dir))
-            normalized_candidates = _apply_candidate_paths(candidates, target_frames_dir)
-        else:
-            normalized_candidates = _apply_candidate_paths(candidates, target_frames_dir)
+        normalized_candidates = _apply_candidate_paths(candidates, target_frames_dir)
 
         replace_candidates(run_id, recording["id"], normalized_candidates)
         clear_export_bundle_for_run(run_id)
 
         candidate_count = len(normalized_candidates)
-        if stage == "primary" and should_request_fallback(candidate_count):
-            _set_run_state(
-                run_id,
-                status="awaiting_fallback",
-                phase="awaiting_fallback",
-                progress=0.66,
-                message="Primary detection found only the opening frame. Review it or run a sensitive fallback.",
-                level="warning",
-                candidate_count=candidate_count,
-            )
-        else:
-            completion_message = (
-                f"Sensitive fallback prepared {candidate_count} screenshot candidates"
-                if stage == "fallback"
-                else f"Prepared {candidate_count} screenshot candidates"
-            )
-            _set_run_state(
-                run_id,
-                status="completed",
-                phase="completed",
-                progress=1.0,
-                message=completion_message,
-                level="success",
-                candidate_count=candidate_count,
-                completed_at=utc_now(),
-            )
+        completion_message = f"Prepared {candidate_count} screenshot candidates"
+        
+        _set_run_state(
+            run_id,
+            status="completed",
+            phase="completed",
+            progress=1.0,
+            message=completion_message,
+            level="success",
+            candidate_count=candidate_count,
+            completed_at=utc_now(),
+        )
     except CancellationRequested as exc:
         _set_run_state(
             run_id,
@@ -617,7 +574,7 @@ def runs_create(recording_id: str, settings: RunSettings) -> DetectionRunSummary
     _validate_run_settings_for_recording(recording, settings)
     run = create_run(recording_id, settings)
     _emit_run_event(run["id"], phase="queued", level="info", message="Run queued", progress=0.0)
-    _job_manager().start(run["id"], lambda: _run_detection_job(run["id"], stage="primary"))
+    _job_manager().start(run["id"], lambda: _run_detection_job(run["id"]))
     return _serialize_run_summary(get_run(run["id"]))
 
 
@@ -645,43 +602,7 @@ def runs_cancel(run_id: str) -> DetectionRunSummary:
     return _serialize_run_summary(get_run(run_id))
 
 
-@app.post("/runs/{run_id}/fallback", response_model=DetectionRunSummary)
-def runs_start_fallback(run_id: str) -> DetectionRunSummary:
-    run = get_run(run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
-    if run["status"] != "awaiting_fallback":
-        raise HTTPException(status_code=409, detail="Sensitive fallback is only available while awaiting fallback")
-    _set_run_state(
-        run_id,
-        status="running",
-        phase="probing",
-        progress=0.68,
-        message="Queued sensitive fallback pass",
-        level="warning",
-        completed_at=None,
-    )
-    _job_manager().start(run_id, lambda: _run_detection_job(run_id, stage="fallback"))
-    return _serialize_run_summary(get_run(run_id))
 
-
-@app.post("/runs/{run_id}/fallback/dismiss", response_model=DetectionRunSummary)
-def runs_dismiss_fallback(run_id: str) -> DetectionRunSummary:
-    run = get_run(run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
-    if run["status"] != "awaiting_fallback":
-        raise HTTPException(status_code=409, detail="Fallback can only be dismissed while awaiting fallback")
-    _set_run_state(
-        run_id,
-        status="completed",
-        phase="completed",
-        progress=1.0,
-        message="Kept the primary detection result without running sensitive fallback.",
-        level="success",
-        completed_at=utc_now(),
-    )
-    return _serialize_run_summary(get_run(run_id))
 
 
 @app.delete("/runs/{run_id}", status_code=204)

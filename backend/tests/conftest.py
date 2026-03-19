@@ -47,7 +47,7 @@ def video_factory(tmp_path: Path):
 @pytest.fixture()
 def wait_for_run():
     def _wait(client: TestClient, run_id: str, terminal_states: set[str] | None = None) -> dict:
-        terminal_states = terminal_states or {'completed', 'failed', 'cancelled', 'awaiting_fallback'}
+        terminal_states = terminal_states or {'completed', 'failed', 'cancelled'}
         for _ in range(120):
             detail = client.get(f'/runs/{run_id}').json()
             if detail['summary']['status'] in terminal_states:

@@ -110,13 +110,7 @@ export function abortRun(runId: string): Promise<RunSummary> {
   return request<RunSummary>(`/runs/${runId}/cancel`, { method: 'POST' });
 }
 
-export function startFallback(runId: string): Promise<RunSummary> {
-  return request<RunSummary>(`/runs/${runId}/fallback`, { method: 'POST' });
-}
 
-export function dismissFallback(runId: string): Promise<RunSummary> {
-  return request<RunSummary>(`/runs/${runId}/fallback/dismiss`, { method: 'POST' });
-}
 
 export function deleteRun(runId: string): Promise<void> {
   return request<void>(`/runs/${runId}`, { method: 'DELETE' });
