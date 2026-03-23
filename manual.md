@@ -154,6 +154,26 @@ This makes it much better than v1 for:
 - content updates inside the same screen
 - text-heavy interfaces
 
+#### Under the Hood: Engine Modules and Calculations
+
+The Hybrid v2 engine relies strongly on **OpenCV (`cv2`)** for image processing, **NumPy** for matrix mathematics, and optionally **PaddleOCR** for text extraction. Instead of a single tolerance threshold, each sampled frame is scored against the previous frame using a combination of metrics:
+
+**1. Visual Score**
+A composite score reflecting overall visual change, aggregating:
+- **Structural Loss (45% weight):** A manual SSIM (Structural Similarity Index Measure) calculated using the mean, variance, and covariance of grayscale pixels.
+- **Tile Change Ratio (25% weight):** The frame is divided into a 4x4 grid. OpenCV's `absdiff` calculates how many of the 16 tiles experienced significant pixel shifts.
+- **Changed Regions (20% weight):** After dilating the thresholded difference, `cv2.findContours` maps localized bounding boxes of changed areas. The score is influenced by the intensity of the most drastically changed region.
+- **Edge Differences (10% weight):** Uses `cv2.Canny` to extract outlines and calculates the proportion of edges that moved.
+
+**2. Motion Score**
+A secondary score focused entirely on movement rather than structural difference, favoring Edge Differences (55% weight), Tile Ratio (25%), and Region Strength (20%).
+
+**3. Text Score**
+If the Visual or Motion score trips an initial trigger threshold, the frame is passed into the local **PaddleOCR** neural network. Extracted text from the previous frame is compared to the current frame using a string-distance algorithm to calculate the Text Score.
+
+**4. The Combined Score & Settle Mechanics**
+Every parsed frame yields a final **Combined Score** (`Visual*0.60 + Motion*0.25 + Text*0.15`). 
+When a frame exceeds the `proposal_threshold`, an **Event Window** is opened. Subsequent frames are evaluated and appended as active moving samples until the score dips below the `settle_threshold`. The engine then waits for the **Settle Window** to close without further motion. Finally, it drops the blurriest frames and records the specific frame with the lowest motion as the canonical representative screenshot.
 ### Hybrid v2 Presets
 
 Hybrid v2 has three presets.
