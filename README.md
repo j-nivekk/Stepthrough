@@ -37,51 +37,28 @@ To run Stepthrough locally, you must have the following installed on your system
    cd stepthrough
    ```
 
-2. **Install Backend Dependencies:**
-   Stepthrough uses `uv` for backend package management.
+2. **One-Command Setup:**
+   Run the included setup script to automatically install both frontend and backend dependencies using `npm` and `uv` respectively:
    ```bash
-   cd backend
-   uv sync
-   
-   # Note: To enable the advanced Hybrid OCR detection engine, sync the hybrid group:
-   # uv sync --group hybrid
+   chmod +x setup.sh start.sh
+   ./setup.sh
    ```
-
-3. **Install Frontend Dependencies:**
-   ```bash
-   cd ../frontend
-   npm install
-   ```
+   *(To install manually instead: `cd backend && uv sync`, then `cd frontend && npm install`)*
 
 ---
 
 ## 🕹 Running Locally
 
-You can spin up both the frontend and backend servers easily.
+You can spin up both the frontend and backend servers easily with the provided start script.
 
-**Terminal 1 (Backend):**
+**Quick Start:**
 ```bash
-cd backend
-uv run uvicorn app.main:app --reload
-# Runs on http://127.0.0.1:8000
+./start.sh
 ```
 
-**Terminal 2 (Frontend):**
-```bash
-cd frontend
-npm run dev
-# Runs on http://127.0.0.1:5173
-```
+By default, the backend runs at `http://127.0.0.1:8000` and the frontend at `http://127.0.0.1:5173`. The application stores all local data in `./data` at the project root. You can specify a custom data path by prefixing the backend process with `STEPTHROUGH_DATA_ROOT=/path/to/my/data`.
 
-By default, the application stores all databases, recordings, and exports in `./data` at the project root. You can specify a custom data path by prefixing your backend process with `STEPTHROUGH_DATA_ROOT=/path/to/my/data`.
-
-Alternatively, you can use the provided `Makefile` in the project root:
-```bash
-make backend-install
-make frontend-install
-make backend-dev
-make frontend-dev
-```
+*(To run them manually in separate terminal windows, you can simply use: `cd backend && uv run uvicorn app.main:app --reload` and `cd frontend && npm run dev`)*
 
 ---
 
