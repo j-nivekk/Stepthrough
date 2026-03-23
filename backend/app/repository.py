@@ -114,6 +114,25 @@ def update_project_name(project_id: str, name: str) -> dict[str, Any] | None:
     return get_project(project_id)
 
 
+def delete_project_record(project_id: str) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
+
+def project_has_active_runs(project_id: str) -> bool:
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(1)
+            FROM detection_runs dr
+            JOIN recordings r ON r.id = dr.recording_id
+            WHERE r.project_id = ? AND dr.status IN ('queued', 'running')
+            """,
+            (project_id,),
+        ).fetchone()
+    return bool(row[0])
+
+
 def create_recording(
     *,
     recording_id: str | None = None,

@@ -61,6 +61,10 @@ export function updateProject(projectId: string, name: string): Promise<Project>
   });
 }
 
+export function deleteProject(projectId: string): Promise<void> {
+  return request<void>(`/projects/${projectId}`, { method: 'DELETE' });
+}
+
 export function getProject(projectId: string): Promise<ProjectDetail> {
   return request<ProjectDetail>(`/projects/${projectId}`);
 }

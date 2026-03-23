@@ -8,6 +8,7 @@ import {
   createManualCandidate,
   createProject,
   createRun,
+  deleteProject,
   deleteRecording,
   deleteRun,
   exportRun,
@@ -1337,6 +1338,32 @@ function App() {
     onError: (error: Error) => setAppError(error.message),
   });
 
+  const deleteProjectMutation = useMutation({
+    mutationFn: ({ projectId }: { projectId: string }) => deleteProject(projectId),
+    onSuccess: (_result, variables) => {
+      window.localStorage.removeItem(getProjectPresetStorageKey(variables.projectId));
+      if (selectedProjectId === variables.projectId) {
+        if (selectedRecordingId) {
+          queryClient.removeQueries({ queryKey: ['recording', selectedRecordingId] });
+        }
+        if (previewRecordingId) {
+          queryClient.removeQueries({ queryKey: ['recording', previewRecordingId] });
+        }
+        if (selectedRunId) {
+          queryClient.removeQueries({ queryKey: ['run', selectedRunId] });
+        }
+        setSelectedProjectId(null);
+        setPendingAnalysisProjectId(null);
+        setSelectedRecordingId(null);
+        setSelectedRunId(null);
+        setPreviewRecordingId(null);
+      }
+      queryClient.invalidateQueries({ queryKey: ['projects'] });
+      queryClient.removeQueries({ queryKey: ['project', variables.projectId] });
+    },
+    onError: (error: Error) => setAppError(error.message),
+  });
+
   const importRecordingMutation = useMutation({
     mutationFn: ({ file, filename, projectId }: { file: File; filename?: string; localId?: string; projectId: string }) =>
       importRecording(projectId, file, filename),
@@ -1722,7 +1749,16 @@ function App() {
     if (!window.confirm(`Delete ${filename} and every run, screenshot, and export created from it?`)) {
       return;
     }
+    clearAnalysisMessages();
     deleteRecordingMutation.mutate({ recordingId });
+  }
+
+  function confirmDeleteProject(projectId: string, projectName: string) {
+    if (!window.confirm(`Delete ${projectName} and every recording, run, screenshot, and export in it?`)) {
+      return;
+    }
+    clearAnalysisMessages();
+    deleteProjectMutation.mutate({ projectId });
   }
 
   async function handleRenameProject(projectId: string, name: string) {
@@ -2139,7 +2175,9 @@ function App() {
           appError={appError}
           healthMessage={healthWarning ? healthQuery.data?.message ?? 'Video tools are not ready.' : null}
           isCreating={createProjectMutation.isPending}
+          deletingProjectId={deleteProjectMutation.isPending ? (deleteProjectMutation.variables?.projectId ?? null) : null}
           onCreate={handleCreateProject}
+          onDeleteProject={confirmDeleteProject}
           onNavigateStage={setProjectStage}
           onOpenProject={openProject}
           onProjectNameChange={setProjectName}
@@ -2242,9 +2280,11 @@ function App() {
 
 interface EntryScreenProps {
   appError: string;
+  deletingProjectId?: string | null;
   healthMessage: string | null;
   isCreating: boolean;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
+  onDeleteProject: (projectId: string, projectName: string) => void;
   onNavigateStage: (stage: WorkflowStage) => void;
   onOpenProject: (projectId: string, targetStage: ProjectEntryTarget) => void;
   onProjectNameChange: (value: string) => void;
@@ -5210,9 +5250,11 @@ function AnalysisScreen({
 
 function EntryScreen({
   appError,
+  deletingProjectId,
   healthMessage,
   isCreating,
   onCreate,
+  onDeleteProject,
   onNavigateStage,
   onOpenProject,
   onProjectNameChange,
@@ -5331,6 +5373,14 @@ function EntryScreen({
                           analysis
                         </button>
                       ) : null}
+                      <button
+                        className="analysis-pill danger entry-project-action-pill"
+                        disabled={deletingProjectId === project.id}
+                        onClick={() => onDeleteProject(project.id, project.name)}
+                        type="button"
+                      >
+                        {deletingProjectId === project.id ? 'deleting…' : 'delete'}
+                      </button>
                     </div>
                   </div>
                 </div>
