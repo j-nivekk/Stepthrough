@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -202,6 +203,10 @@ def create_run(recording_id: str, settings: RunSettings) -> dict[str, Any]:
         "recording_id": recording_id,
         "status": "queued",
         "phase": "queued",
+        "analysis_engine": settings.analysis_engine,
+        "analysis_preset": settings.analysis_preset,
+        "analysis_advanced": settings.advanced.model_dump_json() if settings.advanced is not None else None,
+        "analysis_config": None,
         "detector_mode": settings.detector_mode,
         "tolerance": settings.tolerance,
         "min_scene_gap_ms": settings.min_scene_gap_ms,
@@ -218,11 +223,13 @@ def create_run(recording_id: str, settings: RunSettings) -> dict[str, Any]:
         conn.execute(
             """
             INSERT INTO detection_runs (
-                id, recording_id, status, phase, detector_mode, tolerance, min_scene_gap_ms, sample_fps,
-                allow_high_fps_sampling, extract_offset_ms, progress, message, candidate_count, created_at, updated_at
+                id, recording_id, status, phase, analysis_engine, analysis_preset, analysis_advanced, analysis_config,
+                detector_mode, tolerance, min_scene_gap_ms, sample_fps, allow_high_fps_sampling,
+                extract_offset_ms, progress, message, candidate_count, created_at, updated_at
             ) VALUES (
-                :id, :recording_id, :status, :phase, :detector_mode, :tolerance, :min_scene_gap_ms, :sample_fps,
-                :allow_high_fps_sampling, :extract_offset_ms, :progress, :message, :candidate_count, :created_at, :updated_at
+                :id, :recording_id, :status, :phase, :analysis_engine, :analysis_preset, :analysis_advanced, :analysis_config,
+                :detector_mode, :tolerance, :min_scene_gap_ms, :sample_fps, :allow_high_fps_sampling,
+                :extract_offset_ms, :progress, :message, :candidate_count, :created_at, :updated_at
             )
             """,
             payload,
@@ -285,12 +292,12 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
                 """
                 INSERT INTO candidate_frames (
                     id, run_id, recording_id, detector_index, candidate_origin, timestamp_ms, timestamp_tc, image_path,
-                    scene_score, status, title, notes, image_hash, histogram_signature,
-                    revisit_group_id, similar_to_candidate_id, similarity_distance, created_at, updated_at
+                    scene_score, status, title, notes, image_hash, perceptual_hash, histogram_signature, ocr_text,
+                    revisit_group_id, similar_to_candidate_id, similarity_distance, score_breakdown, created_at, updated_at
                 ) VALUES (
                     :id, :run_id, :recording_id, :detector_index, :candidate_origin, :timestamp_ms, :timestamp_tc, :image_path,
-                    :scene_score, :status, :title, :notes, :image_hash, :histogram_signature,
-                    :revisit_group_id, :similar_to_candidate_id, :similarity_distance, :created_at, :updated_at
+                    :scene_score, :status, :title, :notes, :image_hash, :perceptual_hash, :histogram_signature, :ocr_text,
+                    :revisit_group_id, :similar_to_candidate_id, :similarity_distance, :score_breakdown, :created_at, :updated_at
                 )
                 """,
                 [
@@ -299,6 +306,13 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
                         "run_id": run_id,
                         "recording_id": recording_id,
                         "candidate_origin": candidate.get("candidate_origin", "detected"),
+                        "score_breakdown": (
+                            candidate.get("score_breakdown")
+                            if isinstance(candidate.get("score_breakdown"), str)
+                            else json.dumps(candidate.get("score_breakdown"))
+                            if candidate.get("score_breakdown") is not None
+                            else None
+                        ),
                     }
                     for candidate in candidates
                 ],

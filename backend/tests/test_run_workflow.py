@@ -46,6 +46,35 @@ def test_single_scene_run_completes_and_persists_log_events(client: TestClient, 
 
 
 
+def test_hybrid_run_completes_and_serializes_engine_metadata(client: TestClient, video_factory, wait_for_run) -> None:
+    project = _create_project(client)
+    video = video_factory('hybrid-workflow.mp4', ['black', 'white'])
+    recording = _import_video(client, project['id'], video)
+
+    run = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={
+            'analysis_engine': 'hybrid_v2',
+            'analysis_preset': 'balanced',
+            'advanced': {'enable_ocr': False},
+            'tolerance': 50,
+            'min_scene_gap_ms': 900,
+            'sample_fps': 4,
+            'detector_mode': 'content',
+            'extract_offset_ms': 200,
+        },
+    ).json()
+
+    detail = wait_for_run(client, run['id'])
+
+    assert detail['summary']['status'] == 'completed'
+    assert detail['summary']['analysis_engine'] == 'hybrid_v2'
+    assert detail['summary']['analysis_preset'] == 'balanced'
+    assert detail['summary']['advanced']['enable_ocr'] is False
+    assert detail['candidates']
+    assert detail['candidates'][0]['score_breakdown'] is not None
+
+
 def test_abort_blocks_recording_delete_until_run_stops(client: TestClient, video_factory, wait_for_run, monkeypatch) -> None:
     import app.main as main
     from app.services.detection import CancellationRequested

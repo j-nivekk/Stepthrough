@@ -11,6 +11,16 @@ from ..utils import utc_now
 from .video import export_filename
 
 
+def _normalized_score_breakdown(candidate: dict) -> dict | None:
+    value = candidate.get("score_breakdown")
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value
+
+
 def build_accepted_steps(recording_slug: str, candidates: list[dict]) -> list[dict]:
     accepted = [candidate for candidate in candidates if candidate["status"] == "accepted"]
     accepted_steps: list[dict] = []
@@ -39,6 +49,7 @@ def build_accepted_steps(recording_slug: str, candidates: list[dict]) -> list[di
             "title": title,
             "notes": candidate.get("notes"),
             "scene_score": candidate["scene_score"],
+            "score_breakdown": _normalized_score_breakdown(candidate),
             "revisit_group_id": revisit_group_id,
             "similar_to_step_id": similar_to_step_id,
             "source_candidate_id": candidate["id"],
@@ -69,6 +80,7 @@ def build_all_candidate_rows(recording_slug: str, candidates: list[dict]) -> lis
                 "title": (candidate.get("title") or "").strip() or f"Candidate {row_index}",
                 "notes": candidate.get("notes"),
                 "scene_score": candidate["scene_score"],
+                "score_breakdown": _normalized_score_breakdown(candidate),
                 "revisit_group_id": candidate.get("revisit_group_id"),
                 "similar_to_step_id": None,
                 "similar_to_source_candidate_id": candidate.get("similar_to_candidate_id"),
