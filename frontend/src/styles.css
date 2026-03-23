@@ -974,10 +974,15 @@ a {
 .analysis-task-title:focus-visible,
 .analysis-task-link:focus-visible,
 .analysis-mode-button:focus-visible,
+.analysis-tuning-summary:focus-visible,
 .analysis-video-select-button:focus-visible {
   outline: 2px solid rgba(72, 175, 124, 0.32);
   outline-offset: 3px;
   border-radius: 8px;
+}
+
+.analysis-tuning-summary:focus-visible {
+  border-radius: 0;
 }
 
 .analysis-pill.success {
@@ -3555,24 +3560,96 @@ button:disabled {
   }
 }
 
-.analysis-hybrid-advanced {
+.analysis-tuning-section {
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   margin-top: 12px;
   padding-top: 18px;
 }
 
-.analysis-hybrid-advanced summary {
+.analysis-tuning-summary {
   align-items: center;
+  background: var(--accent);
+  color: #fff;
   cursor: pointer;
   display: flex;
-  font-size: 13px;
+  font-size: 12px;
   gap: 12px;
   justify-content: space-between;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  line-height: 1.2;
+  list-style: none;
+  min-height: 24px;
+  padding: 6px 10px;
+  text-transform: none;
+  transition: background 140ms ease;
+  width: 100%;
+}
+
+.analysis-tuning-summary:hover,
+.analysis-tuning-summary:focus-visible {
+  background: var(--accent-strong);
+}
+
+.analysis-tuning-summary::-webkit-details-marker {
+  display: none;
+}
+
+.analysis-tuning-summary::marker {
+  content: '';
+}
+
+.analysis-tuning-summary-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.analysis-tuning-summary-chevron {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid currentColor;
+  transition: transform 140ms ease;
+}
+
+.analysis-tuning-section[open] .analysis-tuning-summary-chevron {
+  transform: rotate(180deg);
+}
+
+.analysis-tuning-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.analysis-tuning-section-body .analysis-parameter-group {
+  gap: 4px;
+}
+
+.analysis-tuning-section-body .analysis-parameter-row,
+.analysis-tuning-section-body .analysis-mode-row {
+  min-height: 22px;
+}
+
+.analysis-tuning-summary .analysis-dirty-reset {
+  width: 14px;
+  height: 14px;
+}
+
+.analysis-tuning-summary .analysis-dirty-reset-glyph {
+  width: 7px;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.analysis-tuning-summary .analysis-dirty-reset:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.55);
+  outline-offset: 3px;
+  border-radius: 999px;
 }
 
 .analysis-compare-shell {
