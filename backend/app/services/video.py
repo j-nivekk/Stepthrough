@@ -14,6 +14,9 @@ class VideoToolError(RuntimeError):
     pass
 
 
+FRAME_EXTRACTION_FALLBACK_OFFSETS_MS = (0, 33, 80, 160, 320, 640, 1000, 2000, 4000)
+
+
 @dataclass(frozen=True)
 class VideoMetadata:
     duration_ms: int
@@ -77,27 +80,62 @@ async def save_upload_file(upload: UploadFile, destination: Path) -> None:
     await upload.close()
 
 
+def _frame_extract_timestamps(timestamp_ms: int) -> list[int]:
+    attempts: list[int] = []
+    seen: set[int] = set()
+    for offset_ms in FRAME_EXTRACTION_FALLBACK_OFFSETS_MS:
+        candidate_ms = max(0, timestamp_ms - offset_ms)
+        if candidate_ms in seen:
+            continue
+        attempts.append(candidate_ms)
+        seen.add(candidate_ms)
+    if 0 not in seen:
+        attempts.append(0)
+    return attempts
+
+
 def extract_frame(video_path: Path, output_path: Path, timestamp_ms: int) -> None:
-    seconds = max(0.0, timestamp_ms / 1000)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    run_command(
-        [
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-i",
-            str(video_path),
-            "-ss",
-            f"{seconds:.3f}",
-            "-frames:v",
-            "1",
-            "-y",
-            str(output_path),
-        ]
-    )
-    if not output_path.exists() or output_path.stat().st_size == 0:
+    last_command_error: VideoToolError | None = None
+    saw_empty_output = False
+
+    for candidate_ms in _frame_extract_timestamps(timestamp_ms):
+        if output_path.exists():
+            output_path.unlink()
+        seconds = max(0.0, candidate_ms / 1000)
+        try:
+            run_command(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-ss",
+                    f"{seconds:.3f}",
+                    "-i",
+                    str(video_path),
+                    "-frames:v",
+                    "1",
+                    "-y",
+                    str(output_path),
+                ]
+            )
+        except VideoToolError as exc:
+            last_command_error = exc
+            continue
+
+        if output_path.exists() and output_path.stat().st_size > 0:
+            return
+
+        saw_empty_output = True
+
+    if output_path.exists():
+        output_path.unlink(missing_ok=True)
+    if saw_empty_output:
         raise VideoToolError("Could not extract a frame at the requested timestamp.")
+    if last_command_error is not None:
+        raise last_command_error
+    raise VideoToolError("Could not extract a frame at the requested timestamp.")
 
 
 def recording_slug_from_filename(filename: str) -> str:
