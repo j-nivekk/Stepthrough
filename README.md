@@ -33,7 +33,7 @@ To run Stepthrough locally, you must have the following installed on your system
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/stepthrough.git
+   git clone https://github.com/j-nivekk/stepthrough.git
    cd stepthrough
    ```
 
