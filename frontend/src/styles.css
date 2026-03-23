@@ -536,11 +536,12 @@ a {
 }
 
 .entry-project-actions {
-  flex: 0 0 152px;
-  min-width: 152px;
+  flex: 0 0 236px;
+  min-width: 236px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   opacity: 0;
   pointer-events: none;

@@ -40,6 +40,7 @@ from .repository import (
     create_recording,
     create_run,
     create_run_event,
+    delete_project_record,
     delete_recording_record,
     delete_run_record,
     get_candidate,
@@ -53,6 +54,7 @@ from .repository import (
     list_recordings,
     list_run_events,
     list_runs,
+    project_has_active_runs,
     recording_has_active_runs,
     replace_candidates,
     update_candidate,
@@ -80,6 +82,7 @@ from .services.video import (
 from .storage import (
     absolute_data_path,
     asset_url,
+    project_dir,
     recording_dir,
     recording_source_path,
     relative_data_path,
@@ -525,6 +528,19 @@ def projects_show(project_id: str) -> dict:
         "project": _serialize_project(project),
         "recordings": [_serialize_recording(recording) for recording in list_recordings(project_id)],
     }
+
+
+@app.delete("/projects/{project_id}", status_code=204)
+def projects_delete(project_id: str) -> Response:
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project_has_active_runs(project_id):
+        raise HTTPException(status_code=409, detail="Abort active runs before deleting this project")
+    project_path = project_dir(project["slug"], project["id"])
+    delete_project_record(project_id)
+    shutil.rmtree(project_path, ignore_errors=True)
+    return Response(status_code=204)
 
 
 @app.post("/recordings/import", response_model=RecordingImportResponse)
