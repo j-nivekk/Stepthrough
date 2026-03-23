@@ -39,7 +39,7 @@ import type {
 } from './types';
 
 const defaultRunSettings: RunSettings = {
-  analysis_engine: 'scene_v1',
+  analysis_engine: 'hybrid_v2',
   analysis_preset: 'balanced',
   advanced: null,
   tolerance: 50,
@@ -111,6 +111,10 @@ type AnalysisHintKey =
   | 'analysis_preset'
   | 'allow_high_fps_sampling'
   | 'hybrid_advanced'
+  | 'hybrid_min_dwell_ms'
+  | 'hybrid_ocr_confirmation'
+  | 'hybrid_sample_fps_override'
+  | 'hybrid_settle_window_ms'
   | 'detector_mode'
   | 'extract_offset_ms'
   | 'load'
@@ -303,19 +307,19 @@ function mapToleranceToDetectorThreshold(tolerance: number, detectorMode: RunSet
 function describeTolerance(tolerance: number, detectorMode: RunSettings['detector_mode']): string {
   const threshold = mapToleranceToDetectorThreshold(tolerance, detectorMode);
   const thresholdLabel = detectorMode === 'adaptive' ? `Adaptive threshold ${threshold}.` : `Content threshold ${threshold}.`;
-  
+
   if (tolerance <= 25) {
-    return `${thresholdLabel} Very sensitive. Lower this when keyboard changes, small badges, or brief sheets are being missed. Interacts closely with sample fps.`;
+    return `${thresholdLabel} Very sensitive. Lower it when keyboard states, small badges, or brief sheets are being missed. Raise sample fps first if very short screens are slipping through.`;
   }
   if (tolerance <= 60) {
-    return `${thresholdLabel} Balanced. Good default for most walkthrough recordings. Lower it to catch subtler screens, raise it if typing or scrolling creates noise.`;
+    return `${thresholdLabel} Balanced for most walkthrough recordings. Lower it to catch subtler screens, or raise it if typing, scrolling, or background shimmer creates noise.`;
   }
-  return `${thresholdLabel} Conservative. Raise this when scrolling or tiny motion creates too many candidates. Lower it if real screens are being missed.`;
+  return `${thresholdLabel} Conservative. Raise it when scrolling or tiny motion creates too many candidates, and lower it if real screens are being missed.`;
 }
 
 function describeSampleFps(sampleFps: number | null, sourceFps: number | null): string {
   if (!sampleFps) {
-    return 'Processing every available frame from the source video.';
+    return 'Sampling every available frame from the source video. Use this only when you need maximum sensitivity or source-fps coverage.';
   }
   let skipText = '';
   if (sourceFps) {
@@ -327,9 +331,9 @@ function describeSampleFps(sampleFps: number | null, sourceFps: number | null): 
 
 function describeDetectorMode(mode: RunSettings['detector_mode']): string {
   if (mode === 'adaptive') {
-    return 'Compares against a rolling average of recent frames. Better for fading UI menus. Adaptive threshold scales from 1 to 7.';
+    return 'Compares against a rolling average of recent frames. Better for fades, overlays, and softer UI changes. Adaptive threshold scales from 1 to 7.';
   }
-  return 'Strictly compares against the immediately previous sampled frame. Better for cuts and hard UI changes. Content threshold scales from 8 to 48.';
+  return 'Strictly compares against the immediately previous sampled frame. Better for cuts and hard screen swaps. Content threshold scales from 8 to 48.';
 }
 
 function describeAnalysisPreset(settings: RunSettings): string {
@@ -346,18 +350,73 @@ function describeAnalysisPreset(settings: RunSettings): string {
 
 function describeMinSceneGap(minSceneGapMs: number): string {
   if (minSceneGapMs === 0) {
-    return '0ms limits candidates loosely based only on timeline offsets rather than enforcing hard breaks.';
+    return '0ms removes the hard time gap between candidates and lets sampled changes cluster tightly on the timeline.';
   }
   const seconds = (minSceneGapMs / 1000).toFixed(1).replace(/\.0$/, '');
-  return `${minSceneGapMs}ms (~${seconds}s) on the original timeline. Minimum required time gap between detected scene candidates.`;
+  return `${minSceneGapMs}ms (~${seconds}s) on the original timeline. This is the minimum spacing allowed between detected scene candidates.`;
 }
 
 function describeExtractOffset(offsetMs: number): string {
   if (offsetMs === 0) {
-    return 'Extracts exactly on the first frame of a suspected new scene candidate.';
+    return 'Captures exactly on the first detected frame of a new scene candidate.';
   }
   const seconds = (offsetMs / 1000).toFixed(1).replace(/\.0$/, '');
-  return `Skips ahead ${offsetMs}ms (${seconds}s) past the detection cut to pull the screenshot, avoiding mid-animation frames.`;
+  return `Captures ${offsetMs}ms (${seconds}s) after the detection cut to avoid grabbing a frame mid-animation or during a transition.`;
+}
+
+function formatHybridOcrState(enableOcr: boolean | undefined, ocrBackend: HybridAdvancedSettings['ocr_backend'] | null | undefined): string {
+  if (enableOcr === false) {
+    return 'off';
+  }
+  return `on (${ocrBackend === 'paddleocr' || !ocrBackend ? 'PaddleOCR' : ocrBackend})`;
+}
+
+function describeHybridSampleFpsOverrideHint(settings: RunSettings): string {
+  const presetSampleFps = analysisPresetDefaults[settings.analysis_preset].sampleFps;
+  return `Overrides the preset sampling rate. Raise it when brief overlays or menu states are being missed, and leave it on auto to keep the preset baseline of ${presetSampleFps} fps.`;
+}
+
+function describeHybridMinDwellHint(settings: RunSettings): string {
+  const presetMinDwellMs = analysisPresetDefaults[settings.analysis_preset].minDwellMs;
+  return `Overrides how long a visual change must persist before it becomes a candidate. Lower it for brief states, or raise it to ignore flicker and transient motion. Preset baseline: ${presetMinDwellMs}ms.`;
+}
+
+function describeHybridSettleWindowHint(settings: RunSettings): string {
+  const presetSettleWindowMs = analysisPresetDefaults[settings.analysis_preset].settleWindowMs;
+  return `Overrides how long the detector waits for motion to settle before capturing the representative frame. Raise it for longer animations or loading states, and lower it when captures land too late. Preset baseline: ${presetSettleWindowMs}ms.`;
+}
+
+function describeHybridOcrConfirmationHint(): string {
+  return 'Keeps OCR confirmation aligned with strong visual changes. Leave it on for text-heavy interfaces, and turn it off only when you want pure visual-diff behavior. Preset baseline: on (PaddleOCR).';
+}
+
+function formatHybridSampleFpsAnnotation(settings: RunSettings): string {
+  const presetSampleFps = analysisPresetDefaults[settings.analysis_preset].sampleFps;
+  const overrideSampleFps = settings.advanced?.sample_fps_override;
+  return overrideSampleFps == null
+    ? `Preset: ${presetSampleFps} fps. Current: auto, using the preset value.`
+    : `Preset: ${presetSampleFps} fps. Current override: ${overrideSampleFps} fps.`;
+}
+
+function formatHybridMinDwellAnnotation(settings: RunSettings): string {
+  const presetMinDwellMs = analysisPresetDefaults[settings.analysis_preset].minDwellMs;
+  const overrideMinDwellMs = settings.advanced?.min_dwell_ms;
+  return overrideMinDwellMs == null
+    ? `Preset: ${presetMinDwellMs}ms. Current: auto, using the preset value.`
+    : `Preset: ${presetMinDwellMs}ms. Current override: ${overrideMinDwellMs}ms.`;
+}
+
+function formatHybridSettleWindowAnnotation(settings: RunSettings): string {
+  const presetSettleWindowMs = analysisPresetDefaults[settings.analysis_preset].settleWindowMs;
+  const overrideSettleWindowMs = settings.advanced?.settle_window_ms;
+  return overrideSettleWindowMs == null
+    ? `Preset: ${presetSettleWindowMs}ms. Current: auto, using the preset value.`
+    : `Preset: ${presetSettleWindowMs}ms. Current override: ${overrideSettleWindowMs}ms.`;
+}
+
+function formatHybridOcrAnnotation(settings: RunSettings): string {
+  const currentOcrState = formatHybridOcrState(settings.advanced?.enable_ocr, settings.advanced?.ocr_backend);
+  return `Preset: on (PaddleOCR). Current: ${currentOcrState}.`;
 }
 
 function getSampleFpsGuardrail(recordingFps: number | null | undefined, allowHighFpsSampling: boolean) {
@@ -2303,7 +2362,11 @@ function AnalysisResetDiamondButton({ className, label, onClick }: AnalysisReset
     <button
       aria-label={`Reset ${label} to default`}
       className={className ? `analysis-dirty-reset ${className}` : 'analysis-dirty-reset'}
-      onClick={onClick}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      }}
       title={`Reset ${label} to default`}
       type="button"
     >
@@ -2859,7 +2922,7 @@ function AnalysisScreen({
     analysis_preset:
       runSettings.analysis_engine === 'hybrid_v2'
         ? describeAnalysisPreset(runSettings)
-        : 'Hybrid presets only apply to the v2 detector. Switch engines to use the new UI-change pipeline.',
+        : 'Hybrid presets only affect the v2 detector. Switch engines to use the UI-change pipeline.',
     allow_high_fps_sampling: sampleFpsGuardrail.isHighFpsRecording
       ? `Turn this on to sample above 30 fps or use source fps for this ~${sampleFpsGuardrail.sourceFpsCeiling} fps recording.`
       : 'Use this only when you need denser sampling on recordings above 30 fps.',
@@ -2867,8 +2930,12 @@ function AnalysisScreen({
     extract_offset_ms: describeExtractOffset(runSettings.extract_offset_ms),
     hybrid_advanced:
       runSettings.analysis_engine === 'hybrid_v2'
-        ? 'Override the preset only when you need finer control over sampling density, dwell, settle timing, or OCR confirmation.'
+        ? 'Start with the preset. Use overrides only when a specific recording still misses or overfires on interface changes.'
         : 'Hybrid advanced controls are only used by the v2 detector.',
+    hybrid_min_dwell_ms: describeHybridMinDwellHint(runSettings),
+    hybrid_ocr_confirmation: describeHybridOcrConfirmationHint(),
+    hybrid_sample_fps_override: describeHybridSampleFpsOverrideHint(runSettings),
+    hybrid_settle_window_ms: describeHybridSettleWindowHint(runSettings),
     load: 'Paste Stepthrough preset text to load a saved parameter set into the active analysis controls.',
     min_scene_gap_ms: describeMinSceneGap(runSettings.min_scene_gap_ms),
     reset: 'Reset the current analysis parameters to this project or universal defaults.',
@@ -4045,195 +4112,406 @@ function AnalysisScreen({
                     <span className="analysis-parameter-annotation">{describeAnalysisPreset(runSettings)}</span>
                   </div>
 
-                  <details className="analysis-hybrid-advanced" {...bindHint('hybrid_advanced')}>
-                    <summary>
+                  <details className="analysis-tuning-section">
+                    <summary className="analysis-tuning-summary" {...bindHint('hybrid_advanced')}>
                       <span>advanced hybrid tuning</span>
-                      {isHybridAdvancedDirty ? (
-                        <AnalysisResetDiamondButton
-                          className="outside"
-                          label="hybrid advanced"
-                          onClick={() => {
-                            setRunSettings((current) => ({
-                              ...current,
-                              advanced: projectDefaultSettings.advanced ?? { ...defaultHybridAdvancedSettings },
-                            }));
-                          }}
-                        />
-                      ) : null}
+                      <span className="analysis-tuning-summary-actions">
+                        {isHybridAdvancedDirty ? (
+                          <AnalysisResetDiamondButton
+                            label="advanced hybrid tuning"
+                            onClick={() => {
+                              setRunSettings((current) => ({
+                                ...current,
+                                advanced: projectDefaultSettings.advanced ?? { ...defaultHybridAdvancedSettings },
+                              }));
+                            }}
+                          />
+                        ) : null}
+                        <span aria-hidden="true" className="analysis-tuning-summary-chevron" />
+                      </span>
                     </summary>
+                    <div className="analysis-tuning-section-body">
+                      <div className="analysis-parameter-group">
+                        <label className="analysis-parameter-row" {...bindHint('hybrid_sample_fps_override')}>
+                          <span>sample fps override</span>
+                          <div className="analysis-parameter-control">
+                            <AnalysisStepperInput
+                              ariaLabel="hybrid sample fps override"
+                              className="analysis-parameter-input short"
+                              max={Math.max(1, Math.ceil(selectedRecordingSummary?.fps ?? 30))}
+                              min={1}
+                              onChange={(rawValue) =>
+                                setRunSettings((current) =>
+                                  clampRunSettingsForRecording(
+                                    {
+                                      ...current,
+                                      advanced: {
+                                        ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                        sample_fps_override: rawValue ? Number(rawValue) : null,
+                                      },
+                                    },
+                                    selectedRecordingSummary?.fps ?? null,
+                                  ),
+                                )
+                              }
+                              onStep={(direction) =>
+                                setRunSettings((current) => {
+                                  const fallback = analysisPresetDefaults[current.analysis_preset].sampleFps;
+                                  const currentValue = current.advanced?.sample_fps_override ?? fallback;
+                                  return clampRunSettingsForRecording(
+                                    {
+                                      ...current,
+                                      advanced: {
+                                        ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                        sample_fps_override: clampInteger(
+                                          currentValue + direction,
+                                          1,
+                                          Math.max(1, Math.ceil(selectedRecordingSummary?.fps ?? 30)),
+                                        ),
+                                      },
+                                    },
+                                    selectedRecordingSummary?.fps ?? null,
+                                  );
+                                })
+                              }
+                              value={runSettings.advanced?.sample_fps_override ?? ''}
+                            />
+                          </div>
+                        </label>
+                        <span className="analysis-parameter-annotation">{formatHybridSampleFpsAnnotation(runSettings)}</span>
+                      </div>
+
+                      <div className="analysis-parameter-group">
+                        <label className="analysis-parameter-row" {...bindHint('hybrid_min_dwell_ms')}>
+                          <span>minimum dwell</span>
+                          <div className="analysis-parameter-control">
+                            <div className="analysis-parameter-input-group">
+                              <AnalysisStepperInput
+                                ariaLabel="hybrid minimum dwell"
+                                className="analysis-parameter-input long"
+                                min={0}
+                                onChange={(rawValue) =>
+                                  setRunSettings((current) => ({
+                                    ...current,
+                                    advanced: {
+                                      ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                      min_dwell_ms: rawValue ? Math.max(0, Number(rawValue)) : null,
+                                    },
+                                  }))
+                                }
+                                onStep={(direction) =>
+                                  setRunSettings((current) => {
+                                    const fallback = analysisPresetDefaults[current.analysis_preset].minDwellMs;
+                                    const currentValue = current.advanced?.min_dwell_ms ?? fallback;
+                                    return {
+                                      ...current,
+                                      advanced: {
+                                        ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                        min_dwell_ms: Math.max(0, currentValue + direction * 25),
+                                      },
+                                    };
+                                  })
+                                }
+                                value={runSettings.advanced?.min_dwell_ms ?? ''}
+                              />
+                              <span className="analysis-parameter-suffix">ms</span>
+                            </div>
+                          </div>
+                        </label>
+                        <span className="analysis-parameter-annotation">{formatHybridMinDwellAnnotation(runSettings)}</span>
+                      </div>
+
+                      <div className="analysis-parameter-group">
+                        <label className="analysis-parameter-row" {...bindHint('hybrid_settle_window_ms')}>
+                          <span>settle window</span>
+                          <div className="analysis-parameter-control">
+                            <div className="analysis-parameter-input-group">
+                              <AnalysisStepperInput
+                                ariaLabel="hybrid settle window"
+                                className="analysis-parameter-input long"
+                                min={0}
+                                onChange={(rawValue) =>
+                                  setRunSettings((current) => ({
+                                    ...current,
+                                    advanced: {
+                                      ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                      settle_window_ms: rawValue ? Math.max(0, Number(rawValue)) : null,
+                                    },
+                                  }))
+                                }
+                                onStep={(direction) =>
+                                  setRunSettings((current) => {
+                                    const fallback = analysisPresetDefaults[current.analysis_preset].settleWindowMs;
+                                    const currentValue = current.advanced?.settle_window_ms ?? fallback;
+                                    return {
+                                      ...current,
+                                      advanced: {
+                                        ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                        settle_window_ms: Math.max(0, currentValue + direction * 25),
+                                      },
+                                    };
+                                  })
+                                }
+                                value={runSettings.advanced?.settle_window_ms ?? ''}
+                              />
+                              <span className="analysis-parameter-suffix">ms</span>
+                            </div>
+                          </div>
+                        </label>
+                        <span className="analysis-parameter-annotation">{formatHybridSettleWindowAnnotation(runSettings)}</span>
+                      </div>
+
+                      <div className="analysis-parameter-group">
+                        <div className="analysis-mode-row" {...bindHint('hybrid_ocr_confirmation')}>
+                          <span>ocr confirmation</span>
+                          <div className="analysis-parameter-control">
+                            <div className="analysis-mode-toggle">
+                              <button
+                                className={`analysis-mode-button ${runSettings.advanced?.enable_ocr === false ? 'active' : ''}`}
+                                onClick={() =>
+                                  setRunSettings((current) => ({
+                                    ...current,
+                                    advanced: {
+                                      ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                      enable_ocr: false,
+                                      ocr_backend: null,
+                                    },
+                                  }))
+                                }
+                                type="button"
+                              >
+                                off
+                              </button>
+                              <button
+                                className={`analysis-mode-button ${runSettings.advanced?.enable_ocr === false ? '' : 'active'}`}
+                                onClick={() =>
+                                  setRunSettings((current) => ({
+                                    ...current,
+                                    advanced: {
+                                      ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                      enable_ocr: true,
+                                      ocr_backend: 'paddleocr',
+                                    },
+                                  }))
+                                }
+                                type="button"
+                              >
+                                on
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                        <span className="analysis-parameter-annotation">{formatHybridOcrAnnotation(runSettings)}</span>
+                      </div>
+                    </div>
+                  </details>
+                </>
+              ) : (
+                <details className="analysis-tuning-section" open>
+                  <summary className="analysis-tuning-summary">
+                    <span>scene v1 tuning</span>
+                    <span className="analysis-tuning-summary-actions">
+                      <span aria-hidden="true" className="analysis-tuning-summary-chevron" />
+                    </span>
+                  </summary>
+                  <div className="analysis-tuning-section-body">
                     <div className="analysis-parameter-group">
-                      <label className="analysis-parameter-row">
-                        <span>sample fps override</span>
+                      <label className="analysis-parameter-row" {...bindHint('tolerance')}>
+                        <span>tolerance</span>
                         <div className="analysis-parameter-control">
                           <AnalysisStepperInput
-                            ariaLabel="hybrid sample fps override"
+                            ariaLabel="tolerance"
                             className="analysis-parameter-input short"
-                            max={Math.max(1, Math.ceil(selectedRecordingSummary?.fps ?? 30))}
+                            max={100}
+                            min={1}
+                            onChange={(rawValue) =>
+                              setRunSettings((current) => ({
+                                ...current,
+                                tolerance: clampInteger(rawValue === '' ? 1 : Number(rawValue), 1, 100),
+                              }))
+                            }
+                            onStep={(direction) =>
+                              setRunSettings((current) => ({
+                                ...current,
+                                tolerance: clampInteger(current.tolerance + direction, 1, 100),
+                              }))
+                            }
+                            value={runSettings.tolerance}
+                          />
+                        </div>
+                        {isToleranceDirty && (
+                          <AnalysisResetDiamondButton
+                            className="outside"
+                            label="tolerance"
+                            onClick={() => setRunSettings((current) => ({ ...current, tolerance: projectDefaultSettings.tolerance }))}
+                          />
+                        )}
+                      </label>
+                      <span className="analysis-parameter-annotation">
+                        {runSettings.detector_mode === 'adaptive' ? 'adaptive' : 'content'} threshold: {mapToleranceToDetectorThreshold(runSettings.tolerance, runSettings.detector_mode)}
+                      </span>
+                    </div>
+                    <div className="analysis-parameter-group">
+                      <label className="analysis-parameter-row" {...bindHint('min_scene_gap_ms')}>
+                        <span>minimum scene gap</span>
+                        <div className="analysis-parameter-control">
+                          <div className="analysis-parameter-input-group">
+                            <AnalysisStepperInput
+                              ariaLabel="minimum scene gap"
+                              className="analysis-parameter-input long"
+                              min={0}
+                              onChange={(rawValue) =>
+                                setRunSettings((current) => ({
+                                  ...current,
+                                  min_scene_gap_ms: clampInteger(rawValue === '' ? 0 : Number(rawValue), 0),
+                                }))
+                              }
+                              onStep={(direction) =>
+                                setRunSettings((current) => ({
+                                  ...current,
+                                  min_scene_gap_ms: clampInteger(current.min_scene_gap_ms + direction, 0),
+                                }))
+                              }
+                              value={runSettings.min_scene_gap_ms}
+                            />
+                            <span className="analysis-parameter-suffix">ms</span>
+                          </div>
+                        </div>
+                        {isMinSceneGapDirty && (
+                          <AnalysisResetDiamondButton
+                            className="outside"
+                            label="minimum scene gap"
+                            onClick={() => setRunSettings((current) => ({ ...current, min_scene_gap_ms: projectDefaultSettings.min_scene_gap_ms }))}
+                          />
+                        )}
+                      </label>
+                      <span className="analysis-parameter-annotation">
+                        {(runSettings.min_scene_gap_ms / 1000).toFixed(1).replace(/\.0$/, '')}s on original timeline
+                      </span>
+                    </div>
+                    <div className="analysis-parameter-group">
+                      <label className="analysis-parameter-row" {...bindHint('sample_fps')}>
+                        <span>sample fps</span>
+                        <div className="analysis-parameter-control">
+                          <AnalysisStepperInput
+                            ariaLabel="sample fps"
+                            className="analysis-parameter-input short"
+                            max={sampleFpsGuardrail.maxSampleFps}
                             min={1}
                             onChange={(rawValue) =>
                               setRunSettings((current) =>
                                 clampRunSettingsForRecording(
                                   {
                                     ...current,
-                                    advanced: {
-                                      ...(current.advanced ?? defaultHybridAdvancedSettings),
-                                      sample_fps_override: rawValue ? Number(rawValue) : null,
-                                    },
+                                    sample_fps: rawValue
+                                      ? clampInteger(Number(rawValue), 1, sampleFpsGuardrail.maxSampleFps)
+                                      : sampleFpsGuardrail.sourceFpsAvailable
+                                        ? null
+                                        : sampleFpsGuardrail.maxSampleFps,
                                   },
                                   selectedRecordingSummary?.fps ?? null,
                                 ),
                               )
                             }
                             onStep={(direction) =>
-                              setRunSettings((current) => {
-                                const fallback = analysisPresetDefaults[current.analysis_preset].sampleFps;
-                                const currentValue = current.advanced?.sample_fps_override ?? fallback;
-                                return clampRunSettingsForRecording(
+                              setRunSettings((current) =>
+                                clampRunSettingsForRecording(
                                   {
                                     ...current,
-                                    advanced: {
-                                      ...(current.advanced ?? defaultHybridAdvancedSettings),
-                                      sample_fps_override: clampInteger(
-                                        currentValue + direction,
-                                        1,
-                                        Math.max(1, Math.ceil(selectedRecordingSummary?.fps ?? 30)),
-                                      ),
-                                    },
+                                    sample_fps: clampInteger((current.sample_fps ?? 1) + direction, 1, sampleFpsGuardrail.maxSampleFps),
                                   },
                                   selectedRecordingSummary?.fps ?? null,
-                                );
-                              })
+                                ),
+                              )
                             }
-                            value={runSettings.advanced?.sample_fps_override ?? ''}
+                            value={runSettings.sample_fps ?? ''}
                           />
                         </div>
+                        {isSampleFpsDirty && (
+                          <AnalysisResetDiamondButton
+                            className="outside"
+                            label="sample fps"
+                            onClick={() => setRunSettings((current) => ({ ...current, sample_fps: projectDefaultSettings.sample_fps }))}
+                          />
+                        )}
                       </label>
                       <span className="analysis-parameter-annotation">
-                        {runSettings.advanced?.sample_fps_override
-                          ? `Overriding preset sampling to ~${runSettings.advanced.sample_fps_override} fps`
-                          : `Auto (${analysisPresetDefaults[runSettings.analysis_preset].sampleFps} fps from preset)`}
+                        {(() => {
+                          const sourceFps = selectedRecordingSummary?.fps ?? null;
+                          const sampleFps = runSettings.sample_fps;
+                          if (!sampleFps || !sourceFps) return sourceFps ? `every frame (~${Math.round(sourceFps)} fps source)` : null;
+                          const skip = Math.max(1, Math.round(sourceFps / sampleFps));
+                          return skip > 1 ? `~every ${ordinal(skip)} frame (~${Math.round(sourceFps)} fps source)` : `every frame (~${Math.round(sourceFps)} fps source)`;
+                        })()}
                       </span>
                     </div>
-
-                    <div className="analysis-parameter-group">
-                      <label className="analysis-parameter-row">
-                        <span>minimum dwell</span>
-                        <div className="analysis-parameter-control">
-                          <div className="analysis-parameter-input-group">
-                            <AnalysisStepperInput
-                              ariaLabel="hybrid minimum dwell"
-                              className="analysis-parameter-input long"
-                              min={0}
-                              onChange={(rawValue) =>
-                                setRunSettings((current) => ({
-                                  ...current,
-                                  advanced: {
-                                    ...(current.advanced ?? defaultHybridAdvancedSettings),
-                                    min_dwell_ms: rawValue ? Math.max(0, Number(rawValue)) : null,
-                                  },
-                                }))
-                              }
-                              onStep={(direction) =>
-                                setRunSettings((current) => {
-                                  const fallback = analysisPresetDefaults[current.analysis_preset].minDwellMs;
-                                  const currentValue = current.advanced?.min_dwell_ms ?? fallback;
-                                  return {
-                                    ...current,
-                                    advanced: {
-                                      ...(current.advanced ?? defaultHybridAdvancedSettings),
-                                      min_dwell_ms: Math.max(0, currentValue + direction * 25),
-                                    },
-                                  };
-                                })
-                              }
-                              value={runSettings.advanced?.min_dwell_ms ?? ''}
-                            />
-                            <span className="analysis-parameter-suffix">ms</span>
-                          </div>
+                    <label className="analysis-parameter-row" {...bindHint('extract_offset_ms')}>
+                      <span>extract offset</span>
+                      <div className="analysis-parameter-control">
+                        <div className="analysis-parameter-input-group">
+                          <AnalysisStepperInput
+                            ariaLabel="extract offset"
+                            className="analysis-parameter-input long"
+                            min={0}
+                            onChange={(rawValue) =>
+                              setRunSettings((current) => ({
+                                ...current,
+                                extract_offset_ms: clampInteger(rawValue === '' ? 0 : Number(rawValue), 0),
+                              }))
+                            }
+                            onStep={(direction) =>
+                              setRunSettings((current) => ({
+                                ...current,
+                                extract_offset_ms: clampInteger(current.extract_offset_ms + direction, 0),
+                              }))
+                            }
+                            value={runSettings.extract_offset_ms}
+                          />
+                          <span className="analysis-parameter-suffix">ms</span>
                         </div>
-                      </label>
-                      <span className="analysis-parameter-annotation">
-                        {runSettings.advanced?.min_dwell_ms
-                          ? `${runSettings.advanced.min_dwell_ms}ms minimum sustained change`
-                          : `Auto (${analysisPresetDefaults[runSettings.analysis_preset].minDwellMs}ms from preset)`}
-                      </span>
-                    </div>
+                      </div>
+                      {isExtractOffsetDirty && (
+                        <AnalysisResetDiamondButton
+                          className="outside"
+                          label="extract offset"
+                          onClick={() => setRunSettings((current) => ({ ...current, extract_offset_ms: projectDefaultSettings.extract_offset_ms }))}
+                        />
+                      )}
+                    </label>
 
-                    <div className="analysis-parameter-group">
-                      <label className="analysis-parameter-row">
-                        <span>settle window</span>
-                        <div className="analysis-parameter-control">
-                          <div className="analysis-parameter-input-group">
-                            <AnalysisStepperInput
-                              ariaLabel="hybrid settle window"
-                              className="analysis-parameter-input long"
-                              min={0}
-                              onChange={(rawValue) =>
-                                setRunSettings((current) => ({
-                                  ...current,
-                                  advanced: {
-                                    ...(current.advanced ?? defaultHybridAdvancedSettings),
-                                    settle_window_ms: rawValue ? Math.max(0, Number(rawValue)) : null,
-                                  },
-                                }))
-                              }
-                              onStep={(direction) =>
-                                setRunSettings((current) => {
-                                  const fallback = analysisPresetDefaults[current.analysis_preset].settleWindowMs;
-                                  const currentValue = current.advanced?.settle_window_ms ?? fallback;
-                                  return {
-                                    ...current,
-                                    advanced: {
-                                      ...(current.advanced ?? defaultHybridAdvancedSettings),
-                                      settle_window_ms: Math.max(0, currentValue + direction * 25),
-                                    },
-                                  };
-                                })
-                              }
-                              value={runSettings.advanced?.settle_window_ms ?? ''}
-                            />
-                            <span className="analysis-parameter-suffix">ms</span>
-                          </div>
-                        </div>
-                      </label>
-                      <span className="analysis-parameter-annotation">
-                        {runSettings.advanced?.settle_window_ms
-                          ? `${runSettings.advanced.settle_window_ms}ms quiet period before capturing the representative frame`
-                          : `Auto (${analysisPresetDefaults[runSettings.analysis_preset].settleWindowMs}ms from preset)`}
-                      </span>
-                    </div>
-
-                    <div className="analysis-mode-row">
-                      <span>ocr confirmation</span>
+                    <div className="analysis-mode-row" {...bindHint('allow_high_fps_sampling')}>
+                      <span>high-fps sampling</span>
                       <div className="analysis-parameter-control">
                         <div className="analysis-mode-toggle">
                           <button
-                            className={`analysis-mode-button ${runSettings.advanced?.enable_ocr === false ? 'active' : ''}`}
+                            className={`analysis-mode-button ${runSettings.allow_high_fps_sampling ? '' : 'active'}`}
                             onClick={() =>
-                              setRunSettings((current) => ({
-                                ...current,
-                                advanced: {
-                                  ...(current.advanced ?? defaultHybridAdvancedSettings),
-                                  enable_ocr: false,
-                                  ocr_backend: null,
-                                },
-                              }))
+                              setRunSettings((current) =>
+                                clampRunSettingsForRecording(
+                                  {
+                                    ...current,
+                                    allow_high_fps_sampling: false,
+                                  },
+                                  selectedRecordingSummary?.fps ?? null,
+                                ),
+                              )
                             }
                             type="button"
                           >
                             off
                           </button>
                           <button
-                            className={`analysis-mode-button ${runSettings.advanced?.enable_ocr === false ? '' : 'active'}`}
+                            className={`analysis-mode-button ${runSettings.allow_high_fps_sampling ? 'active' : ''}`}
                             onClick={() =>
-                              setRunSettings((current) => ({
-                                ...current,
-                                advanced: {
-                                  ...(current.advanced ?? defaultHybridAdvancedSettings),
-                                  enable_ocr: true,
-                                  ocr_backend: 'paddleocr',
-                                },
-                              }))
+                              setRunSettings((current) =>
+                                clampRunSettingsForRecording(
+                                  {
+                                    ...current,
+                                    allow_high_fps_sampling: true,
+                                  },
+                                  selectedRecordingSummary?.fps ?? null,
+                                ),
+                              )
                             }
                             type="button"
                           >
@@ -4241,274 +4519,60 @@ function AnalysisScreen({
                           </button>
                         </div>
                       </div>
-                    </div>
-                    <span className="analysis-parameter-annotation">
-                      Backend: {runSettings.advanced?.enable_ocr === false ? 'disabled' : runSettings.advanced?.ocr_backend ?? 'paddleocr'}
-                    </span>
-                  </details>
-                </>
-              ) : (
-                <details className="analysis-hybrid-advanced" open>
-                  <summary>
-                    <span>scene v1 tuning</span>
-                  </summary>
-                  <div className="analysis-parameter-group">
-                    <label className="analysis-parameter-row" {...bindHint('tolerance')}>
-                      <span>tolerance</span>
-                      <div className="analysis-parameter-control">
-                        <AnalysisStepperInput
-                          ariaLabel="tolerance"
-                          className="analysis-parameter-input short"
-                          max={100}
-                          min={1}
-                          onChange={(rawValue) =>
-                            setRunSettings((current) => ({
-                              ...current,
-                              tolerance: clampInteger(rawValue === '' ? 1 : Number(rawValue), 1, 100),
-                            }))
-                          }
-                          onStep={(direction) =>
-                            setRunSettings((current) => ({
-                              ...current,
-                              tolerance: clampInteger(current.tolerance + direction, 1, 100),
-                            }))
-                          }
-                          value={runSettings.tolerance}
-                        />
-                      </div>
-                      {isToleranceDirty && (
+                      {isHighFpsDirty && (
                         <AnalysisResetDiamondButton
                           className="outside"
-                          label="tolerance"
-                          onClick={() => setRunSettings((current) => ({ ...current, tolerance: projectDefaultSettings.tolerance }))}
+                          label="high-fps sampling"
+                          onClick={() =>
+                            setRunSettings((current) =>
+                              clampRunSettingsForRecording(
+                                {
+                                  ...current,
+                                  allow_high_fps_sampling: projectDefaultSettings.allow_high_fps_sampling,
+                                },
+                                selectedRecordingSummary?.fps ?? null,
+                              ),
+                            )
+                          }
                         />
                       )}
-                    </label>
-                    <span className="analysis-parameter-annotation">
-                      {runSettings.detector_mode === 'adaptive' ? 'adaptive' : 'content'} threshold: {mapToleranceToDetectorThreshold(runSettings.tolerance, runSettings.detector_mode)}
-                    </span>
-                  </div>
-                  <div className="analysis-parameter-group">
-                    <label className="analysis-parameter-row" {...bindHint('min_scene_gap_ms')}>
-                      <span>minimum scene gaps</span>
-                      <div className="analysis-parameter-control">
-                        <div className="analysis-parameter-input-group">
-                          <AnalysisStepperInput
-                            ariaLabel="minimum scene gaps"
-                            className="analysis-parameter-input long"
-                            min={0}
-                            onChange={(rawValue) =>
-                              setRunSettings((current) => ({
-                                ...current,
-                                min_scene_gap_ms: clampInteger(rawValue === '' ? 0 : Number(rawValue), 0),
-                              }))
-                            }
-                            onStep={(direction) =>
-                              setRunSettings((current) => ({
-                                ...current,
-                                min_scene_gap_ms: clampInteger(current.min_scene_gap_ms + direction, 0),
-                              }))
-                            }
-                            value={runSettings.min_scene_gap_ms}
+                    </div>
+
+                    <div className="analysis-parameter-group">
+                      <div className="analysis-mode-row" {...bindHint('detector_mode')}>
+                        <span>detector mode</span>
+                        <div className="analysis-parameter-control">
+                          <div className="analysis-mode-toggle">
+                            <button
+                              className={`analysis-mode-button ${runSettings.detector_mode === 'content' ? 'active' : ''}`}
+                              onClick={() => setRunSettings((current) => ({ ...current, detector_mode: 'content' }))}
+                              type="button"
+                            >
+                              content
+                            </button>
+                            <button
+                              className={`analysis-mode-button ${runSettings.detector_mode === 'adaptive' ? 'active' : ''}`}
+                              onClick={() => setRunSettings((current) => ({ ...current, detector_mode: 'adaptive' }))}
+                              type="button"
+                            >
+                              adaptive
+                            </button>
+                          </div>
+                        </div>
+                        {isDetectorModeDirty && (
+                          <AnalysisResetDiamondButton
+                            className="outside"
+                            label="detector mode"
+                            onClick={() => setRunSettings((current) => ({ ...current, detector_mode: projectDefaultSettings.detector_mode }))}
                           />
-                          <span className="analysis-parameter-suffix">ms</span>
-                        </div>
+                        )}
                       </div>
-                      {isMinSceneGapDirty && (
-                        <AnalysisResetDiamondButton
-                          className="outside"
-                          label="minimum scene gaps"
-                          onClick={() => setRunSettings((current) => ({ ...current, min_scene_gap_ms: projectDefaultSettings.min_scene_gap_ms }))}
-                        />
-                      )}
-                    </label>
-                    <span className="analysis-parameter-annotation">
-                      {(runSettings.min_scene_gap_ms / 1000).toFixed(1).replace(/\.0$/, '')}s on original timeline
-                    </span>
-                  </div>
-                  <div className="analysis-parameter-group">
-                    <label className="analysis-parameter-row" {...bindHint('sample_fps')}>
-                      <span>sample fps</span>
-                      <div className="analysis-parameter-control">
-                        <AnalysisStepperInput
-                          ariaLabel="sample fps"
-                          className="analysis-parameter-input short"
-                          max={sampleFpsGuardrail.maxSampleFps}
-                          min={1}
-                          onChange={(rawValue) =>
-                            setRunSettings((current) =>
-                              clampRunSettingsForRecording(
-                                {
-                                  ...current,
-                                  sample_fps: rawValue
-                                    ? clampInteger(Number(rawValue), 1, sampleFpsGuardrail.maxSampleFps)
-                                    : sampleFpsGuardrail.sourceFpsAvailable
-                                      ? null
-                                      : sampleFpsGuardrail.maxSampleFps,
-                                },
-                                selectedRecordingSummary?.fps ?? null,
-                              ),
-                            )
-                          }
-                          onStep={(direction) =>
-                            setRunSettings((current) =>
-                              clampRunSettingsForRecording(
-                                {
-                                  ...current,
-                                  sample_fps: clampInteger((current.sample_fps ?? 1) + direction, 1, sampleFpsGuardrail.maxSampleFps),
-                                },
-                                selectedRecordingSummary?.fps ?? null,
-                              ),
-                            )
-                          }
-                          value={runSettings.sample_fps ?? ''}
-                        />
-                      </div>
-                      {isSampleFpsDirty && (
-                        <AnalysisResetDiamondButton
-                          className="outside"
-                          label="sample fps"
-                          onClick={() => setRunSettings((current) => ({ ...current, sample_fps: projectDefaultSettings.sample_fps }))}
-                        />
-                      )}
-                    </label>
-                    <span className="analysis-parameter-annotation">
-                      {(() => {
-                        const sourceFps = selectedRecordingSummary?.fps ?? null;
-                        const sampleFps = runSettings.sample_fps;
-                        if (!sampleFps || !sourceFps) return sourceFps ? `every frame (~${Math.round(sourceFps)} fps source)` : null;
-                        const skip = Math.max(1, Math.round(sourceFps / sampleFps));
-                        return skip > 1 ? `~every ${ordinal(skip)} frame (~${Math.round(sourceFps)} fps source)` : `every frame (~${Math.round(sourceFps)} fps source)`;
-                      })()}
-                    </span>
-                  </div>
-                  <label className="analysis-parameter-row" {...bindHint('extract_offset_ms')}>
-                    <span>extract offset</span>
-                    <div className="analysis-parameter-control">
-                      <div className="analysis-parameter-input-group">
-                        <AnalysisStepperInput
-                          ariaLabel="extract offset"
-                          className="analysis-parameter-input long"
-                          min={0}
-                          onChange={(rawValue) =>
-                            setRunSettings((current) => ({
-                              ...current,
-                              extract_offset_ms: clampInteger(rawValue === '' ? 0 : Number(rawValue), 0),
-                            }))
-                          }
-                          onStep={(direction) =>
-                            setRunSettings((current) => ({
-                              ...current,
-                              extract_offset_ms: clampInteger(current.extract_offset_ms + direction, 0),
-                            }))
-                          }
-                          value={runSettings.extract_offset_ms}
-                        />
-                        <span className="analysis-parameter-suffix">ms</span>
-                      </div>
+                      <span className="analysis-parameter-annotation">
+                        {runSettings.detector_mode === 'adaptive'
+                          ? 'compares against recent frames · threshold range 1–7'
+                          : 'compares to previous frame · threshold range 8–48'}
+                      </span>
                     </div>
-                    {isExtractOffsetDirty && (
-                      <AnalysisResetDiamondButton
-                        className="outside"
-                        label="extract offset"
-                        onClick={() => setRunSettings((current) => ({ ...current, extract_offset_ms: projectDefaultSettings.extract_offset_ms }))}
-                      />
-                    )}
-                  </label>
-
-                  <div className="analysis-mode-row" {...bindHint('allow_high_fps_sampling')}>
-                    <span>high-fps sampling</span>
-                    <div className="analysis-parameter-control">
-                      <div className="analysis-mode-toggle">
-                        <button
-                          className={`analysis-mode-button ${runSettings.allow_high_fps_sampling ? '' : 'active'}`}
-                          onClick={() =>
-                            setRunSettings((current) =>
-                              clampRunSettingsForRecording(
-                                {
-                                  ...current,
-                                  allow_high_fps_sampling: false,
-                                },
-                                selectedRecordingSummary?.fps ?? null,
-                              ),
-                            )
-                          }
-                          type="button"
-                        >
-                          off
-                        </button>
-                        <button
-                          className={`analysis-mode-button ${runSettings.allow_high_fps_sampling ? 'active' : ''}`}
-                          onClick={() =>
-                            setRunSettings((current) =>
-                              clampRunSettingsForRecording(
-                                {
-                                  ...current,
-                                  allow_high_fps_sampling: true,
-                                },
-                                selectedRecordingSummary?.fps ?? null,
-                              ),
-                            )
-                          }
-                          type="button"
-                        >
-                          on
-                        </button>
-                      </div>
-                    </div>
-                    {isHighFpsDirty && (
-                      <AnalysisResetDiamondButton
-                        className="outside"
-                        label="high-fps sampling"
-                        onClick={() =>
-                          setRunSettings((current) =>
-                            clampRunSettingsForRecording(
-                              {
-                                ...current,
-                                allow_high_fps_sampling: projectDefaultSettings.allow_high_fps_sampling,
-                              },
-                              selectedRecordingSummary?.fps ?? null,
-                            ),
-                          )
-                        }
-                      />
-                    )}
-                  </div>
-
-                  <div className="analysis-parameter-group">
-                    <div className="analysis-mode-row" {...bindHint('detector_mode')}>
-                      <span>detector mode</span>
-                      <div className="analysis-parameter-control">
-                        <div className="analysis-mode-toggle">
-                          <button
-                            className={`analysis-mode-button ${runSettings.detector_mode === 'content' ? 'active' : ''}`}
-                            onClick={() => setRunSettings((current) => ({ ...current, detector_mode: 'content' }))}
-                            type="button"
-                          >
-                            content
-                          </button>
-                          <button
-                            className={`analysis-mode-button ${runSettings.detector_mode === 'adaptive' ? 'active' : ''}`}
-                            onClick={() => setRunSettings((current) => ({ ...current, detector_mode: 'adaptive' }))}
-                            type="button"
-                          >
-                            adaptive
-                          </button>
-                        </div>
-                      </div>
-                      {isDetectorModeDirty && (
-                        <AnalysisResetDiamondButton
-                          className="outside"
-                          label="detector mode"
-                          onClick={() => setRunSettings((current) => ({ ...current, detector_mode: projectDefaultSettings.detector_mode }))}
-                        />
-                      )}
-                    </div>
-                    <span className="analysis-parameter-annotation">
-                      {runSettings.detector_mode === 'adaptive'
-                        ? 'compares against recent frames · threshold range 1–7'
-                        : 'compares to previous frame · threshold range 8–48'}
-                    </span>
                   </div>
                 </details>
               )}

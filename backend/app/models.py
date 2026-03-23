@@ -70,7 +70,7 @@ class HybridAdvancedSettings(BaseModel):
 
 
 class RunSettings(BaseModel):
-    analysis_engine: AnalysisEngine = "scene_v1"
+    analysis_engine: AnalysisEngine = "hybrid_v2"
     analysis_preset: AnalysisPreset = "balanced"
     advanced: HybridAdvancedSettings | None = None
     tolerance: float = Field(default=50, ge=1, le=100)

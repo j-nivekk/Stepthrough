@@ -75,6 +75,24 @@ def test_hybrid_run_completes_and_serializes_engine_metadata(client: TestClient,
     assert detail['candidates'][0]['score_breakdown'] is not None
 
 
+def test_run_creation_defaults_to_hybrid_v2_engine(client: TestClient, video_factory, wait_for_run) -> None:
+    project = _create_project(client)
+    video = video_factory('default-engine.mp4', ['red'])
+    recording = _import_video(client, project['id'], video)
+
+    response = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={'tolerance': 50, 'min_scene_gap_ms': 900, 'sample_fps': 4, 'detector_mode': 'content', 'extract_offset_ms': 200},
+    )
+
+    assert response.status_code == 200
+    run = response.json()
+    assert run['analysis_engine'] == 'hybrid_v2'
+    assert run['analysis_preset'] == 'balanced'
+    detail = wait_for_run(client, run['id'])
+    assert detail['summary']['analysis_engine'] == 'hybrid_v2'
+
+
 def test_abort_blocks_recording_delete_until_run_stops(client: TestClient, video_factory, wait_for_run, monkeypatch) -> None:
     import app.main as main
     from app.services.detection import CancellationRequested
