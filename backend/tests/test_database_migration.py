@@ -85,6 +85,14 @@ def test_init_db_migrates_existing_detection_runs(monkeypatch, tmp_path) -> None
     with sqlite3.connect(db_path) as conn:
         columns = {row[1] for row in conn.execute('PRAGMA table_info(detection_runs)').fetchall()}
         assert 'phase' in columns
+        assert 'analysis_engine' in columns
+        assert 'analysis_preset' in columns
+        assert 'analysis_advanced' in columns
+        assert 'analysis_config' in columns
+        candidate_columns = {row[1] for row in conn.execute('PRAGMA table_info(candidate_frames)').fetchall()}
+        assert 'perceptual_hash' in candidate_columns
+        assert 'ocr_text' in candidate_columns
+        assert 'score_breakdown' in candidate_columns
         event_tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert 'run_events' in event_tables
         phase = conn.execute("SELECT phase FROM detection_runs WHERE id = 'run-1'").fetchone()[0]

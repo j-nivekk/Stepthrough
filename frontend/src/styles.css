@@ -3554,3 +3554,154 @@ button:disabled {
     pointer-events: auto;
   }
 }
+
+.analysis-hybrid-advanced {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 12px;
+  padding-top: 18px;
+}
+
+.analysis-hybrid-advanced summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: 13px;
+  gap: 12px;
+  justify-content: space-between;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.analysis-compare-shell {
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px;
+}
+
+.analysis-compare-head {
+  align-items: end;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.analysis-compare-head h3 {
+  margin: 4px 0 0;
+}
+
+.analysis-compare-select-wrap {
+  align-items: center;
+  display: flex;
+}
+
+.analysis-compare-select {
+  background: var(--panel-strong);
+  border: 1px solid var(--border);
+  min-width: 280px;
+  padding: 10px 12px;
+}
+
+.analysis-compare-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.analysis-compare-summary span {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
+.analysis-compare-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.analysis-compare-card {
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.analysis-compare-card-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.analysis-compare-badge {
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  text-transform: uppercase;
+}
+
+.analysis-compare-badge.both {
+  background: color-mix(in srgb, var(--brand) 18%, white);
+}
+
+.analysis-compare-badge.timing_shifted {
+  background: color-mix(in srgb, var(--warning) 18%, white);
+}
+
+.analysis-compare-badge.left_only,
+.analysis-compare-badge.right_only {
+  background: color-mix(in srgb, var(--surface) 70%, white);
+}
+
+.analysis-compare-card-columns {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.analysis-compare-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.analysis-compare-column small {
+  color: var(--muted);
+}
+
+.analysis-compare-column-label {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.analysis-compare-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.analysis-compare-metrics span {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.analysis-compare-image {
+  border: 1px solid var(--border);
+  display: block;
+  max-width: 100%;
+}
+
+.analysis-compare-empty {
+  color: var(--muted);
+  margin: 0;
+}

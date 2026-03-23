@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import shutil
 from pathlib import Path
@@ -64,6 +65,7 @@ from .services.detection import (
     detect_candidates,
 )
 from .services.export import build_accepted_steps, create_export_bundle
+from .services.hybrid_detection import detect_candidates_hybrid, resolve_hybrid_config
 from .services.jobs import JobManager
 from .services.similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string
 from .services.video import (
@@ -91,7 +93,7 @@ app = FastAPI(title="Stepthrough API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -131,11 +133,19 @@ def _serialize_project(row: dict) -> ProjectResponse:
 
 
 def _serialize_run_summary(row: dict) -> DetectionRunSummary:
+    advanced = None
+    if isinstance(row.get("analysis_advanced"), str):
+        advanced = json.loads(row["analysis_advanced"])
+    elif row.get("analysis_advanced"):
+        advanced = row["analysis_advanced"]
     return DetectionRunSummary(
         id=row["id"],
         recording_id=row["recording_id"],
         status=row["status"],
         phase=row.get("phase") or "queued",
+        analysis_engine=row.get("analysis_engine") or "scene_v1",
+        analysis_preset=row.get("analysis_preset") or "balanced",
+        advanced=advanced,
         detector_mode=row["detector_mode"],
         tolerance=row["tolerance"],
         min_scene_gap_ms=row["min_scene_gap_ms"],
@@ -173,6 +183,12 @@ def _serialize_recording(row: dict) -> RecordingImportResponse:
 
 
 def _serialize_candidate(row: dict) -> CandidateFrameResponse:
+    score_breakdown = row.get("score_breakdown")
+    if isinstance(score_breakdown, str):
+        try:
+            score_breakdown = json.loads(score_breakdown)
+        except json.JSONDecodeError:
+            score_breakdown = None
     return CandidateFrameResponse(
         id=row["id"],
         run_id=row["run_id"],
@@ -187,6 +203,7 @@ def _serialize_candidate(row: dict) -> CandidateFrameResponse:
         status=row["status"],
         title=row.get("title"),
         notes=row.get("notes"),
+        score_breakdown=score_breakdown,
         revisit_group_id=row.get("revisit_group_id"),
         similar_to_candidate_id=row.get("similar_to_candidate_id"),
         similarity_distance=row.get("similarity_distance"),
@@ -307,6 +324,10 @@ def _sample_fps_guardrail(recording_fps: float, allow_high_fps_sampling: bool) -
 
 
 def _validate_run_settings_for_recording(recording: dict[str, Any], settings: RunSettings) -> None:
+    if settings.analysis_engine == "hybrid_v2":
+        resolve_hybrid_config(settings, recording["fps"])
+        return
+
     max_sample_fps, source_allowed = _sample_fps_guardrail(recording["fps"], settings.allow_high_fps_sampling)
     if settings.sample_fps is None:
         if not source_allowed:
@@ -342,10 +363,11 @@ def _resequence_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, A
                 "detector_index": index,
                 "candidate_origin": candidate.get("candidate_origin") or "detected",
                 "timestamp_tc": display_timecode(candidate["timestamp_ms"]),
-                "scene_score": 0.0,
+                "scene_score": candidate.get("scene_score") or 0.0,
                 "revisit_group_id": None,
                 "similar_to_candidate_id": None,
                 "similarity_distance": None,
+                "score_breakdown": candidate.get("score_breakdown"),
                 "updated_at": updated_at,
             }
         )
@@ -361,8 +383,12 @@ def _run_detection_job(run_id: str) -> None:
     manager = _job_manager()
     temp_root: Path | None = None
     try:
+        detect_fn = detect_candidates
         project, recording, run = _run_context(run_id)
         settings = RunSettings(
+            analysis_engine=run.get("analysis_engine") or "scene_v1",
+            analysis_preset=run.get("analysis_preset") or "balanced",
+            advanced=json.loads(run["analysis_advanced"]) if run.get("analysis_advanced") else None,
             tolerance=run["tolerance"],
             min_scene_gap_ms=run["min_scene_gap_ms"],
             sample_fps=run["sample_fps"],
@@ -370,6 +396,8 @@ def _run_detection_job(run_id: str) -> None:
             detector_mode=run["detector_mode"],
             extract_offset_ms=run["extract_offset_ms"],
         )
+        if settings.analysis_engine == "hybrid_v2":
+            detect_fn = detect_candidates_hybrid
         current_run_dir, target_frames_dir = _run_artifact_paths(project, recording, run_id)
         current_run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -386,12 +414,16 @@ def _run_detection_job(run_id: str) -> None:
             completed_at=None,
         )
 
+        if settings.analysis_engine == "hybrid_v2":
+            resolved_config = resolve_hybrid_config(settings, recording["fps"])
+            update_run(run_id, analysis_config=json.dumps(resolved_config.__dict__))
+
         video_path = absolute_data_path(recording["source_path"])
 
         def publish_progress(phase: str, message: str, progress: float, level: str) -> None:
             _set_run_state(run_id, status="running", phase=phase, progress=progress, message=message, level=level)
 
-        candidates = detect_candidates(
+        candidates = detect_fn(
             video_path=video_path,
             frames_dir=frames_path,
             duration_ms=recording["duration_ms"],
@@ -409,7 +441,11 @@ def _run_detection_job(run_id: str) -> None:
         clear_export_bundle_for_run(run_id)
 
         candidate_count = len(normalized_candidates)
-        completion_message = f"Prepared {candidate_count} screenshot candidates"
+        completion_message = (
+            f"Prepared {candidate_count} screenshot candidates with hybrid ui-change detection"
+            if settings.analysis_engine == "hybrid_v2"
+            else f"Prepared {candidate_count} screenshot candidates"
+        )
         
         _set_run_state(
             run_id,
@@ -683,8 +719,11 @@ def runs_add_manual_candidate(run_id: str, payload: ManualCandidateCreate) -> Ca
         "status": "pending",
         "title": None,
         "notes": None,
-        "image_hash": hash_to_hex(fingerprint.ahash),
+        "image_hash": hash_to_hex(fingerprint.average_hash),
+        "perceptual_hash": hash_to_hex(fingerprint.perceptual_hash),
         "histogram_signature": histogram_to_string(fingerprint.histogram),
+        "ocr_text": None,
+        "score_breakdown": None,
         "revisit_group_id": None,
         "similar_to_candidate_id": None,
         "similarity_distance": None,
