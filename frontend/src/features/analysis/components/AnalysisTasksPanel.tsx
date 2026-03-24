@@ -16,6 +16,7 @@ export interface AnalysisTasksPanelProps {
   analysisTaskItems: AnalysisTaskItem[];
   bulkDeletePending: boolean;
   bulkExportPending: boolean;
+  enableV1Engine: boolean;
   expandedTaskRunId: string | null;
   groupedTaskItems: AnalysisTaskGroup[];
   onAbortRun: (runId: string) => void;
@@ -44,6 +45,7 @@ export function AnalysisTasksPanel({
   analysisTaskItems,
   bulkDeletePending,
   bulkExportPending,
+  enableV1Engine,
   expandedTaskRunId,
   groupedTaskItems,
   onAbortRun,
@@ -82,13 +84,17 @@ export function AnalysisTasksPanel({
     const taskSettings: AnalysisTaskRowSetting[] =
       run.analysis_engine === 'hybrid_v2'
         ? [
-            {
-              key: 'engine',
-              label: 'engine',
-              value: formatAnalysisEngineLabel(run.analysis_engine),
-              valueClassName: 'mode',
-              isDirty: run.analysis_engine !== projectDefaultSettings.analysis_engine,
-            },
+            ...(enableV1Engine
+              ? [
+                  {
+                    key: 'engine',
+                    label: 'engine',
+                    value: formatAnalysisEngineLabel(run.analysis_engine),
+                    valueClassName: 'mode',
+                    isDirty: run.analysis_engine !== projectDefaultSettings.analysis_engine,
+                  },
+                ]
+              : []),
             {
               key: 'preset',
               label: 'preset',

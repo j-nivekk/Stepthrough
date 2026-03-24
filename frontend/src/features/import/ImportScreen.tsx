@@ -60,17 +60,17 @@ export function ImportScreen({
 
         {(healthMessage || ocrStatusMessage || ocrWarnings.length > 0 || appError) && (
           <div className="entry-notices">
+            {ocrWarnings.length > 0 ? (
+              <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
+                dismiss
+              </button>
+            ) : null}
             {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
             {ocrStatusMessage && (
               <p className={ocrStatusTone === 'warning' ? 'entry-notice warning' : 'entry-notice'}>
                 {ocrStatusMessage}
               </p>
             )}
-            {ocrWarnings.length > 0 ? (
-              <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
-                dismiss OCR details
-              </button>
-            ) : null}
             {ocrWarnings.map((warning) => (
               <p className="entry-notice diagnostic" key={warning}>
                 OCR detail: {warning}

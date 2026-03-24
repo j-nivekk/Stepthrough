@@ -148,6 +148,23 @@ def _backfill_detection_run_phase(conn: sqlite3.Connection) -> None:
     )
 
 
+def reset_db() -> None:
+    """Drop all application tables and reinitialise the schema."""
+    ensure_app_dirs()
+    with connect() as conn:
+        conn.executescript("""
+            PRAGMA foreign_keys = OFF;
+            DROP TABLE IF EXISTS export_bundles;
+            DROP TABLE IF EXISTS run_events;
+            DROP TABLE IF EXISTS candidate_frames;
+            DROP TABLE IF EXISTS detection_runs;
+            DROP TABLE IF EXISTS recordings;
+            DROP TABLE IF EXISTS projects;
+            PRAGMA foreign_keys = ON;
+        """)
+    init_db()
+
+
 def init_db() -> None:
     ensure_app_dirs()
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)

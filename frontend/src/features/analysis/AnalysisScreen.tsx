@@ -74,6 +74,7 @@ export interface AnalysisScreenProps {
   acceptedStepSimilarityLinks: Map<string, SimilarLink>;
   abortRunPending: boolean;
   activeProject: Project | null;
+  enableV1Engine: boolean;
   analysisActionMessage: string;
   analysisTaskItems: AnalysisTaskItem[];
   appError: string;
@@ -142,6 +143,7 @@ export function AnalysisScreen({
   abortRunPending,
   activeProject,
   analysisActionMessage,
+  enableV1Engine,
   analysisTaskItems,
   appError,
   bulkDeletePending,
@@ -1099,17 +1101,17 @@ export function AnalysisScreen({
 
         {(healthMessage || (ocrStatus !== 'available' && ocrStatusMessage) || ocrWarnings.length > 0 || appError || liveMessage || settingsFeedback || analysisActionMessage) && (
           <div aria-atomic="true" aria-live="polite" className="analysis-notices" role="status">
+            {ocrWarnings.length > 0 ? (
+              <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
+                dismiss
+              </button>
+            ) : null}
             {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
             {ocrStatus !== 'available' && ocrStatusMessage && (
               <p className={ocrStatus === 'unavailable' ? 'entry-notice warning' : 'entry-notice'}>
                 {ocrStatusMessage}
               </p>
             )}
-            {ocrWarnings.length > 0 ? (
-              <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
-                dismiss OCR details
-              </button>
-            ) : null}
             {ocrWarnings.map((warning) => (
               <p className="entry-notice diagnostic" key={warning}>
                 OCR detail: {warning}
@@ -1142,6 +1144,7 @@ export function AnalysisScreen({
             bindHint={bindHint}
             closePopover={closePopover}
             createRunPending={createRunPending}
+            enableV1Engine={enableV1Engine}
             healthWarning={healthWarning}
             hintCardPosition={hintCardPosition}
             hintText={hintText}
@@ -1193,6 +1196,7 @@ export function AnalysisScreen({
             analysisTaskItems={analysisTaskItems}
             bulkDeletePending={bulkDeletePending}
             bulkExportPending={bulkExportPending}
+            enableV1Engine={enableV1Engine}
             expandedTaskRunId={expandedTaskRunId}
             groupedTaskItems={groupedTaskItems}
             onAbortRun={onAbortRun}

@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import DATA_ROOT, build_tool_diagnostics, ensure_app_dirs
-from .database import init_db
+from .database import init_db, reset_db
 from .models import (
     CandidateFrameResponse,
     CandidateUpdate,
@@ -583,6 +583,20 @@ def health() -> HealthResponse:
         ocr_message=ocr_state.message,
         ocr_warnings=list(ocr_state.warnings),
     )
+
+
+@app.post("/admin/reset-db", status_code=204)
+def admin_reset_db() -> Response:
+    reset_db()
+    app.state.job_manager = JobManager()
+    return Response(status_code=204)
+
+
+@app.post("/admin/recheck-ocr", status_code=204)
+def admin_recheck_ocr() -> Response:
+    _set_ocr_state(_checking_ocr_state())
+    _start_background_ocr_probe()
+    return Response(status_code=204)
 
 
 @app.get("/projects", response_model=list[ProjectResponse])
