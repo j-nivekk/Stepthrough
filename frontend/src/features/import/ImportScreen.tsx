@@ -12,6 +12,9 @@ export interface ImportScreenProps {
   healthMessage: string | null;
   isDeleting: boolean;
   isUploadBlocked: boolean;
+  ocrStatusMessage: string | null;
+  ocrStatusTone: 'info' | 'warning';
+  ocrWarnings: string[];
   onDeleteRow: (localId: string) => void;
   onDone: () => void;
   onFilesSelected: (files: FileList | File[]) => void;
@@ -30,6 +33,9 @@ export function ImportScreen({
   healthMessage,
   isDeleting,
   isUploadBlocked,
+  ocrStatusMessage,
+  ocrStatusTone,
+  ocrWarnings,
   onDeleteRow,
   onDone,
   onFilesSelected,
@@ -50,9 +56,19 @@ export function ImportScreen({
       <div className="entry-shell import-shell">
         <StageNavigator activeStage="import" className="entry-stage-nav" onNavigate={onNavigateStage} />
 
-        {(healthMessage || appError) && (
+        {(healthMessage || ocrStatusMessage || ocrWarnings.length > 0 || appError) && (
           <div className="entry-notices">
             {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
+            {ocrStatusMessage && (
+              <p className={ocrStatusTone === 'warning' ? 'entry-notice warning' : 'entry-notice'}>
+                {ocrStatusMessage}
+              </p>
+            )}
+            {ocrWarnings.map((warning) => (
+              <p className="entry-notice diagnostic" key={warning}>
+                OCR detail: {warning}
+              </p>
+            ))}
             {appError && <p className="entry-notice error">{appError}</p>}
           </div>
         )}

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import json
 import math
 import shutil
 from pathlib import Path
-from typing import Any
+from threading import Thread
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
@@ -92,6 +94,14 @@ from .utils import sanitize_filename, utc_now
 
 TERMINAL_WEBSOCKET_STATES = {"completed", "failed", "cancelled"}
 
+
+@dataclass(frozen=True)
+class OcrHealthState:
+    status: Literal["checking", "available", "unavailable"]
+    available: bool | None
+    message: str
+    warnings: tuple[str, ...] = ()
+
 app = FastAPI(title="Stepthrough API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
@@ -102,14 +112,63 @@ app.add_middleware(
 )
 
 
+def _checking_ocr_state() -> OcrHealthState:
+    return OcrHealthState(
+        status="checking",
+        available=None,
+        message="Checking PaddleOCR availability in the background.",
+    )
+
+
+def _get_ocr_state() -> OcrHealthState:
+    return getattr(app.state, "ocr_state", _checking_ocr_state())
+
+
+def _set_ocr_state(state: OcrHealthState) -> None:
+    app.state.ocr_state = state
+
+
+def _refresh_ocr_state() -> None:
+    clear_probe_cache = getattr(probe_paddleocr_availability, "cache_clear", None)
+    if callable(clear_probe_cache):
+        clear_probe_cache()
+    try:
+        result = probe_paddleocr_availability()
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        details = " ".join(str(exc).split()) or exc.__class__.__name__
+        _set_ocr_state(
+            OcrHealthState(
+                status="unavailable",
+                available=False,
+                message=f"PaddleOCR availability check failed in the backend environment: {details}",
+            )
+        )
+        return
+
+    _set_ocr_state(
+        OcrHealthState(
+            status="available" if result.available else "unavailable",
+            available=result.available,
+            message=result.message,
+            warnings=result.warnings,
+        )
+    )
+
+
+def _start_background_ocr_probe() -> None:
+    worker = Thread(target=_refresh_ocr_state, name="stepthrough-ocr-probe", daemon=True)
+    app.state.ocr_probe_thread = worker
+    worker.start()
+
+
 @app.on_event("startup")
 def startup() -> None:
     ensure_app_dirs()
     init_db()
     app.state.tool_diagnostics = build_tool_diagnostics()
-    probe_paddleocr_availability.cache_clear()
-    app.state.ocr_available, app.state.ocr_message = probe_paddleocr_availability()
+    _set_ocr_state(_checking_ocr_state())
     app.state.job_manager = JobManager()
+    _start_background_ocr_probe()
 
 
 app.mount("/assets", StaticFiles(directory=str(DATA_ROOT), check_dir=False), name="assets")
@@ -128,7 +187,7 @@ def _require_tools() -> None:
 def _lock_unavailable_ocr(settings: RunSettings) -> RunSettings:
     if settings.analysis_engine != "hybrid_v2" or settings.advanced is None:
         return settings
-    if getattr(app.state, "ocr_available", True):
+    if _get_ocr_state().available is not False:
         return settings
     if settings.advanced.enable_ocr is False and settings.advanced.ocr_backend is None:
         return settings
@@ -513,13 +572,16 @@ def root() -> dict[str, str]:
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     diagnostics = app.state.tool_diagnostics
+    ocr_state = _get_ocr_state()
     return HealthResponse(
         ffmpeg_available=diagnostics.ffmpeg_available,
         ffprobe_available=diagnostics.ffprobe_available,
-        ocr_available=getattr(app.state, "ocr_available", True),
+        ocr_status=ocr_state.status,
+        ocr_available=ocr_state.available,
         missing_tools=list(diagnostics.missing_tools),
         message=diagnostics.message,
-        ocr_message=getattr(app.state, "ocr_message", "PaddleOCR availability has not been checked yet."),
+        ocr_message=ocr_state.message,
+        ocr_warnings=list(ocr_state.warnings),
     )
 
 

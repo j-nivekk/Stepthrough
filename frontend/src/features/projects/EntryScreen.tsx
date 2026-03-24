@@ -19,6 +19,10 @@ export interface EntryScreenProps {
   projectName: string;
   projects: Project[];
   projectsLoading: boolean;
+  projectsStatusMessage: string | null;
+  ocrStatusMessage: string | null;
+  ocrStatusTone: 'info' | 'warning';
+  ocrWarnings: string[];
   selectedProjectCanJumpToAnalysis: boolean;
   selectedProjectId: string | null;
 }
@@ -37,6 +41,10 @@ export function EntryScreen({
   projectName,
   projects,
   projectsLoading,
+  projectsStatusMessage,
+  ocrStatusMessage,
+  ocrStatusTone,
+  ocrWarnings,
   selectedProjectCanJumpToAnalysis,
   selectedProjectId,
 }: EntryScreenProps) {
@@ -73,9 +81,19 @@ export function EntryScreen({
         />
 
         <div className="entry-stage">
-          {(healthMessage || appError) && (
+          {(healthMessage || ocrStatusMessage || ocrWarnings.length > 0 || appError) && (
             <div className="entry-notices">
               {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
+              {ocrStatusMessage && (
+                <p className={ocrStatusTone === 'warning' ? 'entry-notice warning' : 'entry-notice'}>
+                  {ocrStatusMessage}
+                </p>
+              )}
+              {ocrWarnings.map((warning) => (
+                <p className="entry-notice diagnostic" key={warning}>
+                  OCR detail: {warning}
+                </p>
+              ))}
               {appError && <p className="entry-notice error">{appError}</p>}
             </div>
           )}
@@ -175,11 +193,13 @@ export function EntryScreen({
                   </div>
                 </div>
               ))}
-              {!projects.length && !projectsLoading && <p className="entry-empty-copy">No existing projects yet.</p>}
+              {projectsStatusMessage && <p className="entry-empty-copy">{projectsStatusMessage}</p>}
+              {!projectsStatusMessage && !projects.length && !projectsLoading && (
+                <p className="entry-empty-copy">No existing projects yet.</p>
+              )}
               {Boolean(projects.length) && !visibleProjects.length && !projectsLoading && (
                 <p className="entry-empty-copy">No projects match that search.</p>
               )}
-              {projectsLoading && <p className="entry-empty-copy">Loading projects…</p>}
             </div>
           </div>
         </div>

@@ -59,6 +59,7 @@ import type {
   CandidateStatus,
   ExportMode,
   GlobalRunPreset,
+  HealthResponse,
   Project,
   RecordingDetail,
   RecordingSummary,
@@ -92,9 +93,20 @@ function App() {
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
   }));
 
-  const healthQuery = useQuery({ queryKey: ['health'], queryFn: health, refetchInterval: 30_000 });
+  const healthQuery = useQuery<HealthResponse>({
+    queryKey: ['health'],
+    queryFn: health,
+    retry: false,
+    refetchInterval: (query) => {
+      const current = query.state.data;
+      return !current || current.ocr_status === 'checking' ? 1_500 : 30_000;
+    },
+  });
+  const backendReady = healthQuery.isSuccess;
+  const ocrStatus = healthQuery.data?.ocr_status ?? null;
   const ocrAvailability = healthQuery.data?.ocr_available;
-  const ocrStatusMessage = healthQuery.data?.ocr_message ?? null;
+  const ocrStatusMessage = backendReady ? healthQuery.data?.ocr_message ?? null : null;
+  const ocrWarnings = healthQuery.data?.ocr_warnings ?? [];
   const ocrAvailable = ocrAvailability !== false;
   const applyLocalOcrAvailability = (settings: RunSettings) =>
     enforceLocalOcrAvailability(settings, ocrAvailability);
@@ -103,7 +115,11 @@ function App() {
       applyLocalOcrAvailability(typeof next === 'function' ? next(current) : next),
     );
   };
-  const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: listProjects });
+  const projectsQuery = useQuery({
+    queryKey: ['projects'],
+    queryFn: listProjects,
+    enabled: backendReady,
+  });
   const projectDetailQuery = useQuery({
     queryKey: ['project', selectedProjectId],
     queryFn: () => getProject(selectedProjectId as string),
@@ -300,6 +316,17 @@ function App() {
     [projectDefaultSettings, selectedRecordingSummary?.fps, ocrAvailability],
   );
   const healthWarning = Boolean(healthQuery.data && healthQuery.data.missing_tools.length > 0);
+  const ocrEntryMessage = backendReady && ocrStatus !== 'available' ? ocrStatusMessage : null;
+  const ocrEntryMessageTone = ocrStatus === 'unavailable' ? 'warning' : 'info';
+  const projectsStatusMessage = !backendReady
+    ? 'Connecting to backend…'
+    : projectsQuery.isLoading
+      ? 'Loading projects…'
+      : projectsQuery.isError
+        ? projectsQuery.error instanceof Error
+          ? projectsQuery.error.message
+          : 'Could not load projects.'
+        : null;
   const presetText = useMemo(() => serializeRunPresetText(runSettings), [runSettings]);
   const uploadedImportItems = useMemo(() => getUploadedImportItems(importQueue), [importQueue]);
   const canCompleteImport = uploadedImportItems.length > 0;
@@ -1209,6 +1236,9 @@ function App() {
           healthMessage={healthWarning ? healthQuery.data?.message ?? 'Video tools are not ready.' : null}
           isCreating={createProjectMutation.isPending}
           deletingProjectId={deleteProjectMutation.isPending ? deleteProjectMutation.variables?.projectId ?? null : null}
+          ocrStatusMessage={ocrEntryMessage}
+          ocrStatusTone={ocrEntryMessageTone}
+          ocrWarnings={ocrWarnings}
           onCreate={handleCreateProject}
           onDeleteProject={confirmDeleteProject}
           onNavigateStage={setProjectStage}
@@ -1218,6 +1248,7 @@ function App() {
           projectName={projectName}
           projects={projectsQuery.data ?? []}
           projectsLoading={projectsQuery.isLoading}
+          projectsStatusMessage={projectsStatusMessage}
           selectedProjectCanJumpToAnalysis={selectedProjectCanJumpToAnalysis}
           selectedProjectId={selectedProjectId}
         />
@@ -1236,6 +1267,9 @@ function App() {
           healthMessage={healthWarning ? healthQuery.data?.message ?? 'Video tools are not ready.' : null}
           isDeleting={deleteRecordingMutation.isPending}
           isUploadBlocked={Boolean(healthWarning)}
+          ocrStatusMessage={ocrEntryMessage}
+          ocrStatusTone={ocrEntryMessageTone}
+          ocrWarnings={ocrWarnings}
           onDeleteRow={handleDeleteImportItem}
           onDone={() => void handleNavigateToAnalysis(false)}
           onFilesSelected={handleImportFileSelection}
@@ -1294,7 +1328,9 @@ function App() {
         onStartRun={handleStartAnalysisRun}
         onUpdateCandidate={(candidateId, payload) => updateCandidateMutation.mutate({ candidateId, payload })}
         ocrAvailable={ocrAvailable}
+        ocrStatus={ocrStatus}
         ocrStatusMessage={ocrStatusMessage}
+        ocrWarnings={ocrWarnings}
         previewRecording={previewRecording}
         projectDefaultSettings={effectiveProjectDefaultSettings}
         recordings={projectRecordings}

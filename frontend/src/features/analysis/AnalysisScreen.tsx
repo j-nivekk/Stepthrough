@@ -58,6 +58,7 @@ import type {
   CandidateFrame,
   CandidateStatus,
   ExportMode,
+  OcrStatus,
   Project,
   RecordingDetail,
   RecordingSummary,
@@ -116,7 +117,9 @@ export interface AnalysisScreenProps {
     payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>>,
   ) => void;
   ocrAvailable: boolean;
+  ocrStatus: OcrStatus | null;
   ocrStatusMessage: string | null;
+  ocrWarnings: string[];
   previewRecording: RecordingSummary | null;
   projectDefaultSettings: RunSettings;
   recordings: RecordingSummary[];
@@ -170,7 +173,9 @@ export function AnalysisScreen({
   onStartRun,
   onUpdateCandidate,
   ocrAvailable,
+  ocrStatus,
   ocrStatusMessage,
+  ocrWarnings,
   previewRecording,
   projectDefaultSettings,
   recordings,
@@ -987,9 +992,19 @@ export function AnalysisScreen({
           </div>
         </div>
 
-        {(healthMessage || appError || liveMessage || settingsFeedback || analysisActionMessage) && (
+        {(healthMessage || (ocrStatus !== 'available' && ocrStatusMessage) || ocrWarnings.length > 0 || appError || liveMessage || settingsFeedback || analysisActionMessage) && (
           <div aria-atomic="true" aria-live="polite" className="analysis-notices" role="status">
             {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
+            {ocrStatus !== 'available' && ocrStatusMessage && (
+              <p className={ocrStatus === 'unavailable' ? 'entry-notice warning' : 'entry-notice'}>
+                {ocrStatusMessage}
+              </p>
+            )}
+            {ocrWarnings.map((warning) => (
+              <p className="entry-notice diagnostic" key={warning}>
+                OCR detail: {warning}
+              </p>
+            ))}
             {appError && <p className="entry-notice error">{appError}</p>}
             {liveMessage && <p className="entry-notice">{liveMessage}</p>}
             {settingsFeedback && <p className="entry-notice">{settingsFeedback}</p>}

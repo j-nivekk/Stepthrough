@@ -1,25 +1,114 @@
 from __future__ import annotations
 
 import time
+from threading import Event
 
 from fastapi.testclient import TestClient
+
+
+def _set_ocr_state(main, *, status: str, available: bool | None, message: str, warnings: tuple[str, ...] = ()) -> None:
+    main._set_ocr_state(
+        main.OcrHealthState(
+            status=status,
+            available=available,
+            message=message,
+            warnings=warnings,
+        )
+    )
+
+
+def _configure_test_paths(monkeypatch, tmp_path):
+    import app.config as config
+    import app.database as database
+    import app.main as main
+    import app.storage as storage
+
+    data_root = tmp_path / 'data'
+    db_path = data_root / 'stepthrough.sqlite3'
+
+    monkeypatch.setattr(config, 'DATA_ROOT', data_root)
+    monkeypatch.setattr(config, 'DB_PATH', db_path)
+    monkeypatch.setattr(database, 'DB_PATH', db_path)
+    monkeypatch.setattr(storage, 'DATA_ROOT', data_root)
+    monkeypatch.setattr(main, 'DATA_ROOT', data_root)
+    return main
 
 
 def test_health_reports_ocr_availability(client: TestClient, monkeypatch) -> None:
     import app.main as main
 
-    monkeypatch.setattr(main.app.state, 'ocr_available', False)
-    monkeypatch.setattr(
-        main.app.state,
-        'ocr_message',
-        'Unsupported Paddle OCR stack in the backend Python environment. Install paddlepaddle==3.3.0 and paddleocr==3.3.0.',
+    _set_ocr_state(
+        main,
+        status='unavailable',
+        available=False,
+        message='Unsupported Paddle OCR stack in the backend Python environment. Install paddlepaddle==3.3.0 and paddleocr==3.3.0.',
     )
 
     response = client.get('/health')
 
     assert response.status_code == 200
+    assert response.json()['ocr_status'] == 'unavailable'
     assert response.json()['ocr_available'] is False
     assert 'Unsupported Paddle OCR stack' in response.json()['ocr_message']
+    assert response.json()['ocr_warnings'] == []
+
+
+def test_health_returns_checking_while_background_probe_runs(monkeypatch, tmp_path) -> None:
+    import app.main as main
+    import app.services.hybrid_detection as hybrid_detection
+
+    main = _configure_test_paths(monkeypatch, tmp_path)
+    allow_probe_to_finish = Event()
+    probe_started = Event()
+
+    def slow_probe():
+        probe_started.set()
+        allow_probe_to_finish.wait(timeout=1.0)
+        return hybrid_detection.PaddleOcrProbeResult(available=True, message='PaddleOCR ready.', warnings=('ccache warning',))
+
+    monkeypatch.setattr(main, 'probe_paddleocr_availability', slow_probe)
+
+    with TestClient(main.app) as client:
+        assert probe_started.wait(timeout=1.0)
+        response = client.get('/health')
+        payload = response.json()
+
+        assert response.status_code == 200
+        assert payload['ocr_status'] == 'checking'
+        assert payload['ocr_available'] is None
+        assert payload['ocr_message'] == 'Checking PaddleOCR availability in the background.'
+        assert payload['ocr_warnings'] == []
+        allow_probe_to_finish.set()
+
+
+def test_background_probe_updates_health_state(monkeypatch, tmp_path) -> None:
+    import app.main as main
+    import app.services.hybrid_detection as hybrid_detection
+
+    main = _configure_test_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        main,
+        'probe_paddleocr_availability',
+        lambda: hybrid_detection.PaddleOcrProbeResult(
+            available=False,
+            message='PaddleOCR is unavailable.',
+            warnings=('No ccache found.', 'Requests dependency mismatch.'),
+        ),
+    )
+
+    with TestClient(main.app) as client:
+        for _ in range(20):
+            payload = client.get('/health').json()
+            if payload['ocr_status'] != 'checking':
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError('OCR status did not leave checking state')
+
+    assert payload['ocr_status'] == 'unavailable'
+    assert payload['ocr_available'] is False
+    assert payload['ocr_message'] == 'PaddleOCR is unavailable.'
+    assert payload['ocr_warnings'] == ['No ccache found.', 'Requests dependency mismatch.']
 
 
 
@@ -100,11 +189,11 @@ def test_hybrid_run_locks_ocr_off_when_unavailable(
 ) -> None:
     import app.main as main
 
-    monkeypatch.setattr(main.app.state, 'ocr_available', False)
-    monkeypatch.setattr(
-        main.app.state,
-        'ocr_message',
-        'Local OCR mode requires both STEPTHROUGH_OCR_DET_MODEL_DIR and STEPTHROUGH_OCR_REC_MODEL_DIR.',
+    _set_ocr_state(
+        main,
+        status='unavailable',
+        available=False,
+        message='Local OCR mode requires both STEPTHROUGH_OCR_DET_MODEL_DIR and STEPTHROUGH_OCR_REC_MODEL_DIR.',
     )
 
     project = _create_project(client)
@@ -143,11 +232,11 @@ def test_hybrid_run_emits_warning_and_continues_when_ocr_init_fails(
     import app.main as main
     import app.services.hybrid_detection as hybrid_detection
 
-    monkeypatch.setattr(main.app.state, 'ocr_available', True)
-    monkeypatch.setattr(
-        main.app.state,
-        'ocr_message',
-        'PaddleOCR 3.3.0 is configured through the backend environment. First use may initialize or download models.',
+    _set_ocr_state(
+        main,
+        status='available',
+        available=True,
+        message='PaddleOCR 3.3.0 is configured through the backend environment. First use may initialize or download models.',
     )
     monkeypatch.setattr(hybrid_detection, '_maybe_load_ocr_engine', lambda config: (None, 'model bootstrap failed'))
 
@@ -190,11 +279,11 @@ def test_hybrid_run_reports_when_ocr_is_invoked(
         def extract_text(self, _image):
             return 'sample text'
 
-    monkeypatch.setattr(main.app.state, 'ocr_available', True)
-    monkeypatch.setattr(
-        main.app.state,
-        'ocr_message',
-        'PaddleOCR 3.3.0 is configured through the backend environment. First use may initialize or download models.',
+    _set_ocr_state(
+        main,
+        status='available',
+        available=True,
+        message='PaddleOCR 3.3.0 is configured through the backend environment. First use may initialize or download models.',
     )
     monkeypatch.setattr(hybrid_detection, '_maybe_load_ocr_engine', lambda config: (FakeOcrEngine(), None))
 

@@ -3,12 +3,16 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from functools import lru_cache
+from contextlib import contextmanager, redirect_stderr
 import json
+import logging
 import os
+from io import StringIO
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
+import warnings
 
 import cv2
 import numpy as np
@@ -205,6 +209,24 @@ PADDLEOCR_SUPPORTED_VERSION = "3.3.0"
 PADDLEPADDLE_SUPPORTED_VERSION = "3.3.0"
 
 
+@dataclass(frozen=True)
+class PaddleOcrProbeResult:
+    available: bool
+    message: str
+    warnings: tuple[str, ...] = ()
+
+
+class _ProbeLogCaptureHandler(logging.Handler):
+    def __init__(self, messages: list[str]) -> None:
+        super().__init__(level=logging.WARNING)
+        self._messages = messages
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = _clean_ocr_token(record.getMessage())
+        if message:
+            self._messages.append(message)
+
+
 def _installed_package_version(name: str) -> str | None:
     try:
         return version(name)
@@ -212,11 +234,16 @@ def _installed_package_version(name: str) -> str | None:
         return None
 
 
-def _load_paddleocr_symbols() -> tuple[type[Any], Any]:
+def _import_paddleocr_symbols() -> tuple[type[Any], Any]:
     import paddle  # type: ignore[import-not-found]
     from paddleocr import PaddleOCR  # type: ignore[import-not-found]
 
     return PaddleOCR, paddle
+
+
+def _load_paddleocr_symbols(runtime_config: OcrRuntimeConfig) -> tuple[type[Any], Any]:
+    _apply_paddle_model_source(runtime_config)
+    return _import_paddleocr_symbols()
 
 
 def _validate_paddle_stack_versions() -> str | None:
@@ -312,7 +339,7 @@ def _apply_paddle_model_source(runtime_config: OcrRuntimeConfig) -> None:
     # Keep startup checks offline-friendly and let the real init decide whether
     # model downloads are needed. BOS is the only documented override; the
     # default source is HuggingFace.
-    os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+    os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
     os.environ["PADDLE_PDX_CACHE_HOME"] = str(runtime_config.cache_dir)
     if runtime_config.model_source == "bos":
         os.environ["PADDLE_PDX_MODEL_SOURCE"] = "BOS"
@@ -320,10 +347,44 @@ def _apply_paddle_model_source(runtime_config: OcrRuntimeConfig) -> None:
         os.environ.pop("PADDLE_PDX_MODEL_SOURCE", None)
 
 
+def _dedupe_probe_messages(*groups: list[str]) -> tuple[str, ...]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for message in group:
+            cleaned = _clean_ocr_token(message)
+            if not cleaned or cleaned in seen:
+                continue
+            seen.add(cleaned)
+            ordered.append(cleaned)
+    return tuple(ordered)
+
+
+@contextmanager
+def _capture_probe_output() -> tuple[list[str], list[warnings.WarningMessage]]:
+    logged_messages: list[str] = []
+    paddlex_logger = logging.getLogger("paddlex")
+    original_handlers = list(paddlex_logger.handlers)
+    original_level = paddlex_logger.level
+    original_propagate = paddlex_logger.propagate
+    capture_handler = _ProbeLogCaptureHandler(logged_messages)
+    paddlex_logger.handlers = [capture_handler]
+    paddlex_logger.setLevel(logging.WARNING)
+    paddlex_logger.propagate = False
+
+    with warnings.catch_warnings(record=True) as caught_warnings, redirect_stderr(StringIO()):
+        warnings.simplefilter("always")
+        try:
+            yield logged_messages, caught_warnings
+        finally:
+            paddlex_logger.handlers = original_handlers
+            paddlex_logger.setLevel(original_level)
+            paddlex_logger.propagate = original_propagate
+
+
 class PaddleOcrEngine:
     def __init__(self, runtime_config: OcrRuntimeConfig) -> None:
-        _apply_paddle_model_source(runtime_config)
-        PaddleOCR, _paddle = _load_paddleocr_symbols()
+        PaddleOCR, _paddle = _load_paddleocr_symbols(runtime_config)
         init_kwargs: dict[str, Any] = {
             "lang": "en",
             "use_doc_orientation_classify": False,
@@ -343,31 +404,61 @@ class PaddleOcrEngine:
 
 
 @lru_cache(maxsize=1)
-def probe_paddleocr_availability() -> tuple[bool, str]:
+def probe_paddleocr_availability() -> PaddleOcrProbeResult:
     runtime_config = build_ocr_runtime_config()
     config_valid, config_error = validate_ocr_runtime_config(runtime_config)
     if not config_valid:
-        return False, config_error or "PaddleOCR is not configured for this backend environment."
-    try:
-        _load_paddleocr_symbols()
-    except ModuleNotFoundError as exc:  # pragma: no cover - depends on local install/runtime assets
-        missing_module = getattr(exc, "name", None) or "paddleocr"
-        return False, f"PaddleOCR 3.x is not installed in the backend Python environment: missing `{missing_module}`."
-    except Exception as exc:  # pragma: no cover - depends on local install/runtime assets
-        details = " ".join(str(exc).split()) or exc.__class__.__name__
-        return False, f"PaddleOCR 3.x could not be imported in the backend Python environment: {details}"
+        return PaddleOcrProbeResult(
+            available=False,
+            message=config_error or "PaddleOCR is not configured for this backend environment.",
+        )
+
+    with _capture_probe_output() as (logged_messages, caught_warnings):
+        try:
+            _load_paddleocr_symbols(runtime_config)
+        except ModuleNotFoundError as exc:  # pragma: no cover - depends on local install/runtime assets
+            warning_messages = _dedupe_probe_messages(
+                logged_messages,
+                [_clean_ocr_token(str(warning.message)) or "" for warning in caught_warnings],
+            )
+            missing_module = getattr(exc, "name", None) or "paddleocr"
+            return PaddleOcrProbeResult(
+                available=False,
+                message=f"PaddleOCR 3.x is not installed in the backend Python environment: missing `{missing_module}`.",
+                warnings=warning_messages,
+            )
+        except Exception as exc:  # pragma: no cover - depends on local install/runtime assets
+            warning_messages = _dedupe_probe_messages(
+                logged_messages,
+                [_clean_ocr_token(str(warning.message)) or "" for warning in caught_warnings],
+            )
+            details = " ".join(str(exc).split()) or exc.__class__.__name__
+            return PaddleOcrProbeResult(
+                available=False,
+                message=f"PaddleOCR 3.x could not be imported in the backend Python environment: {details}",
+                warnings=warning_messages,
+            )
+
+    warning_messages = _dedupe_probe_messages(
+        logged_messages,
+        [_clean_ocr_token(str(warning.message)) or "" for warning in caught_warnings],
+    )
     version_error = _validate_paddle_stack_versions()
     if version_error is not None:
-        return False, version_error
+        return PaddleOcrProbeResult(available=False, message=version_error, warnings=warning_messages)
     if runtime_config.model_source == "local":
-        return (
-            True,
-            "PaddleOCR 3.3.0 is configured for local model directories provided by the backend environment.",
+        return PaddleOcrProbeResult(
+            available=True,
+            message="PaddleOCR 3.3.0 is configured for local model directories provided by the backend environment.",
+            warnings=warning_messages,
         )
-    return (
-        True,
-        "PaddleOCR 3.3.0 is configured through the backend environment. "
-        f"First use may initialize or download models into `{runtime_config.cache_dir}`.",
+    return PaddleOcrProbeResult(
+        available=True,
+        message=(
+            "PaddleOCR 3.3.0 is configured through the backend environment. "
+            f"First use may initialize or download models into `{runtime_config.cache_dir}`."
+        ),
+        warnings=warning_messages,
     )
 
 
@@ -562,7 +653,7 @@ def _maybe_load_ocr_engine(config: HybridDetectorConfig) -> tuple[OcrEngine | No
     if not config_valid:
         return None, config_error
     try:
-        _load_paddleocr_symbols()
+        _load_paddleocr_symbols(runtime_config)
     except ModuleNotFoundError as exc:  # pragma: no cover - depends on local install/runtime assets
         missing_module = getattr(exc, "name", None) or "paddleocr"
         return None, f"PaddleOCR 3.x is not installed in the backend Python environment: missing `{missing_module}`."

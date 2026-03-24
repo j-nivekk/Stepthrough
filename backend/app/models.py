@@ -12,6 +12,7 @@ ExportMode = Literal["accepted", "all"]
 AnalysisEngine = Literal["scene_v1", "hybrid_v2"]
 AnalysisPreset = Literal["subtle_ui", "balanced", "noise_resistant"]
 OcrBackend = Literal["paddleocr"]
+OcrStatus = Literal["checking", "available", "unavailable"]
 RunPhase = Literal[
     "queued",
     "probing",
@@ -31,10 +32,12 @@ RunEventLevel = Literal["info", "warning", "error", "success"]
 class HealthResponse(BaseModel):
     ffmpeg_available: bool
     ffprobe_available: bool
-    ocr_available: bool
+    ocr_status: OcrStatus
+    ocr_available: bool | None
     missing_tools: list[str]
     message: str
     ocr_message: str
+    ocr_warnings: list[str]
 
 
 class ProjectCreate(BaseModel):
