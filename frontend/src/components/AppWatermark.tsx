@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 
 const APP_IDENTITY = 'stepthrough, v 0.1.0';
 
-export function AppWatermark() {
+interface AppWatermarkProps {
+  onOpenSettings: () => void;
+}
+
+export function AppWatermark({ onOpenSettings }: AppWatermarkProps) {
   const [showAbout, setShowAbout] = useState(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
 
@@ -25,6 +29,13 @@ export function AppWatermark() {
   return (
     <div className="app-watermark-shell" ref={shellRef}>
       <span className="app-watermark-text">{APP_IDENTITY}</span>
+      <button
+        className="app-watermark-about"
+        onClick={onOpenSettings}
+        type="button"
+      >
+        settings
+      </button>
       <button
         aria-expanded={showAbout}
         className={`app-watermark-about ${showAbout ? 'active' : ''}`}

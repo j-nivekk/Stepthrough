@@ -30,6 +30,7 @@ export interface AnalysisParametersPanelProps {
   bindHint: (key: AnalysisHintKey) => HintBindingProps;
   closePopover: () => void;
   createRunPending: boolean;
+  enableV1Engine: boolean;
   healthWarning: boolean;
   hintCardPosition: { left: number; top: number } | null;
   hintText: string | null;
@@ -79,6 +80,7 @@ export function AnalysisParametersPanel({
   bindHint,
   closePopover,
   createRunPending,
+  enableV1Engine,
   healthWarning,
   hintCardPosition,
   hintText,
@@ -280,62 +282,64 @@ export function AnalysisParametersPanel({
       </div>
 
       <div className="analysis-parameter-box" id="analysis-parameters">
-        <div className="analysis-parameter-group">
-          <div className="analysis-mode-row" {...bindHint('analysis_engine')}>
-            <span>analysis engine</span>
-            <div className="analysis-parameter-control">
-              <div className="analysis-mode-toggle">
-                <button
-                  className={`analysis-mode-button ${runSettings.analysis_engine === 'scene_v1' ? 'active' : ''}`}
-                  onClick={() =>
-                    setRunSettings((current) =>
-                      sanitizeRunSettings({
-                        ...current,
-                        analysis_engine: 'scene_v1',
-                        advanced: null,
-                      }),
-                    )
-                  }
-                  type="button"
-                >
-                  current v1
-                </button>
-                <button
-                  className={`analysis-mode-button ${runSettings.analysis_engine === 'hybrid_v2' ? 'active' : ''}`}
-                  onClick={() =>
-                    setRunSettings((current) =>
-                      sanitizeRunSettings({
-                        ...current,
-                        analysis_engine: 'hybrid_v2',
-                        advanced: current.advanced ?? { ...defaultHybridAdvancedSettings },
-                      }),
-                    )
-                  }
-                  type="button"
-                >
-                  hybrid v2
-                </button>
+        {enableV1Engine ? (
+          <div className="analysis-parameter-group">
+            <div className="analysis-mode-row" {...bindHint('analysis_engine')}>
+              <span>analysis engine</span>
+              <div className="analysis-parameter-control">
+                <div className="analysis-mode-toggle">
+                  <button
+                    className={`analysis-mode-button ${runSettings.analysis_engine === 'scene_v1' ? 'active' : ''}`}
+                    onClick={() =>
+                      setRunSettings((current) =>
+                        sanitizeRunSettings({
+                          ...current,
+                          analysis_engine: 'scene_v1',
+                          advanced: null,
+                        }),
+                      )
+                    }
+                    type="button"
+                  >
+                    current v1
+                  </button>
+                  <button
+                    className={`analysis-mode-button ${runSettings.analysis_engine === 'hybrid_v2' ? 'active' : ''}`}
+                    onClick={() =>
+                      setRunSettings((current) =>
+                        sanitizeRunSettings({
+                          ...current,
+                          analysis_engine: 'hybrid_v2',
+                          advanced: current.advanced ?? { ...defaultHybridAdvancedSettings },
+                        }),
+                      )
+                    }
+                    type="button"
+                  >
+                    hybrid v2
+                  </button>
+                </div>
               </div>
+              {isEngineDirty && (
+                <AnalysisResetDiamondButton
+                  className="outside"
+                  label="analysis engine"
+                  onClick={() =>
+                    setRunSettings((current) => ({
+                      ...current,
+                      analysis_engine: projectDefaultSettings.analysis_engine,
+                    }))
+                  }
+                />
+              )}
             </div>
-            {isEngineDirty && (
-              <AnalysisResetDiamondButton
-                className="outside"
-                label="analysis engine"
-                onClick={() =>
-                  setRunSettings((current) => ({
-                    ...current,
-                    analysis_engine: projectDefaultSettings.analysis_engine,
-                  }))
-                }
-              />
-            )}
+            <span className="analysis-parameter-annotation">
+              {runSettings.analysis_engine === 'hybrid_v2'
+                ? 'visual diff + selective OCR for interface-level changes'
+                : 'classic scene boundary detector for continuity and fast reruns'}
+            </span>
           </div>
-          <span className="analysis-parameter-annotation">
-            {runSettings.analysis_engine === 'hybrid_v2'
-              ? 'visual diff + selective OCR for interface-level changes'
-              : 'classic scene boundary detector for continuity and fast reruns'}
-          </span>
-        </div>
+        ) : null}
 
         {runSettings.analysis_engine === 'hybrid_v2' ? (
           <>

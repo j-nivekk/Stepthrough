@@ -150,3 +150,11 @@ export function exportRun(runId: string, mode: ExportMode = 'accepted'): Promise
 export function health(): Promise<HealthResponse> {
   return request<HealthResponse>('/health');
 }
+
+export function resetDatabase(): Promise<void> {
+  return request<void>('/admin/reset-db', { method: 'POST' });
+}
+
+export function recheckOcr(): Promise<void> {
+  return request<void>('/admin/recheck-ocr', { method: 'POST' });
+}

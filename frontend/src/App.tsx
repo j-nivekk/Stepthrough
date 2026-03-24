@@ -16,11 +16,15 @@ import {
   health,
   importRecording,
   listProjects,
+  recheckOcr,
+  resetDatabase,
   updateCandidate,
   updateProject,
   updateRecording,
 } from './api';
+import { AppSettings } from './components/AppSettings';
 import { AppWatermark } from './components/AppWatermark';
+import { PerformanceMonitor } from './components/PerformanceMonitor';
 import { ViewportWarning } from './components/ViewportWarning';
 import { AnalysisScreen } from './features/analysis/AnalysisScreen';
 import { ImportScreen } from './features/import/ImportScreen';
@@ -39,6 +43,7 @@ import {
   syncImportQueueWithRecordings,
   type ImportQueueItem,
 } from './lib/importQueue';
+import { loadAppPreferences, saveAppPreferences, type AppPreferences } from './lib/appPreferences';
 import {
   areRunSettingsEqual,
   clampRunSettingsForRecording,
@@ -95,6 +100,8 @@ function App() {
   const [dismissedOcrWarningsKey, setDismissedOcrWarningsKey] = useState<string | null>(null);
   const [bulkDeletePending, setBulkDeletePending] = useState(false);
   const [bulkExportPending, setBulkExportPending] = useState(false);
+  const [appPrefs, setAppPrefs] = useState<AppPreferences>(() => loadAppPreferences());
+  const [showSettings, setShowSettings] = useState(false);
   const [viewportSize, setViewportSize] = useState(() => ({
     height: typeof window === 'undefined' ? 900 : window.innerHeight,
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
@@ -345,6 +352,14 @@ function App() {
     ]);
   }
 
+  function updateAppPref<K extends keyof AppPreferences>(key: K, value: AppPreferences[K]) {
+    setAppPrefs((prev) => {
+      const next = { ...prev, [key]: value };
+      saveAppPreferences(next);
+      return next;
+    });
+  }
+
   useEffect(() => {
     if (!pendingTaskNavigation || !selectedRun || selectedRun.summary.id !== pendingTaskNavigation.runId) {
       return;
@@ -418,6 +433,14 @@ function App() {
       return areRunSettingsEqual(current, nextSettings) ? current : nextSettings;
     });
   }, [selectedRecordingSummary?.fps, runSettings.allow_high_fps_sampling]);
+
+  useEffect(() => {
+    if (!appPrefs.enableV1Engine && runSettings.analysis_engine === 'scene_v1') {
+      setRunSettings((current) =>
+        sanitizeRunSettings({ ...current, analysis_engine: 'hybrid_v2', advanced: current.advanced ?? null }),
+      );
+    }
+  }, [appPrefs.enableV1Engine, runSettings.analysis_engine]);
 
   useEffect(() => {
     if (ocrAvailability !== false) {
@@ -645,6 +668,26 @@ function App() {
     mutationFn: abortRun,
     onSuccess: (run) => {
       void refreshRunQueries(run.id, run.recording_id);
+    },
+    onError: (error: Error) => setAppError(error.message),
+  });
+
+  const resetDatabaseMutation = useMutation({
+    mutationFn: resetDatabase,
+    onSuccess: () => {
+      setSelectedProjectId(null);
+      setSelectedRecordingId(null);
+      setSelectedRunId(null);
+      setWorkflowStage('projects');
+      queryClient.clear();
+    },
+    onError: (error: Error) => setAppError(error.message),
+  });
+
+  const recheckOcrMutation = useMutation({
+    mutationFn: recheckOcr,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['health'] });
     },
     onError: (error: Error) => setAppError(error.message),
   });
@@ -1294,7 +1337,19 @@ function App() {
           selectedProjectCanJumpToAnalysis={selectedProjectCanJumpToAnalysis}
           selectedProjectId={selectedProjectId}
         />
-        <AppWatermark />
+        <AppWatermark onOpenSettings={() => setShowSettings(true)} />
+        <AppSettings
+          healthData={healthQuery.data}
+          isRecheckingOcr={recheckOcrMutation.isPending}
+          isResettingDatabase={resetDatabaseMutation.isPending}
+          open={showSettings}
+          prefs={appPrefs}
+          onChangePref={updateAppPref}
+          onClose={() => setShowSettings(false)}
+          onRecheckOcr={() => recheckOcrMutation.mutate()}
+          onResetDatabase={() => resetDatabaseMutation.mutate()}
+        />
+        {appPrefs.showPerfMonitor && <PerformanceMonitor />}
         {viewportWarning}
       </>
     );
@@ -1324,7 +1379,19 @@ function App() {
           rows={importQueue}
           selectionFeedback={importSelectionFeedback}
         />
-        <AppWatermark />
+        <AppWatermark onOpenSettings={() => setShowSettings(true)} />
+        <AppSettings
+          healthData={healthQuery.data}
+          isRecheckingOcr={recheckOcrMutation.isPending}
+          isResettingDatabase={resetDatabaseMutation.isPending}
+          open={showSettings}
+          prefs={appPrefs}
+          onChangePref={updateAppPref}
+          onClose={() => setShowSettings(false)}
+          onRecheckOcr={() => recheckOcrMutation.mutate()}
+          onResetDatabase={() => resetDatabaseMutation.mutate()}
+        />
+        {appPrefs.showPerfMonitor && <PerformanceMonitor />}
         {viewportWarning}
       </>
     );
@@ -1388,9 +1455,22 @@ function App() {
         selectedRunLoading={runDetailQuery.isLoading || runDetailQuery.isFetching}
         setRunSettings={setRunSettings}
         settingsFeedback={settingsFeedback}
+        enableV1Engine={appPrefs.enableV1Engine}
         showPresetText={presetText}
       />
-      <AppWatermark />
+      <AppWatermark onOpenSettings={() => setShowSettings(true)} />
+      <AppSettings
+        healthData={healthQuery.data}
+        isRecheckingOcr={recheckOcrMutation.isPending}
+        isResettingDatabase={resetDatabaseMutation.isPending}
+        open={showSettings}
+        prefs={appPrefs}
+        onChangePref={updateAppPref}
+        onClose={() => setShowSettings(false)}
+        onRecheckOcr={() => recheckOcrMutation.mutate()}
+        onResetDatabase={() => resetDatabaseMutation.mutate()}
+      />
+      {appPrefs.showPerfMonitor && <PerformanceMonitor />}
       {viewportWarning}
     </>
   );
