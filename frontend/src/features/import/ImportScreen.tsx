@@ -88,15 +88,15 @@ export function ImportScreen({
                   buttonClassName="entry-rename-button"
                   containerClassName="import-project-name"
                   onSave={(nextValue) => onRenameProject(project.id, nextValue)}
-                  renameLabel={`Rename project ${project.name}`}
+                  renameLabel={`rename project ${project.name}`}
                   textClassName="import-project-title"
                   value={project.name}
                 />
               ) : (
-                <p className="import-project-title">Loading project…</p>
+                <p className="import-project-title">loading project…</p>
               )}
               <p className="import-project-meta">
-                {project ? formatProjectSummary(project) : 'Loading project details…'}
+                {project ? formatProjectSummary(project) : 'loading project details…'}
               </p>
             </div>
             <div className="import-header-actions">
@@ -165,7 +165,7 @@ export function ImportScreen({
                     inputClassName="import-row-input"
                     lockedExtension
                     onSave={(nextValue) => onRenameRow(row.localId, nextValue)}
-                    renameLabel={`Rename video ${row.filename}`}
+                    renameLabel={`rename video ${row.filename}`}
                     textClassName="import-row-title"
                     value={row.filename}
                   />
@@ -198,7 +198,7 @@ export function ImportScreen({
               </div>
             ))}
             {!rows.length && (
-              <p className="entry-empty-copy import-empty-copy">Selected and uploaded videos will appear here.</p>
+              <p className="entry-empty-copy import-empty-copy">selected and uploaded videos will appear here.</p>
             )}
           </div>
         </div>

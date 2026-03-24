@@ -129,6 +129,7 @@ export interface AnalysisScreenProps {
   selectedRecording: RecordingDetail | null;
   selectedRecordingId: string | null;
   selectedRecordingSummary: RecordingSummary | null;
+  selectedRunId: string | null;
   selectedRun: RunDetail | null;
   selectedRunLoading?: boolean;
   setRunSettings: Dispatch<SetStateAction<RunSettings>>;
@@ -187,6 +188,7 @@ export function AnalysisScreen({
   selectedRecording,
   selectedRecordingId,
   selectedRecordingSummary,
+  selectedRunId,
   selectedRun,
   selectedRunLoading = false,
   setRunSettings,
@@ -244,30 +246,30 @@ export function AnalysisScreen({
   );
   const hintCopy: Record<AnalysisHintKey, string> = {
     analysis_engine:
-      'Choose the classic scene detector for continuity, or the hybrid detector to prioritize interface-level changes such as menus, buttons, and content shifts.',
+      'choose the classic scene detector for continuity, or the hybrid detector to prioritize interface-level changes such as menus, buttons, and content shifts.',
     analysis_preset:
       runSettings.analysis_engine === 'hybrid_v2'
         ? describeAnalysisPreset(runSettings)
-        : 'Hybrid presets only affect the v2 detector. Switch engines to use the UI-change pipeline.',
+        : 'hybrid presets only affect the v2 detector. switch engines to use the ui-change pipeline.',
     allow_high_fps_sampling: sampleFpsGuardrail.isHighFpsRecording
-      ? `Turn this on to sample above 30 fps or use source fps for this ~${sampleFpsGuardrail.sourceFpsCeiling} fps recording.`
-      : 'Use this only when you need denser sampling on recordings above 30 fps.',
+      ? `turn this on to sample above 30 fps or use source fps for this ~${sampleFpsGuardrail.sourceFpsCeiling} fps recording.`
+      : 'use this only when you need denser sampling on recordings above 30 fps.',
     detector_mode: describeDetectorMode(runSettings.detector_mode),
     extract_offset_ms: describeExtractOffset(runSettings.extract_offset_ms),
     hybrid_advanced:
       runSettings.analysis_engine === 'hybrid_v2'
-        ? 'Start with the preset. Use overrides only when a specific recording still misses or overfires on interface changes.'
-        : 'Hybrid advanced controls are only used by the v2 detector.',
+        ? 'start with the preset. use overrides only when a specific recording still misses or overfires on interface changes.'
+        : 'hybrid advanced controls are only used by the v2 detector.',
     hybrid_min_dwell_ms: describeHybridMinDwellHint(runSettings),
     hybrid_ocr_confirmation: describeHybridOcrConfirmationHint(),
     hybrid_sample_fps_override: describeHybridSampleFpsOverrideHint(runSettings),
     hybrid_settle_window_ms: describeHybridSettleWindowHint(runSettings),
-    load: 'Paste Stepthrough preset text to load a saved parameter set into the active analysis controls.',
+    load: 'paste stepthrough preset text to load a saved parameter set into the active analysis controls.',
     min_scene_gap_ms: describeMinSceneGap(runSettings.min_scene_gap_ms),
-    reset: 'Reset the current analysis parameters to this project or universal defaults.',
-    run: 'Start a new analysis task for the selected video using the current parameter set.',
+    reset: 'reset the current analysis parameters to this project or universal defaults.',
+    run: 'start a new analysis task for the selected video using the current parameter set.',
     sample_fps: describeSampleFps(runSettings.sample_fps, selectedRecordingSummary?.fps ?? null),
-    save: 'Save the current analysis parameters for this project or as universal defaults.',
+    save: 'save the current analysis parameters for this project or as universal defaults.',
     tolerance: describeTolerance(runSettings.tolerance, runSettings.detector_mode),
   };
   const activeHintKey = focusedHintKey ?? hoveredHintKey;
@@ -323,7 +325,7 @@ export function AnalysisScreen({
       return analysisTaskItems;
     }
     if (taskFilter === 'active') {
-      return analysisTaskItems.filter((item) => ['queued', 'running'].includes(item.run.status));
+      return analysisTaskItems.filter((item) => ['queued', 'running', 'awaiting_fallback'].includes(item.run.status));
     }
     if (taskFilter === 'completed') {
       return analysisTaskItems.filter((item) => item.run.status === 'completed');
@@ -1075,12 +1077,12 @@ export function AnalysisScreen({
                   buttonClassName="entry-rename-button"
                   containerClassName="analysis-project-name"
                   onSave={(nextValue) => onRenameProject(activeProject.id, nextValue)}
-                  renameLabel={`Rename project ${activeProject.name}`}
+                  renameLabel={`rename project ${activeProject.name}`}
                   textClassName="analysis-project-name-text"
                   value={activeProject.name}
                 />
               ) : (
-                <span className="analysis-project-name-text">Project</span>
+                <span className="analysis-project-name-text">project</span>
               )}
             </div>
             <p className="analysis-project-counts">{activeProject ? formatProjectCounts(activeProject) : ''}</p>
@@ -1215,7 +1217,8 @@ export function AnalysisScreen({
             onToggleTaskSelection={toggleTaskSelection}
             projectDefaultSettings={projectDefaultSettings}
             runNumberById={runNumberById}
-            selectedRunId={selectedRun?.summary.id ?? null}
+            selectedRunId={selectedRunId}
+            selectedRunSummary={selectedRun?.summary ?? null}
             selectedTaskRunIds={selectedTaskRunIds}
             taskClockMs={taskClockMs}
             taskFilter={taskFilter}
@@ -1286,7 +1289,7 @@ export function AnalysisScreen({
                         className="preview-control-btn"
                         disabled={!previewMatchesSelectedRun || timelineCandidates.length === 0}
                         onClick={() => handlePreviewJumpToPin('prev')}
-                        title="Jump to previous scene"
+                        title="jump to previous scene"
                         type="button"
                       >
                         <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 16 16" width="16">
@@ -1297,7 +1300,7 @@ export function AnalysisScreen({
                       <button
                         className="preview-control-btn"
                         onClick={() => handlePreviewStepFrame(-1)}
-                        title="Step back one frame (,)"
+                        title="step back one frame (,)"
                         type="button"
                       >
                         <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 16 16" width="16">
@@ -1307,7 +1310,7 @@ export function AnalysisScreen({
                       <button
                         className="preview-control-btn preview-control-btn--play"
                         onClick={handlePreviewPlayPause}
-                        title={isPreviewPlaying ? 'Pause (Space)' : 'Play (Space)'}
+                        title={isPreviewPlaying ? 'pause (space)' : 'play (space)'}
                         type="button"
                       >
                         {isPreviewPlaying ? (
@@ -1323,7 +1326,7 @@ export function AnalysisScreen({
                       <button
                         className="preview-control-btn"
                         onClick={() => handlePreviewStepFrame(1)}
-                        title="Step forward one frame (.)"
+                        title="step forward one frame (.)"
                         type="button"
                       >
                         <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 16 16" width="16">
@@ -1334,7 +1337,7 @@ export function AnalysisScreen({
                         className="preview-control-btn"
                         disabled={!previewMatchesSelectedRun || timelineCandidates.length === 0}
                         onClick={() => handlePreviewJumpToPin('next')}
-                        title="Jump to next scene"
+                        title="jump to next scene"
                         type="button"
                       >
                         <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 16 16" width="16">
@@ -1348,19 +1351,19 @@ export function AnalysisScreen({
                       <button
                         className="preview-control-btn preview-rate-btn"
                         onClick={handleCyclePlaybackRate}
-                        title="Playback speed"
+                        title="playback speed"
                         type="button"
                       >
                         {playbackRate === 1 ? '1×' : `${playbackRate}×`}
                       </button>
-                      <div className="preview-size-group" role="group" aria-label="Video size">
+                      <div className="preview-size-group" role="group" aria-label="video size">
                         {(['sm', 'md', 'lg'] as const).map((size) => (
                           <button
                             aria-pressed={previewSizeKey === size}
                             className={`preview-control-btn preview-size-btn ${previewSizeKey === size ? 'active' : ''}`}
                             key={size}
                             onClick={() => setPreviewSizeKey(size)}
-                            title={size === 'sm' ? 'Small' : size === 'md' ? 'Medium' : 'Large'}
+                            title={size === 'sm' ? 'small' : size === 'md' ? 'medium' : 'large'}
                             type="button"
                           >
                             <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
@@ -1385,7 +1388,7 @@ export function AnalysisScreen({
                             const timestampMs = getCurrentPreviewTimestampMs();
                             if (timestampMs !== null) handleCreateManualCandidate(timestampMs);
                           }}
-                          title="Mark the current frame as a new step (K)"
+                          title="mark the current frame as a new step (k)"
                           type="button"
                         >
                           {manualCapturePulseToken > 0 ? (
@@ -1395,7 +1398,7 @@ export function AnalysisScreen({
                             <path d="M8 2v12M2 8h12" />
                           </svg>
                           <span>mark</span>
-                          <kbd>K</kbd>
+                          <kbd>k</kbd>
                           {queuedManualMarkItems.length > 0 ? (
                             <span className="preview-mark-queue">{queuedManualMarkItems.length}</span>
                           ) : null}
@@ -1446,7 +1449,7 @@ export function AnalysisScreen({
                           {selectedRun.events.map((event) => (
                             <p className={`analysis-log-line ${event.level}`} key={event.id}>
                               <span className="analysis-log-line-meta">
-                                {new Date(event.created_at).toLocaleTimeString()} · {formatPhase(event.phase)}
+                                {new Date(event.created_at).toLocaleTimeString().toLocaleLowerCase()} · {formatPhase(event.phase)}
                               </span>
                               <span>{event.message}</span>
                               {typeof event.progress === 'number' ? (
@@ -1457,7 +1460,7 @@ export function AnalysisScreen({
                             </p>
                           ))}
                           {!selectedRun.events.length && (
-                            <p className="empty-copy">Progress messages will appear here once the run starts.</p>
+                            <p className="empty-copy">progress messages will appear here once the run starts.</p>
                           )}
                         </div>
                       </div>
@@ -1495,10 +1498,10 @@ export function AnalysisScreen({
                   <div className="analysis-compare-head">
                     <div className="analysis-compare-head-copy">
                       <p className="analysis-compare-head-eyebrow">comparison</p>
-                      <h3>Compare completed runs</h3>
+                      <h3>compare completed runs</h3>
                     </div>
                     <label className="analysis-compare-select-wrap">
-                      <span className="sr-only">Compare with another completed run</span>
+                      <span className="sr-only">compare with another completed run</span>
                       <select
                         className="analysis-compare-select"
                         onChange={(event) => setCompareRunId(event.target.value || null)}
@@ -1507,7 +1510,7 @@ export function AnalysisScreen({
                         <option value="">select another completed run</option>
                         {comparableRuns.map((run) => (
                           <option key={run.id} value={run.id}>
-                            {formatRunSettingsSummary(run)} · {new Date(run.created_at).toLocaleString()}
+                            {formatRunSettingsSummary(run)} · {new Date(run.created_at).toLocaleString().toLocaleLowerCase()}
                           </option>
                         ))}
                       </select>
@@ -1558,7 +1561,7 @@ export function AnalysisScreen({
                                   {row.left ? (
                                     <>
                                       <img
-                                        alt={`Selected run candidate at ${row.left.timestamp_tc}`}
+                                        alt={`selected run candidate at ${row.left.timestamp_tc}`}
                                         className="analysis-compare-image"
                                         src={absoluteApiUrl(row.left.image_url)}
                                       />
@@ -1566,7 +1569,7 @@ export function AnalysisScreen({
                                       <ComparisonMetrics candidate={row.left} />
                                     </>
                                   ) : (
-                                    <p className="analysis-compare-empty">No matching candidate</p>
+                                    <p className="analysis-compare-empty">no matching candidate</p>
                                   )}
                                 </div>
                                 <div className="analysis-compare-column">
@@ -1574,7 +1577,7 @@ export function AnalysisScreen({
                                   {row.right ? (
                                     <>
                                       <img
-                                        alt={`Comparison run candidate at ${row.right.timestamp_tc}`}
+                                        alt={`comparison run candidate at ${row.right.timestamp_tc}`}
                                         className="analysis-compare-image"
                                         src={absoluteApiUrl(row.right.image_url)}
                                       />
@@ -1582,7 +1585,7 @@ export function AnalysisScreen({
                                       <ComparisonMetrics candidate={row.right} />
                                     </>
                                   ) : (
-                                    <p className="analysis-compare-empty">No matching candidate</p>
+                                    <p className="analysis-compare-empty">no matching candidate</p>
                                   )}
                                 </div>
                               </div>
@@ -1592,10 +1595,10 @@ export function AnalysisScreen({
                       </div>
                     </>
                   ) : compareRunId ? (
-                    <p className="analysis-compare-guidance">Loading comparison run…</p>
+                    <p className="analysis-compare-guidance">loading comparison run…</p>
                   ) : (
                     <p className="analysis-compare-guidance">
-                      Select another completed run from this recording to compare outputs side by side.
+                      select another completed run from this recording to compare outputs side by side.
                     </p>
                   )}
                 </div>
@@ -1658,7 +1661,7 @@ export function AnalysisScreen({
 
                 {canShowTimeline ? (
                   <div className="candidate-timeline-shell">
-                    <div className="candidate-timeline-rail" aria-label="Candidate timeline">
+                    <div className="candidate-timeline-rail" aria-label="candidate timeline">
                       {previewMatchesSelectedRun ? (
                         <span
                           aria-hidden="true"
@@ -1720,7 +1723,7 @@ export function AnalysisScreen({
 
                 <div className="candidate-review-toolbar" id="analysis-review-toolbar">
                   <div className="candidate-review-nav-group">
-                    <div aria-label="Candidate review filters" className="candidate-filter-tabs" role="tablist">
+                    <div aria-label="candidate review filters" className="candidate-filter-tabs" role="tablist">
                       {candidateFilters.map((filter) => (
                         <button
                           aria-selected={activeCandidateFilter === filter}
@@ -1755,12 +1758,12 @@ export function AnalysisScreen({
                     </div>
                     {canReviewCandidates && (
                       <span
-                        aria-label="Keyboard shortcuts: A to accept, R to reject, U to reset pending, arrow keys to step"
+                        aria-label="keyboard shortcuts: a to accept, r to reject, u to reset pending, arrow keys to step"
                         className="candidate-review-key-hint"
                       >
-                        <span className="candidate-key-badge">A</span> accept {' · '}
-                        <span className="candidate-key-badge">R</span> reject {' · '}
-                        <span className="candidate-key-badge">U</span> reset {' · '}
+                        <span className="candidate-key-badge">a</span> accept {' · '}
+                        <span className="candidate-key-badge">r</span> reject {' · '}
+                        <span className="candidate-key-badge">u</span> reset {' · '}
                         <span className="candidate-key-badge">← →</span> step
                       </span>
                     )}
@@ -1806,12 +1809,12 @@ export function AnalysisScreen({
                         <>
                           <div className="candidate-export-name-stack">
                             <label className="candidate-export-name-wrap">
-                              <span className="sr-only">Export zip name</span>
+                              <span className="sr-only">export zip name</span>
                               <input
-                                aria-label="Export zip name"
+                                aria-label="export zip name"
                                 className="candidate-export-name-field"
                                 onChange={(event) => setExportNameDraft(event.target.value)}
-                                placeholder="Use server filename"
+                                placeholder="use server filename"
                                 value={exportNameDraft}
                               />
                               <span className="candidate-export-name-suffix">.zip</span>
@@ -1892,10 +1895,10 @@ export function AnalysisScreen({
                 ) : (
                   <p className="entry-empty-copy candidate-empty-copy">
                     {activeCandidateFilter === 'all'
-                      ? 'No scenes in this run.'
+                      ? 'no scenes in this run.'
                       : activeCandidateFilter === 'pending'
-                        ? 'No pending scenes left in this run.'
-                        : `No ${activeCandidateFilter} scenes in this view.`}
+                        ? 'no pending scenes left in this run.'
+                        : `no ${activeCandidateFilter} scenes in this view.`}
                   </p>
                 )}
               </>
@@ -1904,8 +1907,9 @@ export function AnalysisScreen({
         ) : selectedRecording ? (
           <section className="analysis-detail-section empty-state">
             <h2>{selectedRecording.filename}</h2>
-            {!selectedRunLoading && (
-              <p>Select a video name or a task link to review candidates, logs, and exports here.</p>
+            {selectedRunId && selectedRunLoading ? <p>loading task details…</p> : null}
+            {!selectedRunId && !selectedRunLoading && (
+              <p>select a video name or a task link to review candidates, logs, and exports here.</p>
             )}
           </section>
         ) : null}

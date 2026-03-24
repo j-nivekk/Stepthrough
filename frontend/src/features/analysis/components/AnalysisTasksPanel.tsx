@@ -1,9 +1,8 @@
-import { useState } from 'react';
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
 import { formatElapsedDuration } from '../../../lib/utils';
 import { analysisPresetDefaults, formatAnalysisEngineLabel, formatAnalysisPresetLabel } from '../../../lib/runSettings';
 import { formatPercent, formatRunShortTimestamp } from '../../../lib/formatters';
-import type { RunSettings } from '../../../types';
+import type { RunSettings, RunSummary } from '../../../types';
 
 interface AnalysisTaskRowSetting {
   isDirty: boolean;
@@ -34,6 +33,7 @@ export interface AnalysisTasksPanelProps {
   projectDefaultSettings: RunSettings;
   runNumberById: Map<string, number>;
   selectedRunId: string | null;
+  selectedRunSummary: RunSummary | null;
   selectedTaskRunIds: string[];
   taskClockMs: number;
   taskFilter: AnalysisTaskFilter;
@@ -61,23 +61,17 @@ export function AnalysisTasksPanel({
   projectDefaultSettings,
   runNumberById,
   selectedRunId,
+  selectedRunSummary,
   selectedTaskRunIds,
   taskClockMs,
   taskFilter,
   taskSelectMode,
 }: AnalysisTasksPanelProps) {
-  const [shakeRunId, setShakeRunId] = useState<string | null>(null);
-
-  function triggerShake(runId: string) {
-    setShakeRunId(runId);
-    setTimeout(() => setShakeRunId((current) => (current === runId ? null : current)), 500);
-  }
-
   function renderTaskRow(item: AnalysisTaskItem) {
-    const run = item.run;
+    const isSelected = selectedRunId === item.run.id;
+    const run = isSelected && selectedRunSummary?.id === item.run.id ? selectedRunSummary : item.run;
     const runNumber = runNumberById.get(run.id) ?? 1;
     const isExpanded = expandedTaskRunId === run.id;
-    const isSelected = selectedRunId === run.id;
     const isMarked = selectedTaskRunIds.includes(run.id);
     const isError = run.status === 'failed';
     const isDone = run.status === 'completed';
@@ -111,6 +105,30 @@ export function AnalysisTasksPanel({
                 (run.advanced?.sample_fps_override ?? null) !==
                 (projectDefaultSettings.advanced?.sample_fps_override ?? null),
             },
+            ...(run.advanced?.min_dwell_ms != null
+              ? [
+                  {
+                    key: 'dwell',
+                    label: 'dwell',
+                    value: `${run.advanced.min_dwell_ms}ms`,
+                    isDirty:
+                      (run.advanced.min_dwell_ms ?? null) !==
+                      (projectDefaultSettings.advanced?.min_dwell_ms ?? null),
+                  },
+                ]
+              : []),
+            ...(run.advanced?.settle_window_ms != null
+              ? [
+                  {
+                    key: 'settle',
+                    label: 'settle',
+                    value: `${run.advanced.settle_window_ms}ms`,
+                    isDirty:
+                      (run.advanced.settle_window_ms ?? null) !==
+                      (projectDefaultSettings.advanced?.settle_window_ms ?? null),
+                  },
+                ]
+              : []),
             {
               key: 'ocr',
               label: 'ocr',
@@ -172,7 +190,7 @@ export function AnalysisTasksPanel({
     }
 
     return (
-      <div className={`analysis-task-row ${isSelected ? 'selected' : ''} ${shakeRunId === run.id ? 'shake' : ''}`} key={run.id}>
+      <div className={`analysis-task-row ${isSelected ? 'selected' : ''}`} key={run.id}>
         <div className="analysis-task-head">
           <div className="analysis-task-head-primary">
             {taskSelectMode && (
@@ -185,14 +203,10 @@ export function AnalysisTasksPanel({
               <button
                 className={`analysis-task-title ${isError ? 'error' : ''}`}
                 onClick={() => {
-                  if (isDone) {
-                    if (hasCandidates) {
-                      onReviewTaskOutputs(item.recording.id, run.id);
-                    } else {
-                      onSelectRun(item.recording.id, run.id, 'analysis-run-detail');
-                    }
+                  if (isDone && hasCandidates) {
+                    onReviewTaskOutputs(item.recording.id, run.id);
                   } else {
-                    triggerShake(run.id);
+                    onSelectRun(item.recording.id, run.id, 'analysis-run-detail');
                   }
                 }}
                 type="button"
@@ -352,9 +366,9 @@ export function AnalysisTasksPanel({
       <div className="analysis-divider" />
       <div className="analysis-tasks">
         {groupedTaskItems.map((group) => renderTaskGroup(group))}
-        {!analysisTaskItems.length && <p className="entry-empty-copy">Run summaries will appear here once analysis starts.</p>}
+        {!analysisTaskItems.length && <p className="entry-empty-copy">run summaries will appear here once analysis starts.</p>}
         {Boolean(analysisTaskItems.length) && !groupedTaskItems.length && (
-          <p className="entry-empty-copy">No tasks in this filter yet.</p>
+          <p className="entry-empty-copy">no tasks in this filter yet.</p>
         )}
       </div>
     </section>

@@ -143,7 +143,7 @@ export function CandidateCard({
       tabIndex={-1}
     >
       <div className="candidate-image-wrap" style={{ aspectRatio: String(imageAspectRatio) }}>
-        <img alt={`Candidate screenshot at ${candidate.timestamp_tc}`} src={absoluteApiUrl(candidate.image_url)} />
+        <img alt={`candidate screenshot at ${candidate.timestamp_tc}`} src={absoluteApiUrl(candidate.image_url)} />
         <div className="candidate-overlay">
           <span className="candidate-timecode">{candidate.timestamp_tc}</span>
           {isSelectable ? (
@@ -169,19 +169,19 @@ export function CandidateCard({
           <CandidateDecisionButton
             intent="accepted"
             isActive={candidate.status === 'accepted'}
-            label="Accept candidate (A)"
+            label="accept candidate (a)"
             onClick={() => onSetStatus('accepted')}
           />
           <CandidateDecisionButton
             intent="rejected"
             isActive={candidate.status === 'rejected'}
-            label="Reject candidate (R)"
+            label="reject candidate (r)"
             onClick={() => onSetStatus('rejected')}
           />
           <CandidateDecisionButton
             intent="pending"
             isActive={candidate.status === 'pending'}
-            label="Reset candidate to pending (U)"
+            label="reset candidate to pending (u)"
             onClick={() => onSetStatus('pending')}
           />
         </div>
@@ -258,7 +258,7 @@ export function CandidateCard({
             <button
               className="inline-link-button candidate-similarity-link"
               onClick={onJumpToSimilar}
-              title="Jump to the earlier matching scene."
+              title="jump to the earlier matching scene."
               type="button"
             >
               {similarLink.label}
@@ -275,7 +275,7 @@ export function CandidateCard({
                 onBlur={(event) => commitTextField('title', event.target.value)}
                 onChange={(event) => setTitle(event.target.value)}
                 onClick={(event) => event.stopPropagation()}
-                placeholder="Optional custom label"
+                placeholder="optional custom label"
                 value={title}
               />
             </label>
@@ -287,7 +287,7 @@ export function CandidateCard({
                 onBlur={(event) => commitTextField('notes', event.target.value)}
                 onChange={(event) => setNotes(event.target.value)}
                 onClick={(event) => event.stopPropagation()}
-                placeholder="Add observation, annotation note, or coding hint"
+                placeholder="add observation, annotation note, or coding hint"
                 value={notes}
               />
             </label>
