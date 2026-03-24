@@ -35,7 +35,7 @@ export function AppWatermark() {
       </button>
       {showAbout ? (
         <div className="app-watermark-popover">
-          <p>Stepthrough helps researchers turn screen recordings into reviewable scene candidates for step-by-step analysis.</p>
+          <p>stepthrough helps researchers turn screen recordings into reviewable scene candidates for step-by-step analysis.</p>
           <p>version 0.1.0</p>
         </div>
       ) : null}

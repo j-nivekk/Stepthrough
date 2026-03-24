@@ -159,10 +159,10 @@ export function AnalysisParametersPanel({
                   <span>load preset text</span>
                 </div>
                 <p className="analysis-toolbar-copy">
-                  Paste preset text from Stepthrough to apply it to the active analysis controls.
+                  paste preset text from stepthrough to apply it to the active analysis controls.
                 </p>
                 <textarea
-                  aria-label="Load preset text"
+                  aria-label="load preset text"
                   className="analysis-preset-import-field"
                   onChange={(event) => setPresetImportDraftChange(event.target.value)}
                   onKeyDown={(event) => {
@@ -251,7 +251,7 @@ export function AnalysisParametersPanel({
               <div className="analysis-toolbar-popover-head">
                 <span>reset</span>
               </div>
-              <p className="analysis-toolbar-copy">Choose which defaults should replace the active analysis parameters.</p>
+              <p className="analysis-toolbar-copy">choose which defaults should replace the active analysis parameters.</p>
               <div className="analysis-toolbar-option-list">
                 <button
                   className="analysis-task-link subtle"
@@ -894,12 +894,12 @@ export function AnalysisParametersPanel({
       <div className="analysis-guidance-block">
         {runSettings.analysis_engine === 'hybrid_v2' ? (
           <p className="analysis-guidance-copy">
-            Hybrid v2 is tuned for interface changes first. Start with the preset that matches your tolerance for
+            hybrid v2 is tuned for interface changes first. start with the preset that matches your tolerance for
             noise, then only use advanced controls if a specific recording still over- or under-fires.
           </p>
         ) : (
           <p className="analysis-guidance-copy">
-            If steps are missing, raise sample fps first, then lower tolerance, then lower minimum scene gaps. Use
+            if steps are missing, raise sample fps first, then lower tolerance, then lower minimum scene gaps. use
             extract offset only to improve screenshot timing.
           </p>
         )}
@@ -912,13 +912,13 @@ export function AnalysisParametersPanel({
         {showLowCandidateHint ? (
           <p className="analysis-guidance-copy warning">
             {runSettings.analysis_engine === 'hybrid_v2'
-              ? 'This run found very few interface changes. Try the Subtle UI preset or lower the hybrid dwell/settle timing.'
-              : 'This run found very few scenes. Try higher sample fps first, then lower tolerance or minimum scene gaps.'}
+              ? 'this run found very few interface changes. try the subtle ui preset or lower the hybrid dwell/settle timing.'
+              : 'this run found very few scenes. try higher sample fps first, then lower tolerance or minimum scene gaps.'}
           </p>
         ) : null}
         {runSettings.analysis_engine === 'scene_v1' && runSettings.tolerance <= 15 ? (
           <p className="analysis-guidance-copy warning">
-            Note: A very low tolerance makes the detector highly sensitive. You may get many false positives from video
+            note: a very low tolerance makes the detector highly sensitive. you may get many false positives from video
             compression noise or subtle background changes.
           </p>
         ) : null}

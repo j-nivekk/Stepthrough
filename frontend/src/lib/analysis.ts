@@ -47,7 +47,7 @@ export interface ComparisonRow {
   timeDeltaMs: number | null;
 }
 
-export const activeRunStatuses: RunSummary['status'][] = ['queued', 'running'];
+export const activeRunStatuses: RunSummary['status'][] = ['queued', 'running', 'awaiting_fallback'];
 export const candidateFilters: CandidateFilter[] = ['all', 'pending', 'accepted', 'rejected'];
 export const analysisTaskFilters: AnalysisTaskFilter[] = ['all', 'active', 'completed', 'failed'];
 
@@ -55,16 +55,19 @@ export function getAnalysisTaskStatusRank(status: RunSummary['status']): number 
   if (status === 'running') {
     return 0;
   }
-  if (status === 'queued') {
+  if (status === 'awaiting_fallback') {
     return 1;
   }
-  if (status === 'completed') {
+  if (status === 'queued') {
     return 2;
   }
-  if (status === 'failed') {
+  if (status === 'completed') {
     return 3;
   }
-  return 4;
+  if (status === 'failed') {
+    return 4;
+  }
+  return 5;
 }
 
 export function candidateMatchesFilter(candidate: CandidateFrame, filter: CandidateFilter): boolean {

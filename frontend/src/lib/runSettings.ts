@@ -181,17 +181,17 @@ export function persistProjectRunPreset(projectId: string, settings: RunSettings
 }
 
 export function formatDetectorModeLabel(mode: RunSettings['detector_mode']): string {
-  return mode === 'adaptive' ? 'Adaptive' : 'Content';
+  return mode === 'adaptive' ? 'adaptive' : 'content';
 }
 
 export function formatAnalysisEngineLabel(engine: RunSettings['analysis_engine']): string {
-  return engine === 'hybrid_v2' ? 'Hybrid v2' : 'Current v1';
+  return engine === 'hybrid_v2' ? 'hybrid v2' : 'current v1';
 }
 
 export function formatAnalysisPresetLabel(preset: RunSettings['analysis_preset']): string {
-  if (preset === 'subtle_ui') return 'Subtle UI';
-  if (preset === 'noise_resistant') return 'Ignore noise';
-  return 'Balanced';
+  if (preset === 'subtle_ui') return 'subtle ui';
+  if (preset === 'noise_resistant') return 'ignore noise';
+  return 'balanced';
 }
 
 export function mapToleranceToDetectorThreshold(
@@ -209,34 +209,34 @@ export function describeTolerance(
 ): string {
   const threshold = mapToleranceToDetectorThreshold(tolerance, detectorMode);
   const thresholdLabel =
-    detectorMode === 'adaptive' ? `Adaptive threshold ${threshold}.` : `Content threshold ${threshold}.`;
+    detectorMode === 'adaptive' ? `adaptive threshold ${threshold}.` : `content threshold ${threshold}.`;
 
   if (tolerance <= 25) {
-    return `${thresholdLabel} Very sensitive. Lower it when keyboard states, small badges, or brief sheets are being missed. Raise sample fps first if very short screens are slipping through.`;
+    return `${thresholdLabel} very sensitive. lower it when keyboard states, small badges, or brief sheets are being missed. raise sample fps first if very short screens are slipping through.`;
   }
   if (tolerance <= 60) {
-    return `${thresholdLabel} Balanced for most walkthrough recordings. Lower it to catch subtler screens, or raise it if typing, scrolling, or background shimmer creates noise.`;
+    return `${thresholdLabel} balanced for most walkthrough recordings. lower it to catch subtler screens, or raise it if typing, scrolling, or background shimmer creates noise.`;
   }
-  return `${thresholdLabel} Conservative. Raise it when scrolling or tiny motion creates too many candidates, and lower it if real screens are being missed.`;
+  return `${thresholdLabel} conservative. raise it when scrolling or tiny motion creates too many candidates, and lower it if real screens are being missed.`;
 }
 
 export function describeSampleFps(sampleFps: number | null, sourceFps: number | null): string {
   if (!sampleFps) {
-    return 'Sampling every available frame from the source video. Use this only when you need maximum sensitivity or source-fps coverage.';
+    return 'sampling every available frame from the source video. use this only when you need maximum sensitivity or source-fps coverage.';
   }
   let skipText = '';
   if (sourceFps) {
     const skip = Math.max(1, Math.round(sourceFps / sampleFps));
     skipText = skip > 1 ? ` (~every ${skip}th frame)` : ' (~every frame)';
   }
-  return `Sampling ~${sampleFps} fps from the source video${skipText}. Raise this when brief overlays, menus, or quick transitions are being missed.`;
+  return `sampling ~${sampleFps} fps from the source video${skipText}. raise this when brief overlays, menus, or quick transitions are being missed.`;
 }
 
 export function describeDetectorMode(mode: RunSettings['detector_mode']): string {
   if (mode === 'adaptive') {
-    return 'Compares against a rolling average of recent frames. Better for fades, overlays, and softer UI changes. Adaptive threshold scales from 1 to 7.';
+    return 'compares against a rolling average of recent frames. better for fades, overlays, and softer ui changes. adaptive threshold scales from 1 to 7.';
   }
-  return 'Strictly compares against the immediately previous sampled frame. Better for cuts and hard screen swaps. Content threshold scales from 8 to 48.';
+  return 'strictly compares against the immediately previous sampled frame. better for cuts and hard screen swaps. content threshold scales from 8 to 48.';
 }
 
 export function describeAnalysisPreset(settings: RunSettings): string {
@@ -249,25 +249,25 @@ export function describeAnalysisPreset(settings: RunSettings): string {
   const settle = overrideSettle ?? presetDefaults.settleWindowMs;
   const ocrCopy =
     settings.advanced?.enable_ocr === false
-      ? 'OCR confirmation disabled.'
-      : 'OCR confirmation enabled, with backend-configured PaddleOCR for strong visual changes and bounded probes on localized changed regions.';
+      ? 'ocr confirmation disabled.'
+      : 'ocr confirmation enabled, with backend-configured paddleocr for strong visual changes and bounded probes on localized changed regions.';
   return `${formatAnalysisPresetLabel(settings.analysis_preset)} samples around ${sampleFps} fps, waits ~${dwell}ms for dwell and ~${settle}ms for settle windows. ${ocrCopy}`;
 }
 
 export function describeMinSceneGap(minSceneGapMs: number): string {
   if (minSceneGapMs === 0) {
-    return '0ms removes the hard time gap between emitted candidates and lets Hybrid detections cluster tightly on the timeline.';
+    return '0ms removes the hard time gap between emitted candidates and lets hybrid detections cluster tightly on the timeline.';
   }
   const seconds = (minSceneGapMs / 1000).toFixed(1).replace(/\.0$/, '');
-  return `${minSceneGapMs}ms (~${seconds}s) on the original timeline. This is the minimum spacing allowed between emitted candidates; in Hybrid v2 it is enforced after event windows finalize, not by freezing detection.`;
+  return `${minSceneGapMs}ms (~${seconds}s) on the original timeline. this is the minimum spacing allowed between emitted candidates; in hybrid v2 it is enforced after event windows finalize, not by freezing detection.`;
 }
 
 export function describeExtractOffset(offsetMs: number): string {
   if (offsetMs === 0) {
-    return 'Captures exactly on the first detected frame of a new scene candidate.';
+    return 'captures exactly on the first detected frame of a new scene candidate.';
   }
   const seconds = (offsetMs / 1000).toFixed(1).replace(/\.0$/, '');
-  return `Captures ${offsetMs}ms (${seconds}s) after the detection cut to avoid grabbing a frame mid-animation or during a transition.`;
+  return `captures ${offsetMs}ms (${seconds}s) after the detection cut to avoid grabbing a frame mid-animation or during a transition.`;
 }
 
 function formatHybridOcrState(
@@ -277,55 +277,55 @@ function formatHybridOcrState(
   if (enableOcr === false) {
     return 'off';
   }
-  return `on (${ocrBackend === 'paddleocr' || !ocrBackend ? 'PaddleOCR' : ocrBackend})`;
+  return `on (${ocrBackend === 'paddleocr' || !ocrBackend ? 'paddleocr' : ocrBackend})`;
 }
 
 export function describeHybridSampleFpsOverrideHint(settings: RunSettings): string {
   const presetSampleFps = analysisPresetDefaults[settings.analysis_preset].sampleFps;
-  return `Overrides the preset sampling rate. Raise it when brief overlays or menu states are being missed, and leave it on auto to keep the preset baseline of ${presetSampleFps} fps.`;
+  return `overrides the preset sampling rate. raise it when brief overlays or menu states are being missed, and leave it on auto to keep the preset baseline of ${presetSampleFps} fps.`;
 }
 
 export function describeHybridMinDwellHint(settings: RunSettings): string {
   const presetMinDwellMs = analysisPresetDefaults[settings.analysis_preset].minDwellMs;
-  return `Overrides how long a visual change must persist before it becomes a candidate. Lower it for brief states, or raise it to ignore flicker and transient motion. Preset baseline: ${presetMinDwellMs}ms.`;
+  return `overrides how long a visual change must persist before it becomes a candidate. lower it for brief states, or raise it to ignore flicker and transient motion. preset baseline: ${presetMinDwellMs}ms.`;
 }
 
 export function describeHybridSettleWindowHint(settings: RunSettings): string {
   const presetSettleWindowMs = analysisPresetDefaults[settings.analysis_preset].settleWindowMs;
-  return `Overrides how long the detector waits for motion to settle before capturing the representative frame. Raise it for longer animations or loading states, and lower it when captures land too late. Preset baseline: ${presetSettleWindowMs}ms.`;
+  return `overrides how long the detector waits for motion to settle before capturing the representative frame. raise it for longer animations or loading states, and lower it when captures land too late. preset baseline: ${presetSettleWindowMs}ms.`;
 }
 
 export function describeHybridOcrConfirmationHint(): string {
-  return 'OCR is configured by the backend environment. When available, Hybrid uses PaddleOCR for strong visual changes and bounded probes on localized changed regions. First use may initialize models in the backend cache, or rely on backend-provided local model directories. Preset baseline: on (PaddleOCR).';
+  return 'ocr is configured by the backend environment. when available, hybrid uses paddleocr for strong visual changes and bounded probes on localized changed regions. first use may initialize models in the backend cache, or rely on backend-provided local model directories. preset baseline: on (paddleocr).';
 }
 
 export function formatHybridSampleFpsAnnotation(settings: RunSettings): string {
   const presetSampleFps = analysisPresetDefaults[settings.analysis_preset].sampleFps;
   const overrideSampleFps = settings.advanced?.sample_fps_override;
   return overrideSampleFps == null
-    ? `Preset: ${presetSampleFps} fps. Current: auto, using the preset value.`
-    : `Preset: ${presetSampleFps} fps. Current override: ${overrideSampleFps} fps.`;
+    ? `preset: ${presetSampleFps} fps. current: auto, using the preset value.`
+    : `preset: ${presetSampleFps} fps. current override: ${overrideSampleFps} fps.`;
 }
 
 export function formatHybridMinDwellAnnotation(settings: RunSettings): string {
   const presetMinDwellMs = analysisPresetDefaults[settings.analysis_preset].minDwellMs;
   const overrideMinDwellMs = settings.advanced?.min_dwell_ms;
   return overrideMinDwellMs == null
-    ? `Preset: ${presetMinDwellMs}ms. Current: auto, using the preset value.`
-    : `Preset: ${presetMinDwellMs}ms. Current override: ${overrideMinDwellMs}ms.`;
+    ? `preset: ${presetMinDwellMs}ms. current: auto, using the preset value.`
+    : `preset: ${presetMinDwellMs}ms. current override: ${overrideMinDwellMs}ms.`;
 }
 
 export function formatHybridSettleWindowAnnotation(settings: RunSettings): string {
   const presetSettleWindowMs = analysisPresetDefaults[settings.analysis_preset].settleWindowMs;
   const overrideSettleWindowMs = settings.advanced?.settle_window_ms;
   return overrideSettleWindowMs == null
-    ? `Preset: ${presetSettleWindowMs}ms. Current: auto, using the preset value.`
-    : `Preset: ${presetSettleWindowMs}ms. Current override: ${overrideSettleWindowMs}ms.`;
+    ? `preset: ${presetSettleWindowMs}ms. current: auto, using the preset value.`
+    : `preset: ${presetSettleWindowMs}ms. current override: ${overrideSettleWindowMs}ms.`;
 }
 
 export function formatHybridOcrAnnotation(settings: RunSettings): string {
   const currentOcrState = formatHybridOcrState(settings.advanced?.enable_ocr, settings.advanced?.ocr_backend);
-  return `Preset: on (PaddleOCR). Current: ${currentOcrState}. Availability, model source, and local model paths are controlled by the backend.`;
+  return `preset: on (paddleocr). current: ${currentOcrState}. availability, model source, and local model paths are controlled by the backend.`;
 }
 
 export function getSampleFpsGuardrail(
@@ -418,19 +418,19 @@ export function formatRunSettingsSummary(settings: RunSettings): string {
 
 export function serializeRunPresetText(settings: RunSettings): string {
   return [
-    'Stepthrough Detection Preset',
-    `Engine: ${settings.analysis_engine}`,
-    `Preset: ${settings.analysis_preset}`,
-    `Hybrid sample fps override: ${settings.advanced?.sample_fps_override ?? 'Auto'}`,
-    `Hybrid min dwell: ${settings.advanced?.min_dwell_ms ?? 'Auto'} ms`,
-    `Hybrid settle window: ${settings.advanced?.settle_window_ms ?? 'Auto'} ms`,
-    `Hybrid OCR: ${settings.advanced?.enable_ocr === false ? 'Disabled' : 'Enabled'}`,
-    `Mode: ${formatDetectorModeLabel(settings.detector_mode)}`,
-    `Tolerance: ${settings.tolerance}`,
-    `Min scene gap: ${settings.min_scene_gap_ms} ms`,
-    `Sample fps: ${settings.sample_fps ?? 'Source stream'}`,
-    `High-fps sampling: ${settings.allow_high_fps_sampling ? 'Enabled' : 'Disabled'}`,
-    `Extract offset: ${settings.extract_offset_ms} ms`,
+    'stepthrough detection preset',
+    `engine: ${settings.analysis_engine}`,
+    `preset: ${settings.analysis_preset}`,
+    `hybrid sample fps override: ${settings.advanced?.sample_fps_override ?? 'auto'}`,
+    `hybrid min dwell: ${settings.advanced?.min_dwell_ms ?? 'auto'} ms`,
+    `hybrid settle window: ${settings.advanced?.settle_window_ms ?? 'auto'} ms`,
+    `hybrid ocr: ${settings.advanced?.enable_ocr === false ? 'disabled' : 'enabled'}`,
+    `mode: ${formatDetectorModeLabel(settings.detector_mode)}`,
+    `tolerance: ${settings.tolerance}`,
+    `min scene gap: ${settings.min_scene_gap_ms} ms`,
+    `sample fps: ${settings.sample_fps ?? 'source stream'}`,
+    `high-fps sampling: ${settings.allow_high_fps_sampling ? 'enabled' : 'disabled'}`,
+    `extract offset: ${settings.extract_offset_ms} ms`,
   ].join('\n');
 }
 

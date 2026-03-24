@@ -68,6 +68,11 @@ import type {
   RunSummary,
 } from './types';
 
+type PendingTaskNavigation = {
+  anchorId: 'analysis-candidate-review' | 'analysis-run-detail';
+  runId: string;
+};
+
 function App() {
   const queryClient = useQueryClient();
   const [projectName, setProjectName] = useState('');
@@ -76,6 +81,7 @@ function App() {
   const [pendingAnalysisProjectId, setPendingAnalysisProjectId] = useState<string | null>(null);
   const [selectedRecordingId, setSelectedRecordingId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [pendingTaskNavigation, setPendingTaskNavigation] = useState<PendingTaskNavigation | null>(null);
   const [runSettings, setRunSettingsState] = useState<RunSettings>(defaultRunSettings);
   const [settingsFeedback, setSettingsFeedback] = useState('');
   const [globalPreset, setGlobalPreset] = useState<GlobalRunPreset | null>(() => loadGlobalRunPreset());
@@ -257,6 +263,7 @@ function App() {
     const stillSelected = runs.some((run) => run.id === selectedRunId);
     if (!stillSelected) {
       setSelectedRunId(null);
+      setPendingTaskNavigation(null);
     }
   }, [recordingDetailQuery.data, selectedRunId]);
 
@@ -265,9 +272,11 @@ function App() {
       return;
     }
     if (!activeRunStatuses.includes(runDetailQuery.data.summary.status)) {
+      setLiveMessage('');
       return;
     }
 
+    const recordingId = runDetailQuery.data.summary.recording_id;
     const socketUrl = new URL(`/runs/${selectedRunId}/events`, import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000')
       .toString()
       .replace(/^http/, 'ws');
@@ -278,8 +287,12 @@ function App() {
       if (payload.message) {
         setLiveMessage(payload.message);
       }
-      queryClient.invalidateQueries({ queryKey: ['run', selectedRunId] });
-      queryClient.invalidateQueries({ queryKey: ['recording', selectedRecordingId] });
+      void refreshRunQueries(selectedRunId, recordingId);
+    };
+
+    socket.onclose = () => {
+      setLiveMessage('');
+      void refreshRunQueries(selectedRunId, recordingId);
     };
 
     socket.onerror = () => {
@@ -287,7 +300,7 @@ function App() {
     };
 
     return () => socket.close();
-  }, [queryClient, runDetailQuery.data, selectedRecordingId, selectedRunId]);
+  }, [runDetailQuery.data, selectedRunId]);
 
   const selectedProject = useMemo(
     () => projectsQuery.data?.find((project) => project.id === selectedProjectId) ?? null,
@@ -317,6 +330,37 @@ function App() {
     projectRecordings.find((recording) => recording.id === selectedRecordingId) ?? null;
   const previewRecording =
     projectRecordings.find((recording) => recording.id === previewRecordingId) ?? null;
+
+  async function refreshRecordingQueries(recordingId: string): Promise<void> {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['recording', recordingId] }),
+      queryClient.invalidateQueries({ queryKey: ['recording', recordingId, 'analysis'] }),
+    ]);
+  }
+
+  async function refreshRunQueries(runId: string, recordingId: string): Promise<void> {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['run', runId] }),
+      refreshRecordingQueries(recordingId),
+    ]);
+  }
+
+  useEffect(() => {
+    if (!pendingTaskNavigation || !selectedRun || selectedRun.summary.id !== pendingTaskNavigation.runId) {
+      return;
+    }
+
+    const anchorId =
+      pendingTaskNavigation.anchorId === 'analysis-candidate-review' &&
+      selectedRun.summary.status === 'completed' &&
+      selectedRun.candidates.length > 0
+        ? 'analysis-candidate-review'
+        : 'analysis-run-detail';
+
+    jumpToAnalysisAnchor(anchorId);
+    setPendingTaskNavigation(null);
+  }, [pendingTaskNavigation, selectedRun]);
+
   const effectiveProjectDefaultSettings = useMemo(
     () => clampRunSettingsForRecording(applyLocalOcrAvailability(projectDefaultSettings), selectedRecordingSummary?.fps ?? null),
     [projectDefaultSettings, selectedRecordingSummary?.fps, ocrAvailability],
@@ -325,9 +369,9 @@ function App() {
   const ocrEntryMessage = backendReady && ocrStatus !== 'available' ? ocrStatusMessage : null;
   const ocrEntryMessageTone = ocrStatus === 'unavailable' ? 'warning' : 'info';
   const projectsStatusMessage = !backendReady
-    ? 'Connecting to backend…'
+    ? 'connecting to backend…'
     : projectsQuery.isLoading
-      ? 'Loading projects…'
+      ? 'loading projects…'
       : projectsQuery.isError
         ? projectsQuery.error instanceof Error
           ? projectsQuery.error.message
@@ -577,6 +621,7 @@ function App() {
       if (selectedRecordingId === variables.recordingId) {
         setSelectedRecordingId(null);
         setSelectedRunId(null);
+        setPendingTaskNavigation(null);
       }
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] });
@@ -590,9 +635,8 @@ function App() {
       createRun(recordingId, settings),
     onSuccess: (run) => {
       setSelectedRunId(run.id);
-      setLiveMessage('Queued detection job.');
-      queryClient.invalidateQueries({ queryKey: ['recording', run.recording_id] });
-      queryClient.invalidateQueries({ queryKey: ['run', run.id] });
+      setLiveMessage('queued detection job.');
+      void refreshRunQueries(run.id, run.recording_id);
     },
     onError: (error: Error) => setAppError(error.message),
   });
@@ -600,8 +644,7 @@ function App() {
   const abortRunMutation = useMutation({
     mutationFn: abortRun,
     onSuccess: (run) => {
-      queryClient.invalidateQueries({ queryKey: ['run', run.id] });
-      queryClient.invalidateQueries({ queryKey: ['recording', run.recording_id] });
+      void refreshRunQueries(run.id, run.recording_id);
     },
     onError: (error: Error) => setAppError(error.message),
   });
@@ -610,8 +653,7 @@ function App() {
     mutationFn: ({ candidateId, payload }: { candidateId: string; payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>> }) =>
       updateCandidate(candidateId, payload),
     onSuccess: (candidate) => {
-      queryClient.invalidateQueries({ queryKey: ['run', candidate.run_id] });
-      queryClient.invalidateQueries({ queryKey: ['recording', candidate.recording_id] });
+      void refreshRunQueries(candidate.run_id, candidate.recording_id);
     },
     onError: (error: Error) => setAppError(error.message),
   });
@@ -620,27 +662,11 @@ function App() {
     mutationFn: ({ runId, timestampMs }: { runId: string; timestampMs: number }) =>
       createManualCandidate(runId, timestampMs),
     onSuccess: async (candidate) => {
-      setAnalysisActionMessage(`Added manual step at ${candidate.timestamp_tc}.`);
+      setAnalysisActionMessage(`added manual step at ${candidate.timestamp_tc}.`);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['projects'] }),
-        selectedProjectId
-          ? queryClient.fetchQuery({
-              queryKey: ['project', selectedProjectId],
-              queryFn: () => getProject(selectedProjectId),
-            })
-          : Promise.resolve(),
-        queryClient.fetchQuery({
-          queryKey: ['run', candidate.run_id],
-          queryFn: () => getRun(candidate.run_id),
-        }),
-        queryClient.fetchQuery({
-          queryKey: ['recording', candidate.recording_id],
-          queryFn: () => getRecording(candidate.recording_id),
-        }),
-        queryClient.fetchQuery({
-          queryKey: ['recording', candidate.recording_id, 'analysis'],
-          queryFn: () => getRecording(candidate.recording_id),
-        }),
+        selectedProjectId ? queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] }) : Promise.resolve(),
+        refreshRunQueries(candidate.run_id, candidate.recording_id),
       ]);
     },
     onError: (error: Error) => setAppError(error.message),
@@ -653,11 +679,9 @@ function App() {
       return { runId };
     },
     onSuccess: ({ runId }) => {
-      queryClient.invalidateQueries({ queryKey: ['run', runId] });
       const task = analysisTaskItemByRunId.get(runId);
       if (task) {
-        queryClient.invalidateQueries({ queryKey: ['recording', task.run.recording_id] });
-        queryClient.invalidateQueries({ queryKey: ['recording', task.run.recording_id, 'analysis'] });
+        void refreshRunQueries(runId, task.run.recording_id);
       }
     },
     onError: (error: Error) => setAppError(error.message),
@@ -684,6 +708,7 @@ function App() {
     setPendingAnalysisProjectId(targetStage === 'analysis' ? projectId : null);
     setSelectedRecordingId(null);
     setSelectedRunId(null);
+    setPendingTaskNavigation(null);
     setPreviewRecordingId(null);
     setWorkflowStage(targetStage);
     clearAnalysisMessages();
@@ -702,6 +727,7 @@ function App() {
     const latestRun = latestRunByRecordingId.get(recordingId) ?? null;
     setSelectedRecordingId(recordingId);
     setSelectedRunId(latestRun?.id ?? null);
+    setPendingTaskNavigation(null);
     if (latestRun && jumpToRunDetail) {
       jumpToAnalysisAnchor('analysis-run-detail');
     }
@@ -738,13 +764,13 @@ function App() {
     }
     const savedPreset = persistProjectRunPreset(selectedProjectId, applyLocalOcrAvailability(runSettings));
     setProjectDefaultSettings(savedPreset.settings);
-    setSettingsFeedback('Saved the current settings for this project.');
+    setSettingsFeedback('saved the current settings for this project.');
   }
 
   function handleSaveBrowserDefault() {
     const savedPreset = persistGlobalRunPreset(applyLocalOcrAvailability(runSettings));
     setGlobalPreset(savedPreset);
-    setSettingsFeedback('Saved the current settings as universal defaults.');
+    setSettingsFeedback('saved the current settings as universal defaults.');
   }
 
   function applyAnalysisSettings(nextSettings: RunSettings, feedback: string) {
@@ -753,15 +779,15 @@ function App() {
   }
 
   function handleResetToProjectDefaults() {
-    applyAnalysisSettings(effectiveProjectDefaultSettings, "Reset the current settings to this project's defaults.");
+    applyAnalysisSettings(effectiveProjectDefaultSettings, "reset the current settings to this project's defaults.");
   }
 
   function handleResetToUniversalDefaults() {
-    applyAnalysisSettings(globalPreset?.settings ?? defaultRunSettings, 'Reset the current settings to the universal defaults.');
+    applyAnalysisSettings(globalPreset?.settings ?? defaultRunSettings, 'reset the current settings to the universal defaults.');
   }
 
   function handleApplyImportedPreset(settings: RunSettings) {
-    applyAnalysisSettings(settings, 'Applied preset text to the active analysis parameters.');
+    applyAnalysisSettings(settings, 'applied preset text to the active analysis parameters.');
   }
 
   async function handleCreateManualRunCandidate(runId: string, timestampMs: number) {
@@ -770,7 +796,7 @@ function App() {
   }
 
   function confirmDeleteRecording(recordingId: string, filename: string) {
-    if (!window.confirm(`Delete ${filename} and every run, screenshot, and export created from it?`)) {
+    if (!window.confirm(`delete ${filename} and every run, screenshot, and export created from it?`)) {
       return;
     }
     clearAnalysisMessages();
@@ -778,7 +804,7 @@ function App() {
   }
 
   function confirmDeleteProject(projectId: string, projectName: string) {
-    if (!window.confirm(`Delete ${projectName} and every recording, run, screenshot, and export in it?`)) {
+    if (!window.confirm(`delete ${projectName} and every recording, run, screenshot, and export in it?`)) {
       return;
     }
     clearAnalysisMessages();
@@ -838,6 +864,7 @@ function App() {
 
     if (stage === 'import') {
       setPendingAnalysisProjectId(null);
+      setPendingTaskNavigation(null);
       setWorkflowStage('import');
       return;
     }
@@ -867,7 +894,7 @@ function App() {
   function handleSelectTaskRun(recordingId: string, runId: string, anchorId = 'analysis-run-detail') {
     setSelectedRecordingId(recordingId);
     setSelectedRunId(runId);
-    jumpToAnalysisAnchor(anchorId);
+    setPendingTaskNavigation({ runId, anchorId: anchorId === 'analysis-candidate-review' ? anchorId : 'analysis-run-detail' });
   }
 
   function handleImportFileSelection(files: FileList | File[]) {
@@ -916,7 +943,7 @@ function App() {
     ]);
 
     setAnalysisActionMessage(
-      `Importing ${queueItems.length} ${queueItems.length === 1 ? 'video' : 'videos'}${
+      `importing ${queueItems.length} ${queueItems.length === 1 ? 'video' : 'videos'}${
         ignoredCount > 0
           ? ` · ignored ${ignoredCount} duplicate ${ignoredCount === 1 ? 'file' : 'files'}`
           : ''
@@ -971,7 +998,7 @@ function App() {
       return;
     }
     if (queueItem.recordingId) {
-      if (!window.confirm(`Delete ${queueItem.filename} and every run, screenshot, and export created from it?`)) {
+      if (!window.confirm(`delete ${queueItem.filename} and every run, screenshot, and export created from it?`)) {
         return;
       }
       deleteRecordingMutation.mutate({ localId, recordingId: queueItem.recordingId });
@@ -990,7 +1017,7 @@ function App() {
         return;
       }
       const confirmed = window.confirm(
-        'Analysis is usually most useful after at least one uploaded video. Continue without any uploaded videos?',
+        'analysis is usually most useful after at least one uploaded video. continue without any uploaded videos?',
       );
       if (!confirmed) {
         return;
@@ -1004,13 +1031,14 @@ function App() {
     setImportQueue(persistedRows);
     setSelectedRecordingId(nextRecordingId);
     setSelectedRunId(null);
+    setPendingTaskNavigation(null);
     setWorkflowStage('analysis');
   }
 
   async function handleExportRun(runId: string, mode: ExportMode, downloadName?: string): Promise<void> {
     clearAnalysisMessages();
     await exportRunMutation.mutateAsync({ downloadName, mode, runId });
-    setAnalysisActionMessage(mode === 'accepted' ? 'Exported accepted steps.' : 'Exported all steps.');
+    setAnalysisActionMessage(mode === 'accepted' ? 'exported accepted steps.' : 'exported all steps.');
   }
 
   async function handleBulkUpdateCandidates(
@@ -1038,16 +1066,12 @@ function App() {
       failedCandidateIds.push(uniqueCandidateIds[index]);
     });
 
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['run', runId] }),
-      queryClient.invalidateQueries({ queryKey: ['recording', recordingId] }),
-      queryClient.invalidateQueries({ queryKey: ['recording', recordingId, 'analysis'] }),
-    ]);
+    await refreshRunQueries(runId, recordingId);
 
     const successCount = uniqueCandidateIds.length - failedCandidateIds.length;
     if (successCount > 0) {
       setAnalysisActionMessage(
-        `${status === 'accepted' ? 'Accepted' : status === 'rejected' ? 'Rejected' : 'Updated'} ${successCount} ${
+        `${status === 'accepted' ? 'accepted' : status === 'rejected' ? 'rejected' : 'updated'} ${successCount} ${
           successCount === 1 ? 'candidate' : 'candidates'
         }.`,
       );
@@ -1091,8 +1115,7 @@ function App() {
 
           const exportMode: ExportMode = hasReviewedItems ? 'accepted' : 'all';
           const bundle = await exportRun(item.run.id, exportMode);
-          await queryClient.invalidateQueries({ queryKey: ['run', item.run.id] });
-          await queryClient.invalidateQueries({ queryKey: ['recording', item.run.recording_id] });
+          await refreshRunQueries(item.run.id, item.run.recording_id);
           await downloadExportBundle(bundle);
           return item.run.id;
         }),
@@ -1114,9 +1137,9 @@ function App() {
 
       if (successCount > 0) {
         const skipSuffix = skippedCount
-          ? ` Skipped ${skippedCount} non-completed ${skippedCount === 1 ? 'task' : 'tasks'}.`
+          ? ` skipped ${skippedCount} non-completed ${skippedCount === 1 ? 'task' : 'tasks'}.`
           : '';
-        setAnalysisActionMessage(`Exported ${successCount} ${successCount === 1 ? 'task' : 'tasks'}.${skipSuffix}`);
+        setAnalysisActionMessage(`exported ${successCount} ${successCount === 1 ? 'task' : 'tasks'}.${skipSuffix}`);
       }
       if (failures.length > 0) {
         setAppError(
@@ -1140,10 +1163,10 @@ function App() {
 
     const activeTasks = tasks.filter((item) => activeRunStatuses.includes(item.run.status));
     const confirmCopy = activeTasks.length
-      ? `Delete ${tasks.length} selected ${tasks.length === 1 ? 'task' : 'tasks'}? ${activeTasks.length} active ${
+      ? `delete ${tasks.length} selected ${tasks.length === 1 ? 'task' : 'tasks'}? ${activeTasks.length} active ${
           activeTasks.length === 1 ? 'task will' : 'tasks will'
         } be ended first, then deleted.`
-      : `Delete ${tasks.length} selected ${tasks.length === 1 ? 'task' : 'tasks'}?`;
+      : `delete ${tasks.length} selected ${tasks.length === 1 ? 'task' : 'tasks'}?`;
     if (!window.confirm(confirmCopy)) {
       return null;
     }
@@ -1160,8 +1183,7 @@ function App() {
         const abortResults = await Promise.allSettled(
           activeTasks.map(async (item) => {
             const run = await abortRun(item.run.id);
-            await queryClient.invalidateQueries({ queryKey: ['run', run.id] });
-            await queryClient.invalidateQueries({ queryKey: ['recording', run.recording_id] });
+            await refreshRunQueries(run.id, run.recording_id);
             return run.id;
           }),
         );
@@ -1182,8 +1204,7 @@ function App() {
         const waitResults = await Promise.allSettled(
           waitingTasks.map(async (item) => {
             const run = await waitForRunToLeaveActiveState(item.run.id);
-            await queryClient.invalidateQueries({ queryKey: ['run', run.summary.id] });
-            await queryClient.invalidateQueries({ queryKey: ['recording', run.summary.recording_id] });
+            await refreshRunQueries(run.summary.id, run.summary.recording_id);
             return run.summary.id;
           }),
         );
@@ -1207,8 +1228,9 @@ function App() {
           await deleteRun(item.run.id);
           if (selectedRunId === item.run.id) {
             setSelectedRunId(null);
+            setPendingTaskNavigation(null);
           }
-          await queryClient.invalidateQueries({ queryKey: ['recording', item.run.recording_id] });
+          await refreshRecordingQueries(item.run.recording_id);
           queryClient.removeQueries({ queryKey: ['run', item.run.id] });
           return item.run.id;
         }),
@@ -1233,7 +1255,7 @@ function App() {
       await queryClient.invalidateQueries({ queryKey: ['projects'] });
 
       if (deletedCount > 0) {
-        setAnalysisActionMessage(`Deleted ${deletedCount} ${deletedCount === 1 ? 'task' : 'tasks'}.`);
+        setAnalysisActionMessage(`deleted ${deletedCount} ${deletedCount === 1 ? 'task' : 'tasks'}.`);
       }
       if (failures.length > 0) {
         setAppError(
@@ -1360,6 +1382,7 @@ function App() {
         runSettings={runSettings}
         selectedRecording={selectedRecording}
         selectedRecordingId={selectedRecordingId}
+        selectedRunId={selectedRunId}
         selectedRecordingSummary={selectedRecordingSummary}
         selectedRun={selectedRun}
         selectedRunLoading={runDetailQuery.isLoading || runDetailQuery.isFetching}

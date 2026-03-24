@@ -79,7 +79,7 @@ export function AnalysisVideosPanel({
                   lockedExtension
                   onDisplayClick={() => onSelectRecording(recording.id)}
                   onSave={(nextValue) => onRenameRecording(recording.id, nextValue)}
-                  renameLabel={`Rename video ${recording.filename}`}
+                  renameLabel={`rename video ${recording.filename}`}
                   showRenameButton={false}
                   textClassName="analysis-video-name-text"
                   value={recording.filename}
@@ -117,7 +117,7 @@ export function AnalysisVideosPanel({
         })}
         {!recordings.length && (
           <p className="entry-empty-copy">
-            {recordingsLoading ? 'Loading videos…' : 'Uploaded videos will appear here.'}
+            {recordingsLoading ? 'loading videos…' : 'uploaded videos will appear here.'}
           </p>
         )}
       </div>

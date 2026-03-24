@@ -1,18 +1,22 @@
 import type { Project, RecordingSummary, RunPhase, RunSummary } from '../types';
 
 const phaseLabels: Record<RunPhase, string> = {
-  queued: 'Queued',
-  probing: 'Preparing',
-  primary_scan: 'Scanning scene changes',
-  primary_extract: 'Extracting candidate screenshots',
-  awaiting_fallback: 'Awaiting fallback',
-  fallback_scan: 'Fallback scan',
-  fallback_extract: 'Fallback extract',
-  exporting: 'Exporting assets',
-  completed: 'Completed',
-  failed: 'Failed',
-  cancelled: 'Aborted',
+  queued: 'queued',
+  probing: 'preparing',
+  primary_scan: 'scanning scene changes',
+  primary_extract: 'extracting candidate screenshots',
+  awaiting_fallback: 'awaiting fallback',
+  fallback_scan: 'fallback scan',
+  fallback_extract: 'fallback extract',
+  exporting: 'exporting assets',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'aborted',
 };
+
+function formatLowercaseLocaleText(value: string): string {
+  return value.toLocaleLowerCase();
+}
 
 const commonAspectRatios = [
   { height: 9, label: '16:9', width: 16 },
@@ -40,18 +44,18 @@ export function formatPhase(phase: RunPhase): string {
 
 export function formatRunTiming(run: RunSummary): string {
   if (run.status === 'completed' && run.completed_at) {
-    return `Finished ${new Date(run.completed_at).toLocaleString()}`;
+    return `finished ${formatLowercaseLocaleText(new Date(run.completed_at).toLocaleString())}`;
   }
   if (run.status === 'cancelled' && run.completed_at) {
-    return `Aborted ${new Date(run.completed_at).toLocaleString()}`;
+    return `aborted ${formatLowercaseLocaleText(new Date(run.completed_at).toLocaleString())}`;
   }
   if (run.status === 'failed' && run.completed_at) {
-    return `Failed ${new Date(run.completed_at).toLocaleString()}`;
+    return `failed ${formatLowercaseLocaleText(new Date(run.completed_at).toLocaleString())}`;
   }
   if (run.started_at) {
-    return `Started ${new Date(run.started_at).toLocaleString()}`;
+    return `started ${formatLowercaseLocaleText(new Date(run.started_at).toLocaleString())}`;
   }
-  return `Created ${new Date(run.created_at).toLocaleString()}`;
+  return `created ${formatLowercaseLocaleText(new Date(run.created_at).toLocaleString())}`;
 }
 
 function formatProjectActivity(lastActivityAt: string): string {
@@ -132,13 +136,15 @@ export function formatRunShortTimestamp(timestamp: string): string {
 
   const now = new Date();
   const includeYear = date.getFullYear() !== now.getFullYear();
-  return date.toLocaleString([], {
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    month: 'short',
-    ...(includeYear ? { year: 'numeric' as const } : {}),
-  });
+  return formatLowercaseLocaleText(
+    date.toLocaleString([], {
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      month: 'short',
+      ...(includeYear ? { year: 'numeric' as const } : {}),
+    }),
+  );
 }
 
 export function formatRelativeTime(timestamp: string, nowMs: number): string {

@@ -159,7 +159,7 @@ export function EntryScreen({
                         displayButtonClassName="entry-project-select-button"
                         onDisplayClick={() => onOpenProject(project.id, 'import')}
                         onSave={(nextValue) => onRenameProject(project.id, nextValue)}
-                        renameLabel={`Rename project ${project.name}`}
+                        renameLabel={`rename project ${project.name}`}
                         textClassName="entry-project-name-text"
                         value={project.name}
                       />
@@ -202,10 +202,10 @@ export function EntryScreen({
               ))}
               {projectsStatusMessage && <p className="entry-empty-copy">{projectsStatusMessage}</p>}
               {!projectsStatusMessage && !projects.length && !projectsLoading && (
-                <p className="entry-empty-copy">No existing projects yet.</p>
+                <p className="entry-empty-copy">no existing projects yet.</p>
               )}
               {Boolean(projects.length) && !visibleProjects.length && !projectsLoading && (
-                <p className="entry-empty-copy">No projects match that search.</p>
+                <p className="entry-empty-copy">no projects match that search.</p>
               )}
             </div>
           </div>
