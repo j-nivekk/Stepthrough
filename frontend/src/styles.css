@@ -2999,6 +2999,7 @@ button:disabled {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
 }
 
@@ -3080,7 +3081,8 @@ button:disabled {
 
 .candidate-image-wrap {
   position: relative;
-  aspect-ratio: 16 / 10;
+  /* aspect-ratio is now set inline per-card from recording dimensions */
+  max-height: 480px;
   background: var(--analysis-surface);
   display: flex;
   align-items: center;
@@ -3090,6 +3092,7 @@ button:disabled {
 .candidate-image-wrap img {
   width: 100%;
   height: 100%;
+  max-height: 480px;
   object-fit: contain;
 }
 
@@ -3101,6 +3104,25 @@ button:disabled {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.candidate-overlay-actions {
+  position: absolute;
+  bottom: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Slight background blur so buttons are visible on any image */
+  padding: 5px 7px;
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(6px);
+  border-radius: 999px;
+}
+
+.candidate-card.accepted .candidate-overlay-actions,
+.candidate-card.rejected .candidate-overlay-actions {
+  opacity: 0.7;
 }
 
 .candidate-timecode {
@@ -3188,12 +3210,7 @@ button:disabled {
   line-height: 1.2;
 }
 
-.candidate-decision-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-}
+/* .candidate-decision-row is now rendered in the image overlay as .candidate-overlay-actions */
 
 .candidate-decision-button {
   width: 28px;
@@ -3325,6 +3342,34 @@ button:disabled {
 .candidate-notes-field {
   min-height: 88px;
   resize: vertical;
+}
+
+.candidate-review-key-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  flex-wrap: wrap;
+  margin-left: 4px;
+}
+
+.candidate-key-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.6);
+  color: rgba(0, 0, 0, 0.54);
+  font-size: 10px;
+  line-height: 1;
+  font-family: inherit;
 }
 
 .info-text {
@@ -3653,12 +3698,65 @@ button:disabled {
   border-radius: 999px;
 }
 
+/* ── Comparison section (collapsible) ────────────────────────────── */
+
 .analysis-compare-shell {
-  border: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 18px;
+}
+
+.analysis-compare-trigger {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.72);
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  gap: 12px;
+  justify-content: space-between;
+  line-height: 1.2;
+  list-style: none;
+  min-height: 24px;
+  padding: 6px 10px;
+  text-transform: none;
+  transition: background 140ms ease;
+  width: 100%;
+}
+
+.analysis-compare-trigger:hover,
+.analysis-compare-trigger:focus-visible {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.analysis-compare-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.analysis-compare-trigger::marker {
+  content: '';
+}
+
+.analysis-compare-trigger-chevron {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid currentColor;
+  transition: transform 140ms ease;
+}
+
+.analysis-compare-shell[open] .analysis-compare-trigger-chevron {
+  transform: rotate(180deg);
+}
+
+.analysis-compare-body {
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: 20px;
 }
 
 .analysis-compare-head {
@@ -3668,41 +3766,84 @@ button:disabled {
   justify-content: space-between;
 }
 
+.analysis-compare-head-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analysis-compare-head-eyebrow {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
 .analysis-compare-head h3 {
-  margin: 4px 0 0;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.2;
 }
 
 .analysis-compare-select-wrap {
   align-items: center;
   display: flex;
+  flex: 0 0 auto;
 }
 
 .analysis-compare-select {
-  background: var(--panel-strong);
+  background: var(--analysis-surface-overlay);
   border: 1px solid var(--border);
+  color: rgba(0, 0, 0, 0.72);
   min-width: 280px;
   padding: 10px 12px;
+  font-size: 14px;
+}
+
+.analysis-compare-select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(72, 175, 124, 0.28);
 }
 
 .analysis-compare-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
 }
 
 .analysis-compare-summary span {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  font-size: 13px;
-  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 5px 10px;
+  border: none;
+}
+
+.analysis-compare-summary .compare-stat-both {
+  background: rgba(45, 122, 90, 0.12);
+  color: var(--success);
+}
+
+.analysis-compare-summary .compare-stat-timing {
+  background: rgba(162, 105, 27, 0.12);
+  color: var(--warning);
+}
+
+.analysis-compare-summary .compare-stat-left,
+.analysis-compare-summary .compare-stat-right {
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.6);
 }
 
 .analysis-compare-grid {
   display: grid;
-  gap: 16px;
+  gap: 14px;
 }
 
 .analysis-compare-card {
+  background: var(--analysis-surface-overlay);
   border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -3718,23 +3859,27 @@ button:disabled {
 
 .analysis-compare-badge {
   border-radius: 999px;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
   text-transform: uppercase;
 }
 
 .analysis-compare-badge.both {
-  background: color-mix(in srgb, var(--brand) 18%, white);
+  background: rgba(45, 122, 90, 0.14);
+  color: var(--success);
 }
 
 .analysis-compare-badge.timing_shifted {
-  background: color-mix(in srgb, var(--warning) 18%, white);
+  background: rgba(162, 105, 27, 0.14);
+  color: var(--warning);
 }
 
 .analysis-compare-badge.left_only,
 .analysis-compare-badge.right_only {
-  background: color-mix(in srgb, var(--surface) 70%, white);
+  background: rgba(0, 0, 0, 0.06);
+  color: rgba(0, 0, 0, 0.54);
 }
 
 .analysis-compare-card-columns {
@@ -3751,11 +3896,14 @@ button:disabled {
 
 .analysis-compare-column small {
   color: var(--muted);
+  font-size: 12px;
 }
 
 .analysis-compare-column-label {
-  font-size: 12px;
-  letter-spacing: 0.04em;
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
   margin: 0;
   text-transform: uppercase;
 }
@@ -3763,14 +3911,15 @@ button:disabled {
 .analysis-compare-metrics {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .analysis-compare-metrics span {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  font-size: 12px;
-  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.05);
+  border: none;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 11px;
+  padding: 3px 7px;
 }
 
 .analysis-compare-image {
@@ -3781,5 +3930,16 @@ button:disabled {
 
 .analysis-compare-empty {
   color: var(--muted);
+  font-size: 13px;
+  font-style: italic;
   margin: 0;
+  padding: 20px 0;
+}
+
+.analysis-compare-guidance {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+  padding: 4px 0;
 }
