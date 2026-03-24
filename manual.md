@@ -296,6 +296,28 @@ Raise it when:
 #### OCR Confirmation
 
 OCR confirmation helps validate text-heavy UI changes.
+When OCR is enabled, Hybrid v2 still leans on stronger visual change first, but it can also probe localized changed regions to catch small text-led updates without scanning the whole frame every time.
+
+OCR availability is controlled by the backend environment, not by the run payload itself.
+`ocr_available` means the backend can attempt PaddleOCR with its current install and config; it does not mean the full OCR engine has already been initialized.
+
+Stepthrough currently targets this Paddle stack for Hybrid OCR:
+
+- `paddlepaddle==3.3.0`
+- `paddleocr==3.3.0`
+
+The backend OCR environment is controlled with:
+
+- `STEPTHROUGH_OCR_MODEL_SOURCE=auto|huggingface|bos|local`
+- `STEPTHROUGH_OCR_DET_MODEL_DIR`
+- `STEPTHROUGH_OCR_REC_MODEL_DIR`
+- `STEPTHROUGH_OCR_CACHE_DIR`
+
+Behavior notes:
+
+- `auto`, `huggingface`, and `bos` allow the backend to initialize or download models on first use into the configured cache directory
+- `local` requires backend-provided detection and recognition model directories
+- if OCR initialization fails during a run, Hybrid v2 logs a warning and continues with visual-only detection instead of failing the entire run
 
 Leave it **on** when:
 
@@ -465,6 +487,8 @@ Try this order:
 2. Raise dwell.
 3. Raise settle window if motion-heavy transitions are being captured too early.
 4. Turn off high-fps behavior if it is not needed.
+
+In Hybrid v2, minimum scene gap is enforced between emitted candidates after event windows finalize. It reduces close repeats without freezing the detector during the scan.
 
 If you are on Current v1:
 

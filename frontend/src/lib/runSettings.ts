@@ -93,6 +93,27 @@ export function sanitizeRunSettings(settings?: Partial<RunSettings> | null): Run
   };
 }
 
+export function enforceLocalOcrAvailability(
+  settings: RunSettings,
+  ocrAvailable: boolean | null | undefined,
+): RunSettings {
+  if (ocrAvailable !== false || settings.analysis_engine !== 'hybrid_v2') {
+    return settings;
+  }
+  const advanced = settings.advanced ?? { ...defaultHybridAdvancedSettings };
+  if (advanced.enable_ocr === false && advanced.ocr_backend === null) {
+    return settings;
+  }
+  return {
+    ...settings,
+    advanced: {
+      ...advanced,
+      enable_ocr: false,
+      ocr_backend: null,
+    },
+  };
+}
+
 export function getProjectPresetStorageKey(projectId: string): string {
   return `${PROJECT_PRESET_STORAGE_KEY_PREFIX}.${projectId}`;
 }
@@ -229,16 +250,16 @@ export function describeAnalysisPreset(settings: RunSettings): string {
   const ocrCopy =
     settings.advanced?.enable_ocr === false
       ? 'OCR confirmation disabled.'
-      : 'OCR confirmation enabled when visual change is strong.';
+      : 'OCR confirmation enabled, with backend-configured PaddleOCR for strong visual changes and bounded probes on localized changed regions.';
   return `${formatAnalysisPresetLabel(settings.analysis_preset)} samples around ${sampleFps} fps, waits ~${dwell}ms for dwell and ~${settle}ms for settle windows. ${ocrCopy}`;
 }
 
 export function describeMinSceneGap(minSceneGapMs: number): string {
   if (minSceneGapMs === 0) {
-    return '0ms removes the hard time gap between candidates and lets sampled changes cluster tightly on the timeline.';
+    return '0ms removes the hard time gap between emitted candidates and lets Hybrid detections cluster tightly on the timeline.';
   }
   const seconds = (minSceneGapMs / 1000).toFixed(1).replace(/\.0$/, '');
-  return `${minSceneGapMs}ms (~${seconds}s) on the original timeline. This is the minimum spacing allowed between detected scene candidates.`;
+  return `${minSceneGapMs}ms (~${seconds}s) on the original timeline. This is the minimum spacing allowed between emitted candidates; in Hybrid v2 it is enforced after event windows finalize, not by freezing detection.`;
 }
 
 export function describeExtractOffset(offsetMs: number): string {
@@ -275,7 +296,7 @@ export function describeHybridSettleWindowHint(settings: RunSettings): string {
 }
 
 export function describeHybridOcrConfirmationHint(): string {
-  return 'Keeps OCR confirmation aligned with strong visual changes. Leave it on for text-heavy interfaces, and turn it off only when you want pure visual-diff behavior. Preset baseline: on (PaddleOCR).';
+  return 'OCR is configured by the backend environment. When available, Hybrid uses PaddleOCR for strong visual changes and bounded probes on localized changed regions. First use may initialize models in the backend cache, or rely on backend-provided local model directories. Preset baseline: on (PaddleOCR).';
 }
 
 export function formatHybridSampleFpsAnnotation(settings: RunSettings): string {
@@ -304,7 +325,7 @@ export function formatHybridSettleWindowAnnotation(settings: RunSettings): strin
 
 export function formatHybridOcrAnnotation(settings: RunSettings): string {
   const currentOcrState = formatHybridOcrState(settings.advanced?.enable_ocr, settings.advanced?.ocr_backend);
-  return `Preset: on (PaddleOCR). Current: ${currentOcrState}.`;
+  return `Preset: on (PaddleOCR). Current: ${currentOcrState}. Availability, model source, and local model paths are controlled by the backend.`;
 }
 
 export function getSampleFpsGuardrail(

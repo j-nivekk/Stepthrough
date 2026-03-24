@@ -1,23 +1,53 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
+import cv2
 import numpy as np
 
 from app.models import HybridAdvancedSettings, RunSettings
 from app.services.hybrid_detection import (
+    _OcrCache,
+    _SequentialReader,
+    _build_signal,
+    _merge_or_append_event,
     _maybe_load_ocr_engine,
+    _normalize_predict_result,
     _prepare_frame,
+    _seek_frame,
     _transition_signal,
     detect_candidates_hybrid,
+    probe_paddleocr_availability,
     resolve_hybrid_config,
 )
+from app.services.similarity import hamming_distance, perceptual_hash_array
+
+
+class FakeOcrEngine:
+    def __init__(self, *, full_frame_only: bool = False) -> None:
+        self.calls: list[tuple[int, int]] = []
+        self.full_frame_only = full_frame_only
+
+    def extract_text(self, image: np.ndarray) -> str | None:
+        self.calls.append((image.shape[1], image.shape[0]))
+        if self.full_frame_only and image.shape[0] < 300:
+            return None
+        tone_bucket = int(round(float(np.mean(image)) / 10.0))
+        return f"tone-{tone_bucket}"
+
+
+class FakePredictResult:
+    def __init__(self, payload) -> None:
+        self.json = payload
 
 
 def test_resolve_hybrid_config_uses_preset_defaults() -> None:
     config = resolve_hybrid_config(RunSettings(analysis_engine="hybrid_v2", analysis_preset="subtle_ui"), fps=30)
 
     assert config.sample_fps == 8
+    assert config.min_scene_gap_ms == 900
     assert config.min_dwell_ms == 250
     assert config.settle_window_ms == 250
     assert config.enable_ocr is True
@@ -55,15 +85,292 @@ def test_transition_signal_detects_local_interface_change() -> None:
     assert regions
 
 
+def test_transition_signal_detects_dark_low_contrast_change() -> None:
+    baseline = np.full((360, 640, 3), 0x33, dtype=np.uint8)
+    changed = baseline.copy()
+    changed[120:220, 240:340] = 0x33 + 15
+
+    previous = _prepare_frame(baseline, 0, 960)
+    current = _prepare_frame(changed, 200, 960)
+
+    visual, motion, regions = _transition_signal(previous, current)
+
+    assert visual > 0.08
+    assert regions
+    assert max(region["score"] for region in regions) > 0.1
+
+
+def test_build_signal_uses_anchor_frame_for_gradual_changes() -> None:
+    baseline = np.full((360, 640, 3), 0x33, dtype=np.uint8)
+    mid = baseline.copy()
+    current = baseline.copy()
+    mid[120:220, 240:340] = 0x33 + 10
+    current[120:220, 240:340] = 0x33 + 20
+
+    config = resolve_hybrid_config(
+        RunSettings(
+            analysis_engine="hybrid_v2",
+            analysis_preset="balanced",
+            advanced=HybridAdvancedSettings(enable_ocr=False),
+        ),
+        fps=30,
+    )
+
+    anchor_sample = _prepare_frame(baseline, 0, 960)
+    previous_sample = _prepare_frame(mid, 200, 960)
+    current_sample = _prepare_frame(current, 400, 960)
+
+    direct_signal = _build_signal(previous_sample, current_sample, None, config, None)
+    anchored_signal = _build_signal(previous_sample, current_sample, anchor_sample, config, None)
+
+    assert anchored_signal.combined > direct_signal.combined
+    assert anchored_signal.visual > direct_signal.visual
+
+
+def test_build_signal_region_probe_runs_below_full_frame_trigger() -> None:
+    baseline = np.full((360, 640, 3), 0x33, dtype=np.uint8)
+    changed = baseline.copy()
+    changed[120:220, 240:340] = 0x33 + 15
+
+    config = replace(
+        resolve_hybrid_config(
+            RunSettings(
+                analysis_engine="hybrid_v2",
+                analysis_preset="balanced",
+                advanced=HybridAdvancedSettings(enable_ocr=True),
+            ),
+            fps=30,
+        ),
+        ocr_trigger_threshold=0.4,
+        settle_threshold=0.1,
+    )
+    engine = FakeOcrEngine()
+    ocr_cache = _OcrCache()
+
+    signal = _build_signal(
+        _prepare_frame(baseline, 0, 960),
+        _prepare_frame(changed, 200, 960),
+        None,
+        config,
+        engine,
+        ocr_cache,
+    )
+
+    assert signal.visual < config.ocr_trigger_threshold
+    assert signal.text > 0
+    assert engine.calls
+    assert all(width < 640 and height < 360 for width, height in engine.calls)
+
+
+def test_build_signal_region_probe_uses_cache_for_repeated_crops() -> None:
+    baseline = np.full((360, 640, 3), 0x33, dtype=np.uint8)
+    changed = baseline.copy()
+    changed[120:220, 240:340] = 0x33 + 15
+
+    config = replace(
+        resolve_hybrid_config(
+            RunSettings(
+                analysis_engine="hybrid_v2",
+                analysis_preset="balanced",
+                advanced=HybridAdvancedSettings(enable_ocr=True),
+            ),
+            fps=30,
+        ),
+        ocr_trigger_threshold=0.4,
+        settle_threshold=0.1,
+    )
+    engine = FakeOcrEngine()
+    ocr_cache = _OcrCache()
+    previous_sample = _prepare_frame(baseline, 0, 960)
+    current_sample = _prepare_frame(changed, 200, 960)
+
+    _build_signal(previous_sample, current_sample, None, config, engine, ocr_cache)
+    first_call_count = len(engine.calls)
+    _build_signal(previous_sample, current_sample, None, config, engine, ocr_cache)
+
+    assert first_call_count > 0
+    assert len(engine.calls) == first_call_count
+
+
+def test_build_signal_falls_back_to_full_frame_ocr_when_region_probe_is_empty() -> None:
+    baseline = np.zeros((360, 640, 3), dtype=np.uint8)
+    changed = baseline.copy()
+    changed[60:180, 420:580] = 255
+
+    config = resolve_hybrid_config(
+        RunSettings(
+            analysis_engine="hybrid_v2",
+            analysis_preset="balanced",
+            advanced=HybridAdvancedSettings(enable_ocr=True),
+        ),
+        fps=30,
+    )
+    engine = FakeOcrEngine(full_frame_only=True)
+    signal = _build_signal(
+        _prepare_frame(baseline, 0, 960),
+        _prepare_frame(changed, 200, 960),
+        None,
+        config,
+        engine,
+        _OcrCache(),
+    )
+
+    assert signal.text > 0
+    assert any(width == 640 and height == 360 for width, height in engine.calls)
+    assert any(width < 640 and height < 360 for width, height in engine.calls)
+
+
+def test_emit_gap_keeps_stronger_later_candidate_within_gap() -> None:
+    detected_events = [
+        {"timestamp_ms": 100, "scene_score": 0.4, "score_breakdown": {}, "ocr_text": None},
+    ]
+    next_event = {"timestamp_ms": 350, "scene_score": 0.7, "score_breakdown": {}, "ocr_text": None}
+
+    _merge_or_append_event(detected_events, next_event, 500)
+
+    assert len(detected_events) == 1
+    assert detected_events[0]["timestamp_ms"] == 350
+    assert detected_events[0]["scene_score"] == 0.7
+
+
+def test_emit_gap_keeps_both_candidates_outside_gap() -> None:
+    detected_events = [
+        {"timestamp_ms": 100, "scene_score": 0.7, "score_breakdown": {}, "ocr_text": None},
+    ]
+    next_event = {"timestamp_ms": 700, "scene_score": 0.6, "score_breakdown": {}, "ocr_text": None}
+
+    _merge_or_append_event(detected_events, next_event, 500)
+
+    assert len(detected_events) == 2
+
+
+def test_emit_gap_keeps_later_timestamp_when_scores_tie() -> None:
+    detected_events = [
+        {"timestamp_ms": 100, "scene_score": 0.7, "score_breakdown": {}, "ocr_text": None},
+    ]
+    next_event = {"timestamp_ms": 450, "scene_score": 0.7, "score_breakdown": {}, "ocr_text": None}
+
+    _merge_or_append_event(detected_events, next_event, 500)
+
+    assert len(detected_events) == 1
+    assert detected_events[0]["timestamp_ms"] == 450
+
+
+def test_perceptual_hash_array_is_stable_for_identical_arrays() -> None:
+    baseline = np.full((120, 180, 3), 90, dtype=np.uint8)
+
+    baseline_hash = perceptual_hash_array(baseline)
+    copied_hash = perceptual_hash_array(baseline.copy())
+
+    assert hamming_distance(baseline_hash, baseline_hash) == 0
+    assert hamming_distance(baseline_hash, copied_hash) == 0
+
+
+def test_ocr_cache_hits_for_entries_within_hamming_threshold() -> None:
+    baseline = np.full((120, 180, 3), 90, dtype=np.uint8)
+    cache = _OcrCache()
+    baseline_hash = perceptual_hash_array(baseline)
+    cache.entries[baseline_hash ^ 0b11] = "tone-9"
+
+    cached, cached_text = cache.get(baseline)
+
+    assert cached is True
+    assert cached_text == "tone-9"
+
+
+def test_normalize_predict_result_returns_none_when_no_text_is_present() -> None:
+    result = [FakePredictResult({"res": {"rec_texts": []}})]
+
+    assert _normalize_predict_result(result) is None
+
+
+def test_normalize_predict_result_handles_single_result_object() -> None:
+    result = [FakePredictResult({"res": {"rec_texts": ["  hello   world  "]}})]
+
+    assert _normalize_predict_result(result) == "hello world"
+
+
+def test_normalize_predict_result_handles_multiple_blocks_and_lines() -> None:
+    result = [
+        FakePredictResult({"res": {"rec_texts": ["First line", "Second line"]}}),
+        FakePredictResult({"result": {"rec_texts": np.array(["Third block"], dtype=object)}}),
+        SimpleNamespace(res={"rec_texts": ["Fourth block"]}),
+    ]
+
+    assert _normalize_predict_result(result) == "First line Second line Third block Fourth block"
+
+
+def test_probe_paddleocr_availability_returns_false_when_package_is_missing(monkeypatch) -> None:
+    import app.services.hybrid_detection as hybrid_detection
+
+    probe_paddleocr_availability.cache_clear()
+    monkeypatch.delenv("STEPTHROUGH_OCR_MODEL_SOURCE", raising=False)
+    monkeypatch.delenv("STEPTHROUGH_OCR_DET_MODEL_DIR", raising=False)
+    monkeypatch.delenv("STEPTHROUGH_OCR_REC_MODEL_DIR", raising=False)
+    monkeypatch.delenv("STEPTHROUGH_OCR_CACHE_DIR", raising=False)
+
+    def fail_import():
+        raise ModuleNotFoundError("No module named 'paddleocr'")
+
+    monkeypatch.setattr(hybrid_detection, "_load_paddleocr_symbols", fail_import)
+
+    available, message = probe_paddleocr_availability()
+
+    assert available is False
+    assert "missing `paddleocr`" in message
+
+
+def test_probe_paddleocr_availability_rejects_local_mode_without_model_dirs(monkeypatch) -> None:
+    probe_paddleocr_availability.cache_clear()
+    monkeypatch.setenv("STEPTHROUGH_OCR_MODEL_SOURCE", "local")
+    monkeypatch.delenv("STEPTHROUGH_OCR_DET_MODEL_DIR", raising=False)
+    monkeypatch.delenv("STEPTHROUGH_OCR_REC_MODEL_DIR", raising=False)
+    monkeypatch.delenv("STEPTHROUGH_OCR_CACHE_DIR", raising=False)
+
+    available, message = probe_paddleocr_availability()
+
+    assert available is False
+    assert "Local OCR mode requires both" in message
+
+
+def test_probe_paddleocr_availability_accepts_remote_mode_without_cached_models(monkeypatch, tmp_path: Path) -> None:
+    import app.services.hybrid_detection as hybrid_detection
+
+    probe_paddleocr_availability.cache_clear()
+    monkeypatch.setenv("STEPTHROUGH_OCR_MODEL_SOURCE", "bos")
+    monkeypatch.delenv("STEPTHROUGH_OCR_DET_MODEL_DIR", raising=False)
+    monkeypatch.delenv("STEPTHROUGH_OCR_REC_MODEL_DIR", raising=False)
+    monkeypatch.setenv("STEPTHROUGH_OCR_CACHE_DIR", str(tmp_path / "ocr-cache"))
+    monkeypatch.setattr(hybrid_detection, "_load_paddleocr_symbols", lambda: (object, object()))
+    monkeypatch.setattr(
+        hybrid_detection,
+        "_installed_package_version",
+        lambda name: "3.3.0" if name in {"paddleocr", "paddlepaddle"} else None,
+    )
+
+    available, message = probe_paddleocr_availability()
+
+    assert available is True
+    assert "First use may initialize or download models" in message
+    assert "ocr-cache" in message
+
+
 def test_ocr_engine_warning_is_emitted_when_backend_is_missing(monkeypatch) -> None:
     import app.services.hybrid_detection as hybrid_detection
 
-    def fail_constructor():
+    settings = RunSettings(analysis_engine="hybrid_v2", analysis_preset="balanced")
+    config = resolve_hybrid_config(settings, fps=30)
+    monkeypatch.setattr(hybrid_detection, "_load_paddleocr_symbols", lambda: (object, object()))
+    monkeypatch.setattr(
+        hybrid_detection,
+        "_installed_package_version",
+        lambda name: "3.3.0" if name in {"paddleocr", "paddlepaddle"} else None,
+    )
+
+    def fail_constructor(_runtime_config):
         raise RuntimeError("missing paddleocr")
 
     monkeypatch.setattr(hybrid_detection, "PaddleOcrEngine", fail_constructor)
-    settings = RunSettings(analysis_engine="hybrid_v2", analysis_preset="balanced")
-    config = resolve_hybrid_config(settings, fps=30)
 
     engine, warning = _maybe_load_ocr_engine(config)
 
@@ -94,3 +401,25 @@ def test_detect_candidates_hybrid_creates_score_breakdowns(
     assert candidates
     assert all(candidate["score_breakdown"] is not None for candidate in candidates)
     assert all("perceptual_hash" in candidate for candidate in candidates)
+
+
+def test_sequential_reader_matches_seek_reader_for_monotonic_timestamps(tmp_path: Path, video_factory) -> None:
+    import cv2
+
+    video_path = video_factory("reader-compare.mp4", ["red", "green", "blue"], segment_duration=0.5)
+    timestamps = [0, 100, 300, 600, 900, 1200]
+
+    seek_capture = cv2.VideoCapture(str(video_path))
+    sequential_capture = cv2.VideoCapture(str(video_path))
+    reader = _SequentialReader(sequential_capture, source_fps=float(sequential_capture.get(cv2.CAP_PROP_FPS)) or 25.0)
+
+    try:
+        for timestamp_ms in timestamps:
+            seek_frame = _seek_frame(seek_capture, timestamp_ms)
+            sequential_frame = reader.next(timestamp_ms)
+            assert seek_frame is not None
+            assert sequential_frame is not None
+            assert np.array_equal(seek_frame, sequential_frame)
+    finally:
+        seek_capture.release()
+        sequential_capture.release()

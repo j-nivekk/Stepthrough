@@ -21,9 +21,13 @@ HASH_BITS = 64
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 
 
-def _perceptual_hash(image: Image.Image) -> int:
-    grayscale = np.asarray(image.convert("L").resize((32, 32), Image.Resampling.LANCZOS), dtype=np.float32)
-    transformed = cv2.dct(grayscale)
+def perceptual_hash_array(image: np.ndarray) -> int:
+    if image.ndim == 3:
+        grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        grayscale = image
+    resized = cv2.resize(grayscale.astype(np.float32), (32, 32), interpolation=cv2.INTER_AREA)
+    transformed = cv2.dct(resized)
     low_frequency = transformed[:8, :8]
     values = low_frequency.flatten()
     mean = float(np.mean(values[1:])) if values.size > 1 else float(np.mean(values))
@@ -31,6 +35,11 @@ def _perceptual_hash(image: Image.Image) -> int:
     for value in values:
         bits = (bits << 1) | int(value >= mean)
     return bits
+
+
+def _perceptual_hash(image: Image.Image) -> int:
+    grayscale = np.asarray(image.convert("L"), dtype=np.uint8)
+    return perceptual_hash_array(grayscale)
 
 
 def fingerprint_image(path: Path) -> ImageFingerprint:

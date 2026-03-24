@@ -31,8 +31,10 @@ RunEventLevel = Literal["info", "warning", "error", "success"]
 class HealthResponse(BaseModel):
     ffmpeg_available: bool
     ffprobe_available: bool
+    ocr_available: bool
     missing_tools: list[str]
     message: str
+    ocr_message: str
 
 
 class ProjectCreate(BaseModel):

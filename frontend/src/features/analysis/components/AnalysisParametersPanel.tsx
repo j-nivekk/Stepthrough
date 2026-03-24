@@ -52,6 +52,8 @@ export interface AnalysisParametersPanelProps {
   onStartRun: () => void;
   onToggleHints: () => void;
   openPopover: AnalysisPopoverKey | null;
+  ocrAvailable: boolean;
+  ocrStatusMessage: string | null;
   parameterColumnRef: RefObject<HTMLElement | null>;
   presetCopyFeedback: string;
   presetImportDraft: string;
@@ -99,6 +101,8 @@ export function AnalysisParametersPanel({
   onStartRun,
   onToggleHints,
   openPopover,
+  ocrAvailable,
+  ocrStatusMessage,
   parameterColumnRef,
   presetCopyFeedback,
   presetImportDraft,
@@ -119,6 +123,10 @@ export function AnalysisParametersPanel({
   showPresetText,
   togglePopover,
 }: AnalysisParametersPanelProps) {
+  const hybridOcrAnnotation = ocrStatusMessage
+    ? `${formatHybridOcrAnnotation(runSettings)} ${ocrStatusMessage}`
+    : formatHybridOcrAnnotation(runSettings);
+
   return (
     <section className="analysis-column analysis-parameter-column" ref={parameterColumnRef}>
       <div className="analysis-column-head">
@@ -537,6 +545,7 @@ export function AnalysisParametersPanel({
                       <div className="analysis-mode-toggle">
                         <button
                           className={`analysis-mode-button ${runSettings.advanced?.enable_ocr === false ? 'active' : ''}`}
+                          disabled={!ocrAvailable}
                           onClick={() =>
                             setRunSettings((current) => ({
                               ...current,
@@ -553,6 +562,7 @@ export function AnalysisParametersPanel({
                         </button>
                         <button
                           className={`analysis-mode-button ${runSettings.advanced?.enable_ocr === false ? '' : 'active'}`}
+                          disabled={!ocrAvailable}
                           onClick={() =>
                             setRunSettings((current) => ({
                               ...current,
@@ -570,7 +580,7 @@ export function AnalysisParametersPanel({
                       </div>
                     </div>
                   </div>
-                  <span className="analysis-parameter-annotation">{formatHybridOcrAnnotation(runSettings)}</span>
+                  <span className="analysis-parameter-annotation">{hybridOcrAnnotation}</span>
                 </div>
               </div>
             </details>

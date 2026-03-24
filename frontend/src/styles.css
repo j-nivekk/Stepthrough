@@ -1388,6 +1388,16 @@ a {
   text-decoration-color: transparent;
 }
 
+.analysis-mode-button:disabled {
+  color: rgba(0, 0, 0, 0.35);
+  cursor: default;
+  text-decoration-color: transparent;
+}
+
+.analysis-mode-button.active:disabled {
+  color: #000;
+}
+
 .analysis-task-bar {
   width: 100%;
   height: 12px;

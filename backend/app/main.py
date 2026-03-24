@@ -67,7 +67,7 @@ from .services.detection import (
     detect_candidates,
 )
 from .services.export import build_accepted_steps, create_export_bundle
-from .services.hybrid_detection import detect_candidates_hybrid, resolve_hybrid_config
+from .services.hybrid_detection import detect_candidates_hybrid, probe_paddleocr_availability, resolve_hybrid_config
 from .services.jobs import JobManager
 from .services.similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string
 from .services.video import (
@@ -107,6 +107,8 @@ def startup() -> None:
     ensure_app_dirs()
     init_db()
     app.state.tool_diagnostics = build_tool_diagnostics()
+    probe_paddleocr_availability.cache_clear()
+    app.state.ocr_available, app.state.ocr_message = probe_paddleocr_availability()
     app.state.job_manager = JobManager()
 
 
@@ -121,6 +123,25 @@ def _require_tools() -> None:
     diagnostics = app.state.tool_diagnostics
     if diagnostics.missing_tools:
         raise HTTPException(status_code=503, detail=diagnostics.message)
+
+
+def _lock_unavailable_ocr(settings: RunSettings) -> RunSettings:
+    if settings.analysis_engine != "hybrid_v2" or settings.advanced is None:
+        return settings
+    if getattr(app.state, "ocr_available", True):
+        return settings
+    if settings.advanced.enable_ocr is False and settings.advanced.ocr_backend is None:
+        return settings
+    return settings.model_copy(
+        update={
+            "advanced": settings.advanced.model_copy(
+                update={
+                    "enable_ocr": False,
+                    "ocr_backend": None,
+                }
+            )
+        }
+    )
 
 
 def _run_is_abortable(run: dict[str, Any]) -> bool:
@@ -495,8 +516,10 @@ def health() -> HealthResponse:
     return HealthResponse(
         ffmpeg_available=diagnostics.ffmpeg_available,
         ffprobe_available=diagnostics.ffprobe_available,
+        ocr_available=getattr(app.state, "ocr_available", True),
         missing_tools=list(diagnostics.missing_tools),
         message=diagnostics.message,
+        ocr_message=getattr(app.state, "ocr_message", "PaddleOCR availability has not been checked yet."),
     )
 
 
@@ -623,6 +646,7 @@ def runs_create(recording_id: str, settings: RunSettings) -> DetectionRunSummary
     recording = get_recording(recording_id)
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
+    settings = _lock_unavailable_ocr(settings)
     _validate_run_settings_for_recording(recording, settings)
     run = create_run(recording_id, settings)
     _emit_run_event(run["id"], phase="queued", level="info", message="Run queued", progress=0.0)

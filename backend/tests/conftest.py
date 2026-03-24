@@ -30,7 +30,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 @pytest.fixture()
 def video_factory(tmp_path: Path):
-    def create_video(filename: str, colors: list[str], segment_duration: int = 1) -> Path:
+    def create_video(filename: str, colors: list[str], segment_duration: float = 1.0) -> Path:
         output_path = tmp_path / filename
         command = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y']
         filter_inputs: list[str] = []

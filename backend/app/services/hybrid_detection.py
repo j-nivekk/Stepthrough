@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from functools import lru_cache
+import json
+import os
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import uuid4
@@ -8,10 +13,18 @@ from uuid import uuid4
 import cv2
 import numpy as np
 
+from ..config import OcrRuntimeConfig, build_ocr_runtime_config, validate_ocr_runtime_config
 from ..models import AnalysisPreset, RunSettings
 from ..utils import timecode_from_ms, utc_now
 from .detection import CancellationRequested, CancellationCallback, ProgressCallback
-from .similarity import fingerprint_image, hash_to_hex, histogram_to_string, text_distance
+from .similarity import (
+    fingerprint_image,
+    hamming_distance,
+    hash_to_hex,
+    histogram_to_string,
+    perceptual_hash_array,
+    text_distance,
+)
 from .video import extract_frame
 
 
@@ -22,7 +35,9 @@ EXTRACT_RANGE = (0.48, 0.92)
 @dataclass(frozen=True)
 class HybridDetectorConfig:
     sample_fps: float
+    source_fps: float
     min_dwell_ms: int
+    min_scene_gap_ms: int
     settle_window_ms: int
     enable_ocr: bool
     ocr_backend: str | None
@@ -30,6 +45,9 @@ class HybridDetectorConfig:
     proposal_threshold: float
     settle_threshold: float
     ocr_trigger_threshold: float
+    tile_grid_size: int
+    contour_threshold_floor: int
+    contour_threshold_ceiling: int
 
 
 @dataclass
@@ -39,6 +57,7 @@ class SampleFrame:
     gray: np.ndarray
     edges: np.ndarray
     ocr_text: str | None = None
+    ocr_text_checked: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,6 +90,83 @@ class OcrEngine(Protocol):
         ...
 
 
+@dataclass
+class _OcrCache:
+    capacity: int = 64
+    max_hamming_distance: int = 2
+    entries: OrderedDict[int, str | None] = field(default_factory=OrderedDict)
+
+    def get(self, image: np.ndarray) -> tuple[bool, str | None]:
+        image_hash = perceptual_hash_array(image)
+        for cached_hash, cached_text in list(self.entries.items()):
+            if hamming_distance(image_hash, cached_hash) <= self.max_hamming_distance:
+                self.entries.move_to_end(cached_hash)
+                return True, cached_text
+        return False, None
+
+    def put(self, image: np.ndarray, text: str | None) -> str | None:
+        image_hash = perceptual_hash_array(image)
+        self.entries[image_hash] = text
+        self.entries.move_to_end(image_hash)
+        while len(self.entries) > self.capacity:
+            self.entries.popitem(last=False)
+        return text
+
+
+@dataclass
+class _SequentialReader:
+    capture: cv2.VideoCapture
+    source_fps: float
+    total_frames: int | None = None
+    seek_gap_frames: int = 5
+    last_frame_index: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.total_frames is None:
+            raw_total_frames = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.total_frames = raw_total_frames if raw_total_frames > 0 else None
+
+    def _frame_index_for_timestamp(self, timestamp_ms: int) -> int:
+        target_index = max(0, int(round((timestamp_ms / 1000.0) * self.source_fps)))
+        if self.total_frames is not None:
+            return min(target_index, max(0, self.total_frames - 1))
+        return target_index
+
+    def _seek_to_frame(self, frame_index: int) -> np.ndarray | None:
+        self.capture.set(cv2.CAP_PROP_POS_FRAMES, float(frame_index))
+        success, frame = self.capture.read()
+        if not success:
+            return None
+        self.last_frame_index = frame_index
+        return frame
+
+    def next(self, timestamp_ms: int) -> np.ndarray | None:
+        if self.source_fps <= 0:
+            return _seek_frame(self.capture, timestamp_ms)
+
+        target_frame_index = self._frame_index_for_timestamp(timestamp_ms)
+        if self.last_frame_index is None:
+            return self._seek_to_frame(target_frame_index)
+
+        if target_frame_index <= self.last_frame_index:
+            return self._seek_to_frame(target_frame_index)
+
+        frame_gap = target_frame_index - self.last_frame_index
+        if frame_gap > self.seek_gap_frames:
+            return self._seek_to_frame(target_frame_index)
+
+        for _ in range(max(0, frame_gap - 1)):
+            if not self.capture.grab():
+                return self._seek_to_frame(target_frame_index)
+
+        success, frame = self.capture.read()
+        if not success:
+            return self._seek_to_frame(target_frame_index)
+
+        self.last_frame_index = target_frame_index
+        return frame
+
+
 PRESET_DEFAULTS: dict[AnalysisPreset, dict[str, float | int]] = {
     "subtle_ui": {
         "sample_fps": 8,
@@ -99,26 +195,170 @@ PRESET_DEFAULTS: dict[AnalysisPreset, dict[str, float | int]] = {
 }
 
 
-class PaddleOcrEngine:
-    def __init__(self) -> None:
-        from paddleocr import PaddleOCR  # type: ignore[import-not-found]
+PADDLEOCR_SUPPORTED_VERSION = "3.3.0"
+PADDLEPADDLE_SUPPORTED_VERSION = "3.3.0"
 
-        self._ocr = PaddleOCR(use_angle_cls=False, lang="en", show_log=False)
+
+def _installed_package_version(name: str) -> str | None:
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return None
+
+
+def _load_paddleocr_symbols() -> tuple[type[Any], Any]:
+    import paddle  # type: ignore[import-not-found]
+    from paddleocr import PaddleOCR  # type: ignore[import-not-found]
+
+    return PaddleOCR, paddle
+
+
+def _validate_paddle_stack_versions() -> str | None:
+    paddle_version = _installed_package_version("paddlepaddle")
+    paddleocr_version = _installed_package_version("paddleocr")
+    if paddle_version == PADDLEPADDLE_SUPPORTED_VERSION and paddleocr_version == PADDLEOCR_SUPPORTED_VERSION:
+        return None
+    found_paddle = paddle_version or "missing"
+    found_ocr = paddleocr_version or "missing"
+    return (
+        "Unsupported Paddle OCR stack in the backend Python environment. "
+        f"Install paddlepaddle=={PADDLEPADDLE_SUPPORTED_VERSION} and paddleocr=={PADDLEOCR_SUPPORTED_VERSION} "
+        f"(found paddlepaddle=={found_paddle}, paddleocr=={found_ocr})."
+    )
+
+
+def _clean_ocr_token(value: Any) -> str | None:
+    cleaned = " ".join(part for part in str(value).split() if part)
+    return cleaned or None
+
+
+def _append_ocr_tokens(tokens: list[str], values: Any) -> None:
+    if values is None:
+        return
+    if isinstance(values, np.ndarray):
+        _append_ocr_tokens(tokens, values.tolist())
+        return
+    if isinstance(values, (list, tuple, set)):
+        for item in values:
+            _append_ocr_tokens(tokens, item)
+        return
+    cleaned = _clean_ocr_token(values)
+    if cleaned:
+        tokens.append(cleaned)
+
+
+def _normalize_predict_result(result: Any) -> str | None:
+    tokens: list[str] = []
+
+    def walk(node: Any) -> None:
+        if node is None:
+            return
+        if isinstance(node, dict):
+            if "rec_texts" in node:
+                _append_ocr_tokens(tokens, node["rec_texts"])
+            if "text" in node:
+                _append_ocr_tokens(tokens, node["text"])
+            for key in ("res", "result", "results", "data"):
+                nested = node.get(key)
+                if nested is not None:
+                    walk(nested)
+            return
+        if isinstance(node, np.ndarray):
+            if node.dtype.kind in {"U", "S", "O"}:
+                _append_ocr_tokens(tokens, node.tolist())
+            return
+        if isinstance(node, (list, tuple, set)):
+            for item in node:
+                walk(item)
+            return
+        json_payload = getattr(node, "json", None)
+        if json_payload is not None:
+            try:
+                payload = json_payload() if callable(json_payload) else json_payload
+            except Exception:
+                payload = None
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except json.JSONDecodeError:
+                    payload = None
+            if payload is not None:
+                walk(payload)
+                return
+        for attribute in ("res", "result", "results", "data"):
+            nested = getattr(node, attribute, None)
+            if nested is not None:
+                walk(nested)
+                return
+        rec_texts = getattr(node, "rec_texts", None)
+        if rec_texts is not None:
+            _append_ocr_tokens(tokens, rec_texts)
+        text = getattr(node, "text", None)
+        if text is not None and not callable(text):
+            _append_ocr_tokens(tokens, text)
+
+    walk(result)
+    normalized = " ".join(token for token in tokens if token)
+    return normalized or None
+
+
+def _apply_paddle_model_source(runtime_config: OcrRuntimeConfig) -> None:
+    # Keep startup checks offline-friendly and let the real init decide whether
+    # model downloads are needed. BOS is the only documented override; the
+    # default source is HuggingFace.
+    os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+    if runtime_config.model_source == "bos":
+        os.environ["PADDLE_PDX_MODEL_SOURCE"] = "BOS"
+    elif runtime_config.model_source in {"huggingface", "local"}:
+        os.environ.pop("PADDLE_PDX_MODEL_SOURCE", None)
+
+
+class PaddleOcrEngine:
+    def __init__(self, runtime_config: OcrRuntimeConfig) -> None:
+        _apply_paddle_model_source(runtime_config)
+        PaddleOCR, _paddle = _load_paddleocr_symbols()
+        init_kwargs: dict[str, Any] = {
+            "lang": "en",
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+            "text_detection_model_dir": str(runtime_config.resolved_det_model_dir),
+            "text_recognition_model_dir": str(runtime_config.resolved_rec_model_dir),
+        }
+        self._ocr = PaddleOCR(**init_kwargs)
 
     def extract_text(self, image: np.ndarray) -> str | None:
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = self._ocr.ocr(rgb, cls=False)
-        if not results:
-            return None
-        tokens: list[str] = []
-        for line in results[0]:
-            if not line or len(line) < 2:
-                continue
-            text_part = line[1][0] if line[1] else ""
-            cleaned = " ".join(part for part in str(text_part).split() if part)
-            if cleaned:
-                tokens.append(cleaned)
-        return " ".join(tokens) or None
+        return _normalize_predict_result(self._ocr.predict(rgb))
+
+
+@lru_cache(maxsize=1)
+def probe_paddleocr_availability() -> tuple[bool, str]:
+    runtime_config = build_ocr_runtime_config()
+    config_valid, config_error = validate_ocr_runtime_config(runtime_config)
+    if not config_valid:
+        return False, config_error or "PaddleOCR is not configured for this backend environment."
+    try:
+        _load_paddleocr_symbols()
+    except ModuleNotFoundError as exc:  # pragma: no cover - depends on local install/runtime assets
+        missing_module = getattr(exc, "name", None) or "paddleocr"
+        return False, f"PaddleOCR 3.x is not installed in the backend Python environment: missing `{missing_module}`."
+    except Exception as exc:  # pragma: no cover - depends on local install/runtime assets
+        details = " ".join(str(exc).split()) or exc.__class__.__name__
+        return False, f"PaddleOCR 3.x could not be imported in the backend Python environment: {details}"
+    version_error = _validate_paddle_stack_versions()
+    if version_error is not None:
+        return False, version_error
+    if runtime_config.model_source == "local":
+        return (
+            True,
+            "PaddleOCR 3.3.0 is configured for local model directories provided by the backend environment.",
+        )
+    return (
+        True,
+        "PaddleOCR 3.3.0 is configured through the backend environment. "
+        f"First use may initialize or download models into `{runtime_config.cache_dir}`.",
+    )
 
 
 def resolve_hybrid_config(settings: RunSettings, fps: float) -> HybridDetectorConfig:
@@ -136,7 +376,9 @@ def resolve_hybrid_config(settings: RunSettings, fps: float) -> HybridDetectorCo
     ocr_backend = advanced.ocr_backend if advanced is not None else "paddleocr"
     return HybridDetectorConfig(
         sample_fps=sample_fps,
+        source_fps=max(fps, 0.0),
         min_dwell_ms=min_dwell_ms,
+        min_scene_gap_ms=settings.min_scene_gap_ms,
         settle_window_ms=settle_window_ms,
         enable_ocr=enable_ocr,
         ocr_backend=ocr_backend,
@@ -144,6 +386,9 @@ def resolve_hybrid_config(settings: RunSettings, fps: float) -> HybridDetectorCo
         proposal_threshold=float(preset_defaults["proposal_threshold"]),
         settle_threshold=float(preset_defaults["settle_threshold"]),
         ocr_trigger_threshold=float(preset_defaults["ocr_trigger_threshold"]),
+        tile_grid_size=8,
+        contour_threshold_floor=8,
+        contour_threshold_ceiling=30,
     )
 
 
@@ -162,7 +407,7 @@ def _sample_timestamps(duration_ms: int, sample_fps: float) -> list[int]:
     return timestamps
 
 
-def _read_frame(capture: cv2.VideoCapture, timestamp_ms: int) -> np.ndarray | None:
+def _seek_frame(capture: cv2.VideoCapture, timestamp_ms: int) -> np.ndarray | None:
     capture.set(cv2.CAP_PROP_POS_MSEC, float(timestamp_ms))
     success, frame = capture.read()
     if not success:
@@ -204,8 +449,9 @@ def _structural_loss(previous_gray: np.ndarray, current_gray: np.ndarray) -> flo
     return _clamp_score(1.0 - ssim)
 
 
-def _tile_change_ratio(previous_gray: np.ndarray, current_gray: np.ndarray, tile_size: int = 4) -> float:
+def _tile_change_ratio(previous_gray: np.ndarray, current_gray: np.ndarray, tile_size: int = 8) -> float:
     diff = cv2.absdiff(previous_gray, current_gray).astype(np.float32) / 255.0
+    change_threshold = max(0.04, float(np.std(diff)) * 2.5)
     height, width = diff.shape
     changed_tiles = 0
     total_tiles = tile_size * tile_size
@@ -216,14 +462,22 @@ def _tile_change_ratio(previous_gray: np.ndarray, current_gray: np.ndarray, tile
             left = round((col / tile_size) * width)
             right = round(((col + 1) / tile_size) * width)
             tile = diff[top:bottom, left:right]
-            if tile.size and float(np.mean(tile)) >= 0.08:
+            if tile.size and float(np.mean(tile)) >= change_threshold:
                 changed_tiles += 1
     return changed_tiles / max(1, total_tiles)
 
 
-def _changed_regions(previous_gray: np.ndarray, current_gray: np.ndarray) -> list[dict[str, float]]:
+def _changed_regions(
+    previous_gray: np.ndarray,
+    current_gray: np.ndarray,
+    *,
+    threshold_floor: int = 8,
+    threshold_ceiling: int = 30,
+) -> list[dict[str, float]]:
     diff = cv2.absdiff(previous_gray, current_gray)
-    _, threshold = cv2.threshold(diff, 18, 255, cv2.THRESH_BINARY)
+    adaptive_threshold, _ = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    clamped_threshold = int(np.clip(adaptive_threshold, threshold_floor, threshold_ceiling))
+    _, threshold = cv2.threshold(diff, clamped_threshold, 255, cv2.THRESH_BINARY)
     threshold = cv2.dilate(threshold, np.ones((5, 5), dtype=np.uint8), iterations=2)
     contours, _hierarchy = cv2.findContours(threshold, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     frame_area = float(previous_gray.shape[0] * previous_gray.shape[1]) or 1.0
@@ -248,11 +502,42 @@ def _changed_regions(previous_gray: np.ndarray, current_gray: np.ndarray) -> lis
     return regions[:6]
 
 
-def _transition_signal(previous: SampleFrame, current: SampleFrame) -> tuple[float, float, list[dict[str, float]]]:
+def _merge_changed_regions(*groups: list[dict[str, float]]) -> list[dict[str, float]]:
+    merged: dict[tuple[int, int, int, int], dict[str, float]] = {}
+    for group in groups:
+        for region in group:
+            key = (int(region["x"]), int(region["y"]), int(region["width"]), int(region["height"]))
+            existing = merged.get(key)
+            if existing is None or float(region["score"]) > float(existing["score"]):
+                merged[key] = {
+                    "x": key[0],
+                    "y": key[1],
+                    "width": key[2],
+                    "height": key[3],
+                    "score": round(float(region["score"]), 4),
+                }
+    regions = list(merged.values())
+    regions.sort(key=lambda region: (-region["score"], region["y"], region["x"]))
+    return regions[:6]
+
+
+def _transition_signal(
+    previous: SampleFrame,
+    current: SampleFrame,
+    *,
+    tile_size: int = 8,
+    contour_threshold_floor: int = 8,
+    contour_threshold_ceiling: int = 30,
+) -> tuple[float, float, list[dict[str, float]]]:
     ssim_loss = _structural_loss(previous.gray, current.gray)
-    tile_ratio = _tile_change_ratio(previous.gray, current.gray)
+    tile_ratio = _tile_change_ratio(previous.gray, current.gray, tile_size=tile_size)
     edge_ratio = float(np.count_nonzero(cv2.absdiff(previous.edges, current.edges))) / max(1, previous.edges.size)
-    changed_regions = _changed_regions(previous.gray, current.gray)
+    changed_regions = _changed_regions(
+        previous.gray,
+        current.gray,
+        threshold_floor=contour_threshold_floor,
+        threshold_ceiling=contour_threshold_ceiling,
+    )
     region_strength = max((region["score"] for region in changed_regions), default=0.0)
     visual = _clamp_score((ssim_loss * 0.45) + (tile_ratio * 0.25) + (region_strength * 0.20) + (edge_ratio * 0.10))
     motion = _clamp_score((edge_ratio * 0.55) + (tile_ratio * 0.25) + (region_strength * 0.20))
@@ -262,34 +547,173 @@ def _transition_signal(previous: SampleFrame, current: SampleFrame) -> tuple[flo
 def _maybe_load_ocr_engine(config: HybridDetectorConfig) -> tuple[OcrEngine | None, str | None]:
     if not config.enable_ocr or config.ocr_backend != "paddleocr":
         return None, None
+    runtime_config = build_ocr_runtime_config()
+    config_valid, config_error = validate_ocr_runtime_config(runtime_config)
+    if not config_valid:
+        return None, config_error
     try:
-        return PaddleOcrEngine(), None
+        _load_paddleocr_symbols()
+    except ModuleNotFoundError as exc:  # pragma: no cover - depends on local install/runtime assets
+        missing_module = getattr(exc, "name", None) or "paddleocr"
+        return None, f"PaddleOCR 3.x is not installed in the backend Python environment: missing `{missing_module}`."
     except Exception as exc:  # pragma: no cover - depends on local install/runtime assets
-        return None, str(exc)
+        details = " ".join(str(exc).split()) or exc.__class__.__name__
+        return None, f"PaddleOCR 3.x could not be imported in the backend Python environment: {details}"
+    version_error = _validate_paddle_stack_versions()
+    if version_error is not None:
+        return None, version_error
+    try:
+        return PaddleOcrEngine(runtime_config), None
+    except Exception as exc:  # pragma: no cover - depends on local install/runtime assets
+        details = " ".join(str(exc).split()) or exc.__class__.__name__
+        return None, details
 
 
-def _extract_ocr_text(sample: SampleFrame, engine: OcrEngine | None) -> str | None:
+def _crop_changed_regions(
+    frame: np.ndarray,
+    changed_regions: list[dict[str, float]],
+    *,
+    padding: int = 16,
+    max_regions: int = 4,
+) -> list[np.ndarray]:
+    if not changed_regions:
+        return []
+    frame_height, frame_width = frame.shape[:2]
+    selected_regions = sorted(changed_regions[:max_regions], key=lambda region: (region["y"], region["x"]))
+    crops: list[np.ndarray] = []
+    for region in selected_regions:
+        left = max(0, int(region["x"]) - padding)
+        top = max(0, int(region["y"]) - padding)
+        right = min(frame_width, int(region["x"]) + int(region["width"]) + padding)
+        bottom = min(frame_height, int(region["y"]) + int(region["height"]) + int(padding))
+        crop = frame[top:bottom, left:right]
+        if crop.shape[0] < 24 or crop.shape[1] < 24:
+            continue
+        crops.append(crop)
+    return crops
+
+
+def _extract_text_from_image(
+    image: np.ndarray,
+    engine: OcrEngine | None,
+    ocr_cache: _OcrCache | None,
+) -> str | None:
     if engine is None:
         return None
-    if sample.ocr_text is not None:
+    if ocr_cache is not None:
+        cached, cached_text = ocr_cache.get(image)
+        if cached:
+            return cached_text
+    extracted_text = engine.extract_text(image)
+    if ocr_cache is not None:
+        return ocr_cache.put(image, extracted_text)
+    return extracted_text
+
+
+def _extract_ocr_text(
+    sample: SampleFrame,
+    engine: OcrEngine | None,
+    ocr_cache: _OcrCache | None,
+    *,
+    changed_regions: list[dict[str, float]] | None = None,
+) -> str | None:
+    if engine is None:
+        return None
+    if changed_regions:
+        crops = _crop_changed_regions(sample.bgr, changed_regions)
+        if not crops:
+            return None
+        tokens: list[str] = []
+        for crop in crops:
+            cropped_text = _extract_text_from_image(crop, engine, ocr_cache)
+            if cropped_text:
+                tokens.append(cropped_text)
+        return " ".join(tokens) or None
+    if sample.ocr_text_checked:
         return sample.ocr_text
-    sample.ocr_text = engine.extract_text(sample.bgr)
+    sample.ocr_text = _extract_text_from_image(sample.bgr, engine, ocr_cache)
+    sample.ocr_text_checked = True
     return sample.ocr_text
+
+
+def _should_region_probe(
+    visual: float,
+    motion: float,
+    changed_regions: list[dict[str, float]],
+    config: HybridDetectorConfig,
+) -> bool:
+    if not changed_regions:
+        return False
+    signal_strength = max(visual, motion)
+    probe_threshold = min(config.settle_threshold, config.ocr_trigger_threshold * 0.6)
+    return signal_strength >= probe_threshold
+
+
+def _merge_or_append_event(
+    detected_events: list[dict[str, Any]],
+    event: dict[str, Any],
+    min_scene_gap_ms: int,
+) -> None:
+    if not detected_events or min_scene_gap_ms <= 0:
+        detected_events.append(event)
+        return
+
+    previous_event = detected_events[-1]
+    event_gap_ms = int(event["timestamp_ms"]) - int(previous_event["timestamp_ms"])
+    if event_gap_ms >= min_scene_gap_ms:
+        detected_events.append(event)
+        return
+
+    previous_score = float(previous_event["scene_score"])
+    next_score = float(event["scene_score"])
+    if next_score > previous_score or (next_score == previous_score and int(event["timestamp_ms"]) >= int(previous_event["timestamp_ms"])):
+        detected_events[-1] = event
 
 
 def _build_signal(
     previous: SampleFrame,
     current: SampleFrame,
+    anchor: SampleFrame | None,
     config: HybridDetectorConfig,
     engine: OcrEngine | None,
+    ocr_cache: _OcrCache | None = None,
 ) -> CandidateSignal:
-    visual, motion, changed_regions = _transition_signal(previous, current)
+    visual, motion, changed_regions = _transition_signal(
+        previous,
+        current,
+        tile_size=config.tile_grid_size,
+        contour_threshold_floor=config.contour_threshold_floor,
+        contour_threshold_ceiling=config.contour_threshold_ceiling,
+    )
+    if anchor is not None and anchor.timestamp_ms != previous.timestamp_ms:
+        anchor_visual, anchor_motion, anchor_regions = _transition_signal(
+            anchor,
+            current,
+            tile_size=config.tile_grid_size,
+            contour_threshold_floor=config.contour_threshold_floor,
+            contour_threshold_ceiling=config.contour_threshold_ceiling,
+        )
+        visual = max(visual, anchor_visual)
+        motion = max(motion, anchor_motion)
+        changed_regions = _merge_changed_regions(changed_regions, anchor_regions)
     text_score = 0.0
     current_text = None
-    if max(visual, motion) >= config.ocr_trigger_threshold:
-        current_text = _extract_ocr_text(current, engine)
-        previous_text = _extract_ocr_text(previous, engine)
-        if current_text or previous_text:
+    signal_strength = max(visual, motion)
+    current_text = None
+    previous_text = None
+    used_region_probe = False
+    if _should_region_probe(visual, motion, changed_regions, config):
+        used_region_probe = True
+        current_text = _extract_ocr_text(current, engine, ocr_cache, changed_regions=changed_regions)
+        previous_text = _extract_ocr_text(previous, engine, ocr_cache, changed_regions=changed_regions)
+    if signal_strength >= config.ocr_trigger_threshold and not (current_text or previous_text):
+        current_text = _extract_ocr_text(current, engine, ocr_cache)
+        previous_text = _extract_ocr_text(previous, engine, ocr_cache)
+    elif signal_strength >= config.ocr_trigger_threshold and not used_region_probe:
+        current_text = _extract_ocr_text(current, engine, ocr_cache)
+        previous_text = _extract_ocr_text(previous, engine, ocr_cache)
+    if current_text or previous_text:
+        if signal_strength >= config.ocr_trigger_threshold or used_region_probe:
             text_score = _clamp_score(text_distance(current_text, previous_text))
     combined = _clamp_score((visual * 0.60) + (motion * 0.25) + (text_score * 0.15))
     return CandidateSignal(
@@ -352,23 +776,49 @@ def detect_candidates_hybrid(
 
     ocr_engine, ocr_warning = _maybe_load_ocr_engine(config)
     if ocr_warning:
-        progress_callback("primary_scan", "PaddleOCR is unavailable locally. Continuing without OCR.", SCAN_RANGE[0], "warning")
+        progress_callback("primary_scan", f"OCR disabled: {ocr_warning}", SCAN_RANGE[0], "warning")
+    ocr_cache = _OcrCache() if ocr_engine is not None else None
 
     timestamps = _sample_timestamps(duration_ms, config.sample_fps)
     previous_sample: SampleFrame | None = None
+    anchor_sample: SampleFrame | None = None
     active_event: EventWindow | None = None
     detected_events: list[dict[str, Any]] = []
+    frame_reader = _SequentialReader(capture, config.source_fps) if config.source_fps > 0 else None
 
     try:
         for index, timestamp_ms in enumerate(timestamps, start=1):
             if cancellation_callback():
                 raise CancellationRequested("Run cancelled while scanning the video.")
-            frame = _read_frame(capture, timestamp_ms)
+            if frame_reader is None:
+                frame = _seek_frame(capture, timestamp_ms)
+            else:
+                frame = frame_reader.next(timestamp_ms)
             if frame is None:
                 continue
             current_sample = _prepare_frame(frame, timestamp_ms, config.max_frame_edge)
+            if previous_sample is None:
+                previous_sample = current_sample
+                anchor_sample = current_sample
+                ratio = index / max(1, len(timestamps))
+                progress = SCAN_RANGE[0] + ((SCAN_RANGE[1] - SCAN_RANGE[0]) * ratio)
+                progress_callback(
+                    "primary_scan",
+                    f"Scanning video for interface changes ({round(ratio * 100)}%)",
+                    min(progress, SCAN_RANGE[1]),
+                    "info",
+                )
+                continue
+
             if previous_sample is not None:
-                signal = _build_signal(previous_sample, current_sample, config, ocr_engine)
+                signal = _build_signal(
+                    previous_sample,
+                    current_sample,
+                    anchor_sample if active_event is None else None,
+                    config,
+                    ocr_engine,
+                    ocr_cache,
+                )
                 if active_event is None:
                     if signal.combined >= config.proposal_threshold or signal.text >= 0.3:
                         active_event = EventWindow(active_samples=[signal])
@@ -381,7 +831,8 @@ def detect_candidates_hybrid(
                         if signal.timestamp_ms - active_event.last_active_ms >= config.settle_window_ms:
                             finalized = _finalize_event(active_event, config)
                             if finalized is not None:
-                                detected_events.append(finalized)
+                                _merge_or_append_event(detected_events, finalized, config.min_scene_gap_ms)
+                            anchor_sample = current_sample
                             active_event = None
             previous_sample = current_sample
             ratio = index / max(1, len(timestamps))
@@ -398,7 +849,7 @@ def detect_candidates_hybrid(
     if active_event is not None:
         finalized = _finalize_event(active_event, config)
         if finalized is not None:
-            detected_events.append(finalized)
+            _merge_or_append_event(detected_events, finalized, config.min_scene_gap_ms)
 
     if not detected_events:
         detected_events.append(

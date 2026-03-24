@@ -5,6 +5,23 @@ import time
 from fastapi.testclient import TestClient
 
 
+def test_health_reports_ocr_availability(client: TestClient, monkeypatch) -> None:
+    import app.main as main
+
+    monkeypatch.setattr(main.app.state, 'ocr_available', False)
+    monkeypatch.setattr(
+        main.app.state,
+        'ocr_message',
+        'Unsupported Paddle OCR stack in the backend Python environment. Install paddlepaddle==3.3.0 and paddleocr==3.3.0.',
+    )
+
+    response = client.get('/health')
+
+    assert response.status_code == 200
+    assert response.json()['ocr_available'] is False
+    assert 'Unsupported Paddle OCR stack' in response.json()['ocr_message']
+
+
 
 def _create_project(client: TestClient) -> dict:
     response = client.post('/projects', json={'name': 'Workflow Test'})
@@ -73,6 +90,128 @@ def test_hybrid_run_completes_and_serializes_engine_metadata(client: TestClient,
     assert detail['summary']['advanced']['enable_ocr'] is False
     assert detail['candidates']
     assert detail['candidates'][0]['score_breakdown'] is not None
+
+
+def test_hybrid_run_locks_ocr_off_when_unavailable(
+    client: TestClient,
+    video_factory,
+    wait_for_run,
+    monkeypatch,
+) -> None:
+    import app.main as main
+
+    monkeypatch.setattr(main.app.state, 'ocr_available', False)
+    monkeypatch.setattr(
+        main.app.state,
+        'ocr_message',
+        'Local OCR mode requires both STEPTHROUGH_OCR_DET_MODEL_DIR and STEPTHROUGH_OCR_REC_MODEL_DIR.',
+    )
+
+    project = _create_project(client)
+    video = video_factory('hybrid-ocr-lock.mp4', ['black', 'white'])
+    recording = _import_video(client, project['id'], video)
+
+    response = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={
+            'analysis_engine': 'hybrid_v2',
+            'analysis_preset': 'balanced',
+            'advanced': {'enable_ocr': True, 'ocr_backend': 'paddleocr'},
+            'tolerance': 50,
+            'min_scene_gap_ms': 900,
+            'sample_fps': 4,
+            'detector_mode': 'content',
+            'extract_offset_ms': 200,
+        },
+    )
+    run = response.json()
+    detail = wait_for_run(client, run['id'])
+
+    assert response.status_code == 200
+    assert run['advanced']['enable_ocr'] is False
+    assert run['advanced']['ocr_backend'] is None
+    assert detail['summary']['advanced']['enable_ocr'] is False
+    assert detail['summary']['advanced']['ocr_backend'] is None
+
+
+def test_hybrid_run_emits_warning_and_continues_when_ocr_init_fails(
+    client: TestClient,
+    video_factory,
+    wait_for_run,
+    monkeypatch,
+) -> None:
+    import app.main as main
+    import app.services.hybrid_detection as hybrid_detection
+
+    monkeypatch.setattr(main.app.state, 'ocr_available', True)
+    monkeypatch.setattr(
+        main.app.state,
+        'ocr_message',
+        'PaddleOCR 3.3.0 is configured through the backend environment. First use may initialize or download models.',
+    )
+    monkeypatch.setattr(hybrid_detection, '_maybe_load_ocr_engine', lambda config: (None, 'model bootstrap failed'))
+
+    project = _create_project(client)
+    video = video_factory('hybrid-ocr-warning.mp4', ['black', 'white'])
+    recording = _import_video(client, project['id'], video)
+
+    response = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={
+            'analysis_engine': 'hybrid_v2',
+            'analysis_preset': 'balanced',
+            'advanced': {'enable_ocr': True, 'ocr_backend': 'paddleocr'},
+            'tolerance': 50,
+            'min_scene_gap_ms': 900,
+            'sample_fps': 4,
+            'detector_mode': 'content',
+            'extract_offset_ms': 200,
+        },
+    )
+    run = response.json()
+    detail = wait_for_run(client, run['id'])
+
+    assert response.status_code == 200
+    assert detail['summary']['status'] == 'completed'
+    assert any(event['level'] == 'warning' and 'OCR disabled: model bootstrap failed' in event['message'] for event in detail['events'])
+    assert detail['candidates']
+
+
+def test_hybrid_min_scene_gap_reduces_close_candidates(client: TestClient, video_factory, wait_for_run) -> None:
+    project = _create_project(client)
+    video = video_factory('hybrid-gap.mp4', ['black', 'white', 'black', 'white'], segment_duration=0.45)
+    recording = _import_video(client, project['id'], video)
+
+    base_payload = {
+        'analysis_engine': 'hybrid_v2',
+        'analysis_preset': 'subtle_ui',
+        'advanced': {
+            'enable_ocr': False,
+            'sample_fps_override': 12,
+            'min_dwell_ms': 0,
+            'settle_window_ms': 100,
+        },
+        'tolerance': 50,
+        'sample_fps': 4,
+        'detector_mode': 'content',
+        'extract_offset_ms': 0,
+    }
+
+    run_without_gap = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={**base_payload, 'min_scene_gap_ms': 0},
+    ).json()
+    detail_without_gap = wait_for_run(client, run_without_gap['id'])
+
+    run_with_gap = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={**base_payload, 'min_scene_gap_ms': 900},
+    ).json()
+    detail_with_gap = wait_for_run(client, run_with_gap['id'])
+
+    assert detail_without_gap['summary']['status'] == 'completed'
+    assert detail_with_gap['summary']['status'] == 'completed'
+    assert len(detail_without_gap['candidates']) > len(detail_with_gap['candidates'])
 
 
 def test_run_creation_defaults_to_hybrid_v2_engine(client: TestClient, video_factory, wait_for_run) -> None:
