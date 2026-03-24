@@ -120,6 +120,7 @@ export interface AnalysisScreenProps {
   ocrStatus: OcrStatus | null;
   ocrStatusMessage: string | null;
   ocrWarnings: string[];
+  onDismissOcrWarnings: () => void;
   previewRecording: RecordingSummary | null;
   projectDefaultSettings: RunSettings;
   recordings: RecordingSummary[];
@@ -176,6 +177,7 @@ export function AnalysisScreen({
   ocrStatus,
   ocrStatusMessage,
   ocrWarnings,
+  onDismissOcrWarnings,
   previewRecording,
   projectDefaultSettings,
   recordings,
@@ -206,6 +208,9 @@ export function AnalysisScreen({
   const [presetImportDraft, setPresetImportDraft] = useState('');
   const [presetImportError, setPresetImportError] = useState('');
   const [previewPlaybackMs, setPreviewPlaybackMs] = useState(0);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [previewSizeKey, setPreviewSizeKey] = useState<'sm' | 'md' | 'lg'>('md');
   const [showRunLogs, setShowRunLogs] = useState(false);
   const [compareRunId, setCompareRunId] = useState<string | null>(null);
   const [presetCopyFeedback, setPresetCopyFeedback] = useState('');
@@ -419,6 +424,7 @@ export function AnalysisScreen({
     () => selectedCandidateIds.filter((candidateId) => selectablePendingCandidateIds.has(candidateId)),
     [selectedCandidateIds, selectablePendingCandidateIds],
   );
+  const scrubDurationMs = previewRecording?.duration_ms ?? selectedRecordingSummary?.duration_ms ?? 0;
   const canShowTimeline = Boolean(
     isCompletedReview &&
       selectedRecordingSummary &&
@@ -697,6 +703,53 @@ export function AnalysisScreen({
     return () => window.removeEventListener('keydown', handleManualTagKeydown);
   }, [canAddManualCandidate, previewPlaybackMs, selectedRun?.summary.id]);
 
+  useEffect(() => {
+    if (!previewVideoUrl) return;
+
+    function handleTransportKeydown(event: KeyboardEvent) {
+      if (isEditableElement(event.target)) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === ' ') {
+        event.preventDefault();
+        const video = previewVideoRef.current;
+        if (video) {
+          if (video.paused) void video.play();
+          else video.pause();
+        }
+        return;
+      }
+      if (event.repeat) return;
+      const frameMs = 1000 / 30;
+      const durationMs = selectedRecordingSummary?.duration_ms ?? 0;
+      if (event.key === ',') {
+        event.preventDefault();
+        const video = previewVideoRef.current;
+        if (video) {
+          const clamped = Math.max(0, durationMs > 0 ? Math.min(durationMs - 1, previewPlaybackMs - frameMs) : previewPlaybackMs - frameMs);
+          video.currentTime = clamped / 1000;
+          setPreviewPlaybackMs(clamped);
+        }
+      } else if (event.key === '.') {
+        event.preventDefault();
+        const video = previewVideoRef.current;
+        if (video) {
+          const clamped = Math.max(0, durationMs > 0 ? Math.min(durationMs - 1, previewPlaybackMs + frameMs) : previewPlaybackMs + frameMs);
+          video.currentTime = clamped / 1000;
+          setPreviewPlaybackMs(clamped);
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleTransportKeydown);
+    return () => window.removeEventListener('keydown', handleTransportKeydown);
+  }, [previewVideoUrl, previewPlaybackMs, selectedRecordingSummary?.duration_ms]);
+
+  useEffect(() => {
+    if (previewVideoRef.current) {
+      previewVideoRef.current.playbackRate = playbackRate;
+    }
+  }, [playbackRate]);
+
   function updateHintCardPosition(element: HTMLElement) {
     const container = parameterColumnRef.current;
     if (!container) {
@@ -855,6 +908,50 @@ export function AnalysisScreen({
     return Math.max(0, Math.round(clampedSeconds * 1000));
   }
 
+  function seekPreviewTo(ms: number) {
+    const video = previewVideoRef.current;
+    if (!video) return;
+    const durationMs = previewRecording?.duration_ms ?? selectedRecordingSummary?.duration_ms ?? 0;
+    const clamped = Math.max(0, durationMs > 0 ? Math.min(durationMs - 1, ms) : ms);
+    video.currentTime = clamped / 1000;
+    setPreviewPlaybackMs(clamped);
+  }
+
+  function handlePreviewPlayPause() {
+    const video = previewVideoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      void video.play();
+    } else {
+      video.pause();
+    }
+  }
+
+  function handlePreviewStepFrame(delta: 1 | -1) {
+    const frameMs = 1000 / 30;
+    seekPreviewTo(previewPlaybackMs + delta * frameMs);
+  }
+
+  function handleCyclePlaybackRate() {
+    const rates = [0.5, 1, 1.5, 2] as const;
+    setPlaybackRate((current) => {
+      const idx = rates.indexOf(current as (typeof rates)[number]);
+      return rates[(idx + 1) % rates.length];
+    });
+  }
+
+  function handlePreviewJumpToPin(direction: 'next' | 'prev') {
+    if (!previewMatchesSelectedRun || timelineCandidates.length === 0) return;
+    const buffer = 250;
+    if (direction === 'next') {
+      const next = timelineCandidates.find((c) => c.timestamp_ms > previewPlaybackMs + buffer);
+      if (next) seekPreviewTo(next.timestamp_ms);
+    } else {
+      const prev = [...timelineCandidates].reverse().find((c) => c.timestamp_ms < previewPlaybackMs - buffer);
+      if (prev) seekPreviewTo(prev.timestamp_ms);
+    }
+  }
+
   function handleCreateManualCandidate(timestampOverrideMs?: number) {
     if (!selectedRun || !canAddManualCandidate) {
       return;
@@ -1000,6 +1097,11 @@ export function AnalysisScreen({
                 {ocrStatusMessage}
               </p>
             )}
+            {ocrWarnings.length > 0 ? (
+              <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
+                dismiss OCR details
+              </button>
+            ) : null}
             {ocrWarnings.map((warning) => (
               <p className="entry-notice diagnostic" key={warning}>
                 OCR detail: {warning}
@@ -1115,80 +1217,186 @@ export function AnalysisScreen({
         </div>
 
         {previewVideoUrl && (
-          <div className="analysis-lower-grid">
-            <div className="analysis-lower-column">
-              {previewVideoUrl ? (
-                <section className="analysis-panel analysis-preview-panel" id="analysis-video-preview">
-                  <div className="analysis-preview-head">
-                    <div className="analysis-preview-meta-wrap">
-                      <span className="analysis-preview-meta">
-                        {previewRecording?.filename} · {formatPlaybackTimestamp(previewPlaybackMs)}
-                      </span>
-                      {canAddManualCandidate ? (
-                        <span className="analysis-preview-mark-copy">
-                          click anywhere in the button or press K to mark the current frame
-                        </span>
-                      ) : null}
-                    </div>
-                    {canAddManualCandidate ? (
-                      <button
-                        aria-busy={createManualCandidatePending || queuedManualMarkItems.length > 0}
-                        className="analysis-preview-mark-button"
-                        onClick={(event) => {
-                          if (event.detail !== 0) {
-                            return;
-                          }
-                          handleCreateManualCandidate();
-                        }}
-                        onPointerDown={(event) => {
-                          if (event.button !== 0) {
-                            return;
-                          }
-                          event.preventDefault();
-                          const timestampMs = getCurrentPreviewTimestampMs();
-                          if (timestampMs === null) {
-                            return;
-                          }
-                          handleCreateManualCandidate(timestampMs);
-                        }}
-                        title="Mark the current preview frame as a new step."
-                        type="button"
-                      >
-                        {manualCapturePulseToken > 0 ? (
-                          <span
-                            aria-hidden="true"
-                            className="analysis-preview-mark-pulse"
-                            key={manualCapturePulseToken}
-                          />
-                        ) : null}
-                        <span className="analysis-preview-mark-main">
-                          <span className="analysis-preview-mark-title">mark step</span>
-                          <span className="analysis-preview-mark-subtitle">
-                            captures this moment immediately while the video plays
-                          </span>
-                        </span>
-                        <span className="analysis-preview-mark-shortcut">K</span>
-                        {queuedManualMarkItems.length > 0 ? (
-                          <span className="analysis-preview-mark-queue">{queuedManualMarkItems.length}</span>
-                        ) : null}
-                      </button>
-                    ) : null}
-                  </div>
+          <div className="analysis-preview-wrap">
+            <section className="analysis-panel analysis-preview-panel" data-size={previewSizeKey} id="analysis-video-preview">
+                  <span className="analysis-preview-filename">{previewRecording?.filename}</span>
                   <video
                     className="analysis-preview-video"
-                    controls
                     onLoadedMetadata={(event) => setPreviewPlaybackMs(event.currentTarget.currentTime * 1000)}
+                    onPause={() => setIsPreviewPlaying(false)}
+                    onPlay={() => setIsPreviewPlaying(true)}
                     onSeeked={(event) => setPreviewPlaybackMs(event.currentTarget.currentTime * 1000)}
                     onTimeUpdate={(event) => setPreviewPlaybackMs(event.currentTarget.currentTime * 1000)}
                     playsInline
                     ref={previewVideoRef}
                     src={previewVideoUrl}
                   />
-                </section>
-              ) : null}
-            </div>
-            <div className="analysis-lower-column" />
-            <div className="analysis-lower-column" />
+                  {scrubDurationMs > 0 ? (
+                    <div
+                      className="preview-scrubber"
+                      onPointerDown={(event) => {
+                        if (event.button !== 0) return;
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        seekPreviewTo(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * scrubDurationMs);
+                      }}
+                      onPointerMove={(event) => {
+                        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        seekPreviewTo(Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * scrubDurationMs);
+                      }}
+                    >
+                      <div className="preview-scrubber-track">
+                        <div
+                          className="preview-scrubber-progress"
+                          style={{ width: `${Math.min(100, Math.max(0, (previewPlaybackMs / scrubDurationMs) * 100))}%` }}
+                        />
+                        {previewMatchesSelectedRun &&
+                          timelineCandidates.map((candidate) => (
+                            <span
+                              className={`preview-scrubber-pin ${candidate.status}`}
+                              key={candidate.id}
+                              style={{ left: `${Math.min(100, Math.max(0, (candidate.timestamp_ms / scrubDurationMs) * 100))}%` }}
+                            />
+                          ))}
+                        {queuedManualMarkItems.map((item) => (
+                          <span
+                            className="preview-scrubber-pin pending manual"
+                            key={item.id}
+                            style={{ left: `${Math.min(100, Math.max(0, (item.timestampMs / scrubDurationMs) * 100))}%` }}
+                          />
+                        ))}
+                        <div
+                          className="preview-scrubber-playhead"
+                          style={{ left: `${Math.min(100, Math.max(0, (previewPlaybackMs / scrubDurationMs) * 100))}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                  <div className="preview-transport">
+                    <div className="preview-transport-controls">
+                      <button
+                        className="preview-control-btn"
+                        disabled={!previewMatchesSelectedRun || timelineCandidates.length === 0}
+                        onClick={() => handlePreviewJumpToPin('prev')}
+                        title="Jump to previous scene"
+                        type="button"
+                      >
+                        <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 16 16" width="16">
+                          <path d="M3.5 3.5v9" />
+                          <path d="M4.5 8 11.5 3.8v8.4z" fill="currentColor" stroke="none" />
+                        </svg>
+                      </button>
+                      <button
+                        className="preview-control-btn"
+                        onClick={() => handlePreviewStepFrame(-1)}
+                        title="Step back one frame (,)"
+                        type="button"
+                      >
+                        <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 16 16" width="16">
+                          <path d="M9.5 5 6 8l3.5 3" />
+                        </svg>
+                      </button>
+                      <button
+                        className="preview-control-btn preview-control-btn--play"
+                        onClick={handlePreviewPlayPause}
+                        title={isPreviewPlaying ? 'Pause (Space)' : 'Play (Space)'}
+                        type="button"
+                      >
+                        {isPreviewPlaying ? (
+                          <svg aria-hidden="true" height="16" stroke="currentColor" strokeLinecap="round" strokeWidth="2.2" viewBox="0 0 16 16" width="16">
+                            <path d="M5.5 3.5v9M10.5 3.5v9" />
+                          </svg>
+                        ) : (
+                          <svg aria-hidden="true" fill="currentColor" height="16" viewBox="0 0 16 16" width="16">
+                            <path d="M5 3.5 13 8l-8 4.5z" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        className="preview-control-btn"
+                        onClick={() => handlePreviewStepFrame(1)}
+                        title="Step forward one frame (.)"
+                        type="button"
+                      >
+                        <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 16 16" width="16">
+                          <path d="M6.5 5 10 8l-3.5 3" />
+                        </svg>
+                      </button>
+                      <button
+                        className="preview-control-btn"
+                        disabled={!previewMatchesSelectedRun || timelineCandidates.length === 0}
+                        onClick={() => handlePreviewJumpToPin('next')}
+                        title="Jump to next scene"
+                        type="button"
+                      >
+                        <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 16 16" width="16">
+                          <path d="M12.5 3.5v9" />
+                          <path d="M11.5 8 4.5 3.8v8.4z" fill="currentColor" stroke="none" />
+                        </svg>
+                      </button>
+                    </div>
+                    <span className="preview-timecode">{formatPlaybackTimestamp(previewPlaybackMs)}</span>
+                    <div className="preview-transport-right">
+                      <button
+                        className="preview-control-btn preview-rate-btn"
+                        onClick={handleCyclePlaybackRate}
+                        title="Playback speed"
+                        type="button"
+                      >
+                        {playbackRate === 1 ? '1×' : `${playbackRate}×`}
+                      </button>
+                      <div className="preview-size-group" role="group" aria-label="Video size">
+                        {(['sm', 'md', 'lg'] as const).map((size) => (
+                          <button
+                            aria-pressed={previewSizeKey === size}
+                            className={`preview-control-btn preview-size-btn ${previewSizeKey === size ? 'active' : ''}`}
+                            key={size}
+                            onClick={() => setPreviewSizeKey(size)}
+                            title={size === 'sm' ? 'Small' : size === 'md' ? 'Medium' : 'Large'}
+                            type="button"
+                          >
+                            <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
+                              {size === 'sm' && <rect height="6" rx="1" width="8" x="3" y="4" />}
+                              {size === 'md' && <rect height="8" rx="1" width="10" x="2" y="3" />}
+                              {size === 'lg' && <rect height="10" rx="1" width="12" x="1" y="2" />}
+                            </svg>
+                          </button>
+                        ))}
+                      </div>
+                      {canAddManualCandidate ? (
+                        <button
+                          aria-busy={createManualCandidatePending || queuedManualMarkItems.length > 0}
+                          className="preview-mark-btn"
+                          onClick={(event) => {
+                            if (event.detail !== 0) return;
+                            handleCreateManualCandidate();
+                          }}
+                          onPointerDown={(event) => {
+                            if (event.button !== 0) return;
+                            event.preventDefault();
+                            const timestampMs = getCurrentPreviewTimestampMs();
+                            if (timestampMs !== null) handleCreateManualCandidate(timestampMs);
+                          }}
+                          title="Mark the current frame as a new step (K)"
+                          type="button"
+                        >
+                          {manualCapturePulseToken > 0 ? (
+                            <span aria-hidden="true" className="preview-mark-pulse" key={manualCapturePulseToken} />
+                          ) : null}
+                          <svg aria-hidden="true" height="12" stroke="currentColor" strokeLinecap="round" strokeWidth="2" viewBox="0 0 16 16" width="12">
+                            <path d="M8 2v12M2 8h12" />
+                          </svg>
+                          <span>mark</span>
+                          <kbd>K</kbd>
+                          {queuedManualMarkItems.length > 0 ? (
+                            <span className="preview-mark-queue">{queuedManualMarkItems.length}</span>
+                          ) : null}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+            </section>
           </div>
         )}
 

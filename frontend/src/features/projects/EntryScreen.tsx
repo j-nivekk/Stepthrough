@@ -23,6 +23,7 @@ export interface EntryScreenProps {
   ocrStatusMessage: string | null;
   ocrStatusTone: 'info' | 'warning';
   ocrWarnings: string[];
+  onDismissOcrWarnings: () => void;
   selectedProjectCanJumpToAnalysis: boolean;
   selectedProjectId: string | null;
 }
@@ -45,6 +46,7 @@ export function EntryScreen({
   ocrStatusMessage,
   ocrStatusTone,
   ocrWarnings,
+  onDismissOcrWarnings,
   selectedProjectCanJumpToAnalysis,
   selectedProjectId,
 }: EntryScreenProps) {
@@ -89,6 +91,11 @@ export function EntryScreen({
                   {ocrStatusMessage}
                 </p>
               )}
+              {ocrWarnings.length > 0 ? (
+                <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
+                  dismiss OCR details
+                </button>
+              ) : null}
               {ocrWarnings.map((warning) => (
                 <p className="entry-notice diagnostic" key={warning}>
                   OCR detail: {warning}

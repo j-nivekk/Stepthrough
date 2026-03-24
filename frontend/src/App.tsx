@@ -86,6 +86,7 @@ function App() {
   const [liveMessage, setLiveMessage] = useState('');
   const [analysisActionMessage, setAnalysisActionMessage] = useState('');
   const [appError, setAppError] = useState('');
+  const [dismissedOcrWarningsKey, setDismissedOcrWarningsKey] = useState<string | null>(null);
   const [bulkDeletePending, setBulkDeletePending] = useState(false);
   const [bulkExportPending, setBulkExportPending] = useState(false);
   const [viewportSize, setViewportSize] = useState(() => ({
@@ -107,6 +108,8 @@ function App() {
   const ocrAvailability = healthQuery.data?.ocr_available;
   const ocrStatusMessage = backendReady ? healthQuery.data?.ocr_message ?? null : null;
   const ocrWarnings = healthQuery.data?.ocr_warnings ?? [];
+  const ocrWarningsKey = ocrWarnings.join('\n');
+  const visibleOcrWarnings = ocrWarningsKey && dismissedOcrWarningsKey === ocrWarningsKey ? [] : ocrWarnings;
   const ocrAvailable = ocrAvailability !== false;
   const applyLocalOcrAvailability = (settings: RunSettings) =>
     enforceLocalOcrAvailability(settings, ocrAvailability);
@@ -327,6 +330,19 @@ function App() {
           ? projectsQuery.error.message
           : 'Could not load projects.'
         : null;
+
+  useEffect(() => {
+    if (!ocrWarnings.length && dismissedOcrWarningsKey !== null) {
+      setDismissedOcrWarningsKey(null);
+    }
+  }, [dismissedOcrWarningsKey, ocrWarnings.length]);
+
+  function dismissOcrWarnings() {
+    if (!ocrWarningsKey) {
+      return;
+    }
+    setDismissedOcrWarningsKey(ocrWarningsKey);
+  }
   const presetText = useMemo(() => serializeRunPresetText(runSettings), [runSettings]);
   const uploadedImportItems = useMemo(() => getUploadedImportItems(importQueue), [importQueue]);
   const canCompleteImport = uploadedImportItems.length > 0;
@@ -1238,7 +1254,8 @@ function App() {
           deletingProjectId={deleteProjectMutation.isPending ? deleteProjectMutation.variables?.projectId ?? null : null}
           ocrStatusMessage={ocrEntryMessage}
           ocrStatusTone={ocrEntryMessageTone}
-          ocrWarnings={ocrWarnings}
+          ocrWarnings={visibleOcrWarnings}
+          onDismissOcrWarnings={dismissOcrWarnings}
           onCreate={handleCreateProject}
           onDeleteProject={confirmDeleteProject}
           onNavigateStage={setProjectStage}
@@ -1269,7 +1286,8 @@ function App() {
           isUploadBlocked={Boolean(healthWarning)}
           ocrStatusMessage={ocrEntryMessage}
           ocrStatusTone={ocrEntryMessageTone}
-          ocrWarnings={ocrWarnings}
+          ocrWarnings={visibleOcrWarnings}
+          onDismissOcrWarnings={dismissOcrWarnings}
           onDeleteRow={handleDeleteImportItem}
           onDone={() => void handleNavigateToAnalysis(false)}
           onFilesSelected={handleImportFileSelection}
@@ -1330,7 +1348,8 @@ function App() {
         ocrAvailable={ocrAvailable}
         ocrStatus={ocrStatus}
         ocrStatusMessage={ocrStatusMessage}
-        ocrWarnings={ocrWarnings}
+        ocrWarnings={visibleOcrWarnings}
+        onDismissOcrWarnings={dismissOcrWarnings}
         previewRecording={previewRecording}
         projectDefaultSettings={effectiveProjectDefaultSettings}
         recordings={projectRecordings}
