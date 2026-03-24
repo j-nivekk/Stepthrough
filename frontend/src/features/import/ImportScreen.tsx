@@ -50,6 +50,7 @@ export function ImportScreen({
   selectionFeedback,
 }: ImportScreenProps) {
   const [isDropzoneActive, setIsDropzoneActive] = useState(false);
+  const [ocrWarningsExpanded, setOcrWarningsExpanded] = useState(false);
   const uploadedCount = rows.filter((row) => row.status === 'uploaded').length;
   const queuedCount = rows.filter((row) => row.status !== 'uploaded').length;
 
@@ -71,11 +72,24 @@ export function ImportScreen({
                 {ocrStatusMessage}
               </p>
             )}
-            {ocrWarnings.map((warning) => (
-              <p className="entry-notice diagnostic" key={warning}>
-                OCR detail: {warning}
-              </p>
-            ))}
+            {ocrWarnings.length > 0 && (
+              <>
+                <button
+                  className="entry-notice-ocr-summary"
+                  onClick={() => setOcrWarningsExpanded((prev) => !prev)}
+                  type="button"
+                >
+                  {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
+                  — {ocrWarningsExpanded ? 'hide' : 'show'}
+                </button>
+                {ocrWarningsExpanded &&
+                  ocrWarnings.map((warning) => (
+                    <p className="entry-notice diagnostic" key={warning}>
+                      {warning}
+                    </p>
+                  ))}
+              </>
+            )}
             {appError && <p className="entry-notice error">{appError}</p>}
           </div>
         )}
@@ -103,6 +117,9 @@ export function ImportScreen({
               <button className="entry-enter-button import-done-button" disabled={!canComplete} onClick={onDone} type="button">
                 done
               </button>
+              {!canComplete && (
+                <p className="import-done-hint">upload a video first</p>
+              )}
             </div>
           </div>
 
@@ -157,7 +174,7 @@ export function ImportScreen({
 
           <div className="import-queue">
             {rows.map((row) => (
-              <div className="import-row" key={row.localId}>
+              <div className={`import-row${row.status === 'error' ? ' error' : ''}`} key={row.localId}>
                 <div className="import-row-copy">
                   <EditableName
                     buttonClassName="entry-rename-button"
@@ -176,6 +193,15 @@ export function ImportScreen({
                     <span className="import-pill neutral">uploaded</span>
                   ) : row.status === 'uploading' ? (
                     <span className="import-pill neutral muted">uploading...</span>
+                  ) : row.status === 'error' ? (
+                    <button
+                      className="import-pill retry"
+                      disabled={isUploadBlocked}
+                      onClick={() => onUploadRow(row.localId)}
+                      type="button"
+                    >
+                      retry
+                    </button>
                   ) : (
                     <button
                       className="import-pill success"

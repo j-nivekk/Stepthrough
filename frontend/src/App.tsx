@@ -81,6 +81,8 @@ type PendingTaskNavigation = {
 function App() {
   const queryClient = useQueryClient();
   const [projectName, setProjectName] = useState('');
+  const [projectSearch, setProjectSearch] = useState('');
+  const [projectSort, setProjectSort] = useState<'name' | 'recent'>('recent');
   const [workflowStage, setWorkflowStage] = useState<WorkflowStage>('projects');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [pendingAnalysisProjectId, setPendingAnalysisProjectId] = useState<string | null>(null);
@@ -1329,7 +1331,11 @@ function App() {
           onNavigateStage={setProjectStage}
           onOpenProject={openProject}
           onProjectNameChange={setProjectName}
+          onProjectSearchChange={setProjectSearch}
+          onProjectSortChange={setProjectSort}
           onRenameProject={handleRenameProject}
+          projectSearch={projectSearch}
+          projectSort={projectSort}
           projectName={projectName}
           projects={projectsQuery.data ?? []}
           projectsLoading={projectsQuery.isLoading}
