@@ -5,9 +5,10 @@ import {
   AnalysisStepperInput,
 } from '../../../components/AnalysisControls';
 import type { AnalysisHintKey, AnalysisPopoverKey } from '../../../lib/analysis';
-import { describeFrameSkip, clampInteger } from '../../../lib/utils';
+import { clampInteger } from '../../../lib/utils';
 import {
   analysisPresetDefaults,
+  buildV1SampleFpsAnnotation,
   clampRunSettingsForRecording,
   defaultHybridAdvancedSettings,
   describeAnalysisPreset,
@@ -454,7 +455,7 @@ export function AnalysisParametersPanel({
                     </div>
                   </label>
                   <span className="analysis-parameter-annotation">
-                    {formatHybridSampleFpsAnnotation(runSettings)}
+                    {formatHybridSampleFpsAnnotation(runSettings, selectedRecordingSummary?.fps)}
                   </span>
                 </div>
 
@@ -739,7 +740,11 @@ export function AnalysisParametersPanel({
                   )}
                 </label>
                 <span className="analysis-parameter-annotation">
-                  {describeFrameSkip(runSettings.sample_fps, selectedRecordingSummary?.fps ?? null)}
+                  {buildV1SampleFpsAnnotation(
+                    runSettings.sample_fps,
+                    selectedRecordingSummary?.fps,
+                    sampleFpsGuardrail,
+                  )}
                 </span>
               </div>
               <label className="analysis-parameter-row" {...bindHint('extract_offset_ms')}>

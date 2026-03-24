@@ -600,6 +600,21 @@ a {
   cursor: pointer;
 }
 
+.entry-notice-ocr-summary {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: rgba(0, 0, 0, 0.54);
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-align: left;
+}
+
+.entry-notice-ocr-summary:hover {
+  color: rgba(0, 0, 0, 0.75);
+  text-decoration: underline;
+}
+
 .entry-notice-dismiss:hover {
   border-color: rgba(0, 0, 0, 0.38);
   color: rgba(0, 0, 0, 0.75);
@@ -901,8 +916,9 @@ a {
 
 .import-header-actions {
   display: flex;
+  flex-direction: column;
   align-items: flex-end;
-  gap: 6px;
+  gap: 4px;
 }
 
 .import-project-copy {
@@ -946,6 +962,13 @@ a {
 
 .import-done-button {
   flex: 0 0 auto;
+}
+
+.import-done-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: rgba(0, 0, 0, 0.45);
+  text-align: right;
 }
 
 .import-dropzone {
@@ -1064,6 +1087,12 @@ a {
   color: #000;
 }
 
+.import-pill.retry {
+  background: #c75a00;
+  color: #fff;
+  cursor: pointer;
+}
+
 .import-pill.danger {
   background: #bf2725;
   color: #fff;
@@ -1089,6 +1118,13 @@ a {
 .import-row:focus-within .import-delete-button {
   opacity: 1;
   pointer-events: auto;
+}
+
+.import-row.error {
+  background: rgba(191, 39, 37, 0.05);
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin: -4px -6px;
 }
 
 .import-empty-copy {
@@ -2172,7 +2208,10 @@ a {
 .analysis-preview-wrap {
   display: flex;
   justify-content: center;
-  width: 100%;
+  background: #141414;
+  margin-inline: -43px;
+  width: calc(100% + 86px);
+  padding: 20px 43px;
 }
 
 .analysis-panel {
@@ -2367,6 +2406,65 @@ a {
   object-fit: contain;
   background: transparent;
   display: block;
+}
+
+/* ── Preview dark-region colour adaptations ──────────────────── */
+
+.analysis-preview-wrap .analysis-preview-filename {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.analysis-preview-wrap .preview-scrubber-track {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.analysis-preview-wrap .preview-scrubber-progress {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.analysis-preview-wrap .preview-scrubber-pin.pending {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.analysis-preview-wrap .preview-scrubber-playhead {
+  background: #fff;
+  box-shadow: 0 0 0 2px #555, 0 0 0 3px rgba(255, 255, 255, 0.12);
+}
+
+.analysis-preview-wrap .preview-control-btn {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.analysis-preview-wrap .preview-control-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.analysis-preview-wrap .preview-control-btn:active {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.analysis-preview-wrap .preview-control-btn--play {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.analysis-preview-wrap .preview-control-btn--play:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.analysis-preview-wrap .preview-timecode {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.analysis-preview-wrap .preview-size-btn {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.analysis-preview-wrap .preview-size-btn.active {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 /* ── Preview scrubber ─────────────────────────────────────────── */

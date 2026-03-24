@@ -1,5 +1,5 @@
 import type { GlobalRunPreset, HybridAdvancedSettings, ProjectRunPreset, RunSettings } from '../types';
-import { clampInteger } from './utils';
+import { clampInteger, describeFrameSkip } from './utils';
 
 export const defaultRunSettings: RunSettings = {
   analysis_engine: 'hybrid_v2',
@@ -299,12 +299,32 @@ export function describeHybridOcrConfirmationHint(): string {
   return 'ocr is configured by the backend environment. when available, hybrid uses paddleocr for strong visual changes and bounded probes on localized changed regions. first use may initialize models in the backend cache, or rely on backend-provided local model directories. preset baseline: on (paddleocr).';
 }
 
-export function formatHybridSampleFpsAnnotation(settings: RunSettings): string {
+export function formatHybridSampleFpsAnnotation(
+  settings: RunSettings,
+  recordingFps?: number | null,
+): string {
   const presetSampleFps = analysisPresetDefaults[settings.analysis_preset].sampleFps;
   const overrideSampleFps = settings.advanced?.sample_fps_override;
-  return overrideSampleFps == null
-    ? `preset: ${presetSampleFps} fps. current: auto, using the preset value.`
-    : `preset: ${presetSampleFps} fps. current override: ${overrideSampleFps} fps.`;
+  const base =
+    overrideSampleFps == null
+      ? `preset: ${presetSampleFps} fps. current: auto, using the preset value.`
+      : `preset: ${presetSampleFps} fps. current override: ${overrideSampleFps} fps.`;
+  if (!recordingFps || !Number.isFinite(recordingFps)) return base;
+  const maxFps = Math.max(1, Math.ceil(recordingFps));
+  return `${base} source: ${Math.round(recordingFps * 10) / 10} fps · max: ${maxFps} fps.`;
+}
+
+export function buildV1SampleFpsAnnotation(
+  sampleFps: number | null,
+  recordingFps: number | null | undefined,
+  guardrail: ReturnType<typeof getSampleFpsGuardrail>,
+): string | null {
+  const frameNote = describeFrameSkip(sampleFps, recordingFps ?? null);
+  if (!recordingFps || !Number.isFinite(recordingFps)) return frameNote;
+  const fpsNote = !guardrail.sourceFpsAvailable
+    ? `source: ${guardrail.sourceFpsCeiling} fps · max: ${guardrail.maxSampleFps} fps`
+    : `source: ${guardrail.sourceFpsCeiling} fps`;
+  return frameNote ? `${frameNote} · ${fpsNote}` : fpsNote;
 }
 
 export function formatHybridMinDwellAnnotation(settings: RunSettings): string {

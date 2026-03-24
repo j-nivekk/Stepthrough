@@ -197,6 +197,7 @@ export function AnalysisScreen({
   settingsFeedback,
   showPresetText,
 }: AnalysisScreenProps) {
+  const [ocrWarningsExpanded, setOcrWarningsExpanded] = useState(false);
   const [expandedTaskRunId, setExpandedTaskRunId] = useState<string | null>(null);
   const [selectedTaskRunIds, setSelectedTaskRunIds] = useState<string[]>([]);
   const [taskFilter, setTaskFilter] = useState<AnalysisTaskFilter>('all');
@@ -1112,11 +1113,24 @@ export function AnalysisScreen({
                 {ocrStatusMessage}
               </p>
             )}
-            {ocrWarnings.map((warning) => (
-              <p className="entry-notice diagnostic" key={warning}>
-                OCR detail: {warning}
-              </p>
-            ))}
+            {ocrWarnings.length > 0 && (
+              <>
+                <button
+                  className="entry-notice-ocr-summary"
+                  onClick={() => setOcrWarningsExpanded((prev) => !prev)}
+                  type="button"
+                >
+                  {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
+                  — {ocrWarningsExpanded ? 'hide' : 'show'}
+                </button>
+                {ocrWarningsExpanded &&
+                  ocrWarnings.map((warning) => (
+                    <p className="entry-notice diagnostic" key={warning}>
+                      {warning}
+                    </p>
+                  ))}
+              </>
+            )}
             {appError && <p className="entry-notice error">{appError}</p>}
             {liveMessage && <p className="entry-notice">{liveMessage}</p>}
             {settingsFeedback && <p className="entry-notice">{settingsFeedback}</p>}

@@ -15,8 +15,12 @@ export interface EntryScreenProps {
   onNavigateStage: (stage: WorkflowStage) => void;
   onOpenProject: (projectId: string, targetStage: ProjectEntryTarget) => void;
   onProjectNameChange: (value: string) => void;
+  onProjectSearchChange: (value: string) => void;
+  onProjectSortChange: (sort: 'name' | 'recent') => void;
   onRenameProject: (projectId: string, name: string) => Promise<void>;
   projectName: string;
+  projectSearch: string;
+  projectSort: 'name' | 'recent';
   projects: Project[];
   projectsLoading: boolean;
   projectsStatusMessage: string | null;
@@ -38,8 +42,12 @@ export function EntryScreen({
   onNavigateStage,
   onOpenProject,
   onProjectNameChange,
+  onProjectSearchChange,
+  onProjectSortChange,
   onRenameProject,
   projectName,
+  projectSearch,
+  projectSort,
   projects,
   projectsLoading,
   projectsStatusMessage,
@@ -50,8 +58,7 @@ export function EntryScreen({
   selectedProjectCanJumpToAnalysis,
   selectedProjectId,
 }: EntryScreenProps) {
-  const [projectSearch, setProjectSearch] = useState('');
-  const [projectSort, setProjectSort] = useState<'name' | 'recent'>('recent');
+  const [ocrWarningsExpanded, setOcrWarningsExpanded] = useState(false);
   const visibleProjects = useMemo(() => {
     const searchValue = projectSearch.trim().toLowerCase();
     const filteredProjects = projects.filter((project) => project.name.toLowerCase().includes(searchValue));
@@ -75,6 +82,14 @@ export function EntryScreen({
         <StageNavigator
           activeStage="projects"
           className="entry-stage-nav"
+          disabledReasons={{
+            analysis: !selectedProjectId
+              ? 'open a project first'
+              : !selectedProjectCanJumpToAnalysis
+                ? 'import at least one video first'
+                : undefined,
+            import: !selectedProjectId ? 'open a project first' : undefined,
+          }}
           disabledStages={{
             analysis: !selectedProjectId || !selectedProjectCanJumpToAnalysis,
             import: !selectedProjectId,
@@ -96,11 +111,24 @@ export function EntryScreen({
                   {ocrStatusMessage}
                 </p>
               )}
-              {ocrWarnings.map((warning) => (
-                <p className="entry-notice diagnostic" key={warning}>
-                  OCR detail: {warning}
-                </p>
-              ))}
+              {ocrWarnings.length > 0 && (
+                <>
+                  <button
+                    className="entry-notice-ocr-summary"
+                    onClick={() => setOcrWarningsExpanded((prev) => !prev)}
+                    type="button"
+                  >
+                    {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
+                    — {ocrWarningsExpanded ? 'hide' : 'show'}
+                  </button>
+                  {ocrWarningsExpanded &&
+                    ocrWarnings.map((warning) => (
+                      <p className="entry-notice diagnostic" key={warning}>
+                        {warning}
+                      </p>
+                    ))}
+                </>
+              )}
               {appError && <p className="entry-notice error">{appError}</p>}
             </div>
           )}
@@ -123,21 +151,21 @@ export function EntryScreen({
             <div className="entry-project-tools">
               <input
                 className="entry-project-search"
-                onChange={(event) => setProjectSearch(event.target.value)}
+                onChange={(event) => onProjectSearchChange(event.target.value)}
                 placeholder="search projects"
                 value={projectSearch}
               />
               <div className="entry-project-sort">
                 <button
                   className={`entry-project-sort-button ${projectSort === 'recent' ? 'active' : ''}`}
-                  onClick={() => setProjectSort('recent')}
+                  onClick={() => onProjectSortChange('recent')}
                   type="button"
                 >
                   recent
                 </button>
                 <button
                   className={`entry-project-sort-button ${projectSort === 'name' ? 'active' : ''}`}
-                  onClick={() => setProjectSort('name')}
+                  onClick={() => onProjectSortChange('name')}
                   type="button"
                 >
                   a-z
