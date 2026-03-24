@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
 import { formatElapsedDuration } from '../../../lib/utils';
 import { analysisPresetDefaults, formatAnalysisEngineLabel, formatAnalysisPresetLabel } from '../../../lib/runSettings';
@@ -19,6 +20,7 @@ export interface AnalysisTasksPanelProps {
   expandedTaskRunId: string | null;
   groupedTaskItems: AnalysisTaskGroup[];
   onAbortRun: (runId: string) => void;
+  onDeleteRun: (runId: string) => void;
   onDeleteSelectedTasks: () => void;
   onEnterTaskSelectMode: () => void;
   onExitTaskSelectMode: () => void;
@@ -45,6 +47,7 @@ export function AnalysisTasksPanel({
   expandedTaskRunId,
   groupedTaskItems,
   onAbortRun,
+  onDeleteRun,
   onDeleteSelectedTasks,
   onEnterTaskSelectMode,
   onExitTaskSelectMode,
@@ -63,6 +66,13 @@ export function AnalysisTasksPanel({
   taskFilter,
   taskSelectMode,
 }: AnalysisTasksPanelProps) {
+  const [shakeRunId, setShakeRunId] = useState<string | null>(null);
+
+  function triggerShake(runId: string) {
+    setShakeRunId(runId);
+    setTimeout(() => setShakeRunId((current) => (current === runId ? null : current)), 500);
+  }
+
   function renderTaskRow(item: AnalysisTaskItem) {
     const run = item.run;
     const runNumber = runNumberById.get(run.id) ?? 1;
@@ -162,7 +172,7 @@ export function AnalysisTasksPanel({
     }
 
     return (
-      <div className={`analysis-task-row ${isSelected ? 'selected' : ''}`} key={run.id}>
+      <div className={`analysis-task-row ${isSelected ? 'selected' : ''} ${shakeRunId === run.id ? 'shake' : ''}`} key={run.id}>
         <div className="analysis-task-head">
           <div className="analysis-task-head-primary">
             {taskSelectMode && (
@@ -174,7 +184,17 @@ export function AnalysisTasksPanel({
             <div className="analysis-task-title-wrap">
               <button
                 className={`analysis-task-title ${isError ? 'error' : ''}`}
-                onClick={() => onSelectRun(item.recording.id, run.id, 'analysis-run-detail')}
+                onClick={() => {
+                  if (isDone) {
+                    if (hasCandidates) {
+                      onReviewTaskOutputs(item.recording.id, run.id);
+                    } else {
+                      onSelectRun(item.recording.id, run.id, 'analysis-run-detail');
+                    }
+                  } else {
+                    triggerShake(run.id);
+                  }
+                }}
                 type="button"
               >
                 {`run #${runNumber}`}
@@ -220,14 +240,23 @@ export function AnalysisTasksPanel({
                 </button>
               ),
             )}
+            <button
+              className="analysis-task-link danger analysis-task-hover-link"
+              onClick={() => onDeleteRun(run.id)}
+              type="button"
+            >
+              delete
+            </button>
           </div>
         </div>
 
         {isExpanded && (
           <>
-            <div className="analysis-task-bar" aria-hidden="true">
-              <div className="analysis-task-bar-fill" style={{ width: isDone ? '100%' : formatPercent(run.progress) }} />
-            </div>
+            {!isSelected && (
+              <div className="analysis-task-bar" aria-hidden="true">
+                <div className="analysis-task-bar-fill" style={{ width: isDone ? '100%' : formatPercent(run.progress) }} />
+              </div>
+            )}
             <div className="analysis-task-settings">
               {taskSettings.map((setting) => (
                 <div className={`analysis-task-setting ${setting.key === 'mode' ? 'mode' : ''}`} key={setting.key}>

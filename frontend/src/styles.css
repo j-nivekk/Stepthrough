@@ -1264,11 +1264,37 @@ a {
   gap: 8px;
 }
 
+@keyframes analysis-task-headshake {
+  0%   { transform: translateX(0); }
+  15%  { transform: translateX(-6px) rotate(-0.4deg); }
+  30%  { transform: translateX(5px) rotate(0.4deg); }
+  45%  { transform: translateX(-4px); }
+  60%  { transform: translateX(3px); }
+  75%  { transform: translateX(-2px); }
+  100% { transform: translateX(0); }
+}
+
 .analysis-task-row {
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding-bottom: 2px;
+}
+
+.analysis-task-row.shake {
+  animation: analysis-task-headshake 450ms ease;
+}
+
+.analysis-task-hover-link {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.analysis-task-row:hover .analysis-task-hover-link,
+.analysis-task-row:focus-within .analysis-task-hover-link {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .analysis-task-row.selected {
