@@ -25,6 +25,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(main, 'DATA_ROOT', data_root)
 
     with TestClient(main.app) as test_client:
+        main.app.state.ocr_available = False
+        main.app.state.ocr_message = 'OCR disabled in tests by default; enable it explicitly in OCR-specific cases.'
         yield test_client
 
 

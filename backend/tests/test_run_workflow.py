@@ -177,6 +177,53 @@ def test_hybrid_run_emits_warning_and_continues_when_ocr_init_fails(
     assert detail['candidates']
 
 
+def test_hybrid_run_reports_when_ocr_is_invoked(
+    client: TestClient,
+    video_factory,
+    wait_for_run,
+    monkeypatch,
+) -> None:
+    import app.main as main
+    import app.services.hybrid_detection as hybrid_detection
+
+    class FakeOcrEngine:
+        def extract_text(self, _image):
+            return 'sample text'
+
+    monkeypatch.setattr(main.app.state, 'ocr_available', True)
+    monkeypatch.setattr(
+        main.app.state,
+        'ocr_message',
+        'PaddleOCR 3.3.0 is configured through the backend environment. First use may initialize or download models.',
+    )
+    monkeypatch.setattr(hybrid_detection, '_maybe_load_ocr_engine', lambda config: (FakeOcrEngine(), None))
+
+    project = _create_project(client)
+    video = video_factory('hybrid-ocr-invoked.mp4', ['black', 'white'])
+    recording = _import_video(client, project['id'], video)
+
+    response = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={
+            'analysis_engine': 'hybrid_v2',
+            'analysis_preset': 'balanced',
+            'advanced': {'enable_ocr': True, 'ocr_backend': 'paddleocr'},
+            'tolerance': 50,
+            'min_scene_gap_ms': 900,
+            'sample_fps': 4,
+            'detector_mode': 'content',
+            'extract_offset_ms': 200,
+        },
+    )
+    run = response.json()
+    detail = wait_for_run(client, run['id'])
+
+    assert response.status_code == 200
+    assert detail['summary']['status'] == 'completed'
+    assert any('OCR enabled with PaddleOCR' in event['message'] for event in detail['events'])
+    assert any('OCR invoked ' in event['message'] for event in detail['events'])
+
+
 def test_hybrid_min_scene_gap_reduces_close_candidates(client: TestClient, video_factory, wait_for_run) -> None:
     project = _create_project(client)
     video = video_factory('hybrid-gap.mp4', ['black', 'white', 'black', 'white'], segment_duration=0.45)

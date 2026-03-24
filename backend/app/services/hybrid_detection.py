@@ -91,6 +91,12 @@ class OcrEngine(Protocol):
 
 
 @dataclass
+class _OcrUsageStats:
+    model_invocations: int = 0
+    cache_hits: int = 0
+
+
+@dataclass
 class _OcrCache:
     capacity: int = 64
     max_hamming_distance: int = 2
@@ -307,6 +313,7 @@ def _apply_paddle_model_source(runtime_config: OcrRuntimeConfig) -> None:
     # model downloads are needed. BOS is the only documented override; the
     # default source is HuggingFace.
     os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+    os.environ["PADDLE_PDX_CACHE_HOME"] = str(runtime_config.cache_dir)
     if runtime_config.model_source == "bos":
         os.environ["PADDLE_PDX_MODEL_SOURCE"] = "BOS"
     elif runtime_config.model_source in {"huggingface", "local"}:
@@ -322,9 +329,12 @@ class PaddleOcrEngine:
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
             "use_textline_orientation": False,
-            "text_detection_model_dir": str(runtime_config.resolved_det_model_dir),
-            "text_recognition_model_dir": str(runtime_config.resolved_rec_model_dir),
         }
+        if runtime_config.model_source == "local" or (
+            runtime_config.det_model_dir is not None and runtime_config.rec_model_dir is not None
+        ):
+            init_kwargs["text_detection_model_dir"] = str(runtime_config.resolved_det_model_dir)
+            init_kwargs["text_recognition_model_dir"] = str(runtime_config.resolved_rec_model_dir)
         self._ocr = PaddleOCR(**init_kwargs)
 
     def extract_text(self, image: np.ndarray) -> str | None:
@@ -597,13 +607,18 @@ def _extract_text_from_image(
     image: np.ndarray,
     engine: OcrEngine | None,
     ocr_cache: _OcrCache | None,
+    ocr_usage_stats: _OcrUsageStats | None = None,
 ) -> str | None:
     if engine is None:
         return None
     if ocr_cache is not None:
         cached, cached_text = ocr_cache.get(image)
         if cached:
+            if ocr_usage_stats is not None:
+                ocr_usage_stats.cache_hits += 1
             return cached_text
+    if ocr_usage_stats is not None:
+        ocr_usage_stats.model_invocations += 1
     extracted_text = engine.extract_text(image)
     if ocr_cache is not None:
         return ocr_cache.put(image, extracted_text)
@@ -614,6 +629,7 @@ def _extract_ocr_text(
     sample: SampleFrame,
     engine: OcrEngine | None,
     ocr_cache: _OcrCache | None,
+    ocr_usage_stats: _OcrUsageStats | None = None,
     *,
     changed_regions: list[dict[str, float]] | None = None,
 ) -> str | None:
@@ -625,13 +641,13 @@ def _extract_ocr_text(
             return None
         tokens: list[str] = []
         for crop in crops:
-            cropped_text = _extract_text_from_image(crop, engine, ocr_cache)
+            cropped_text = _extract_text_from_image(crop, engine, ocr_cache, ocr_usage_stats)
             if cropped_text:
                 tokens.append(cropped_text)
         return " ".join(tokens) or None
     if sample.ocr_text_checked:
         return sample.ocr_text
-    sample.ocr_text = _extract_text_from_image(sample.bgr, engine, ocr_cache)
+    sample.ocr_text = _extract_text_from_image(sample.bgr, engine, ocr_cache, ocr_usage_stats)
     sample.ocr_text_checked = True
     return sample.ocr_text
 
@@ -677,6 +693,7 @@ def _build_signal(
     config: HybridDetectorConfig,
     engine: OcrEngine | None,
     ocr_cache: _OcrCache | None = None,
+    ocr_usage_stats: _OcrUsageStats | None = None,
 ) -> CandidateSignal:
     visual, motion, changed_regions = _transition_signal(
         previous,
@@ -704,14 +721,26 @@ def _build_signal(
     used_region_probe = False
     if _should_region_probe(visual, motion, changed_regions, config):
         used_region_probe = True
-        current_text = _extract_ocr_text(current, engine, ocr_cache, changed_regions=changed_regions)
-        previous_text = _extract_ocr_text(previous, engine, ocr_cache, changed_regions=changed_regions)
+        current_text = _extract_ocr_text(
+            current,
+            engine,
+            ocr_cache,
+            ocr_usage_stats,
+            changed_regions=changed_regions,
+        )
+        previous_text = _extract_ocr_text(
+            previous,
+            engine,
+            ocr_cache,
+            ocr_usage_stats,
+            changed_regions=changed_regions,
+        )
     if signal_strength >= config.ocr_trigger_threshold and not (current_text or previous_text):
-        current_text = _extract_ocr_text(current, engine, ocr_cache)
-        previous_text = _extract_ocr_text(previous, engine, ocr_cache)
+        current_text = _extract_ocr_text(current, engine, ocr_cache, ocr_usage_stats)
+        previous_text = _extract_ocr_text(previous, engine, ocr_cache, ocr_usage_stats)
     elif signal_strength >= config.ocr_trigger_threshold and not used_region_probe:
-        current_text = _extract_ocr_text(current, engine, ocr_cache)
-        previous_text = _extract_ocr_text(previous, engine, ocr_cache)
+        current_text = _extract_ocr_text(current, engine, ocr_cache, ocr_usage_stats)
+        previous_text = _extract_ocr_text(previous, engine, ocr_cache, ocr_usage_stats)
     if current_text or previous_text:
         if signal_strength >= config.ocr_trigger_threshold or used_region_probe:
             text_score = _clamp_score(text_distance(current_text, previous_text))
@@ -777,7 +806,15 @@ def detect_candidates_hybrid(
     ocr_engine, ocr_warning = _maybe_load_ocr_engine(config)
     if ocr_warning:
         progress_callback("primary_scan", f"OCR disabled: {ocr_warning}", SCAN_RANGE[0], "warning")
+    elif ocr_engine is not None:
+        progress_callback(
+            "primary_scan",
+            "OCR enabled with PaddleOCR. Text probes will run when change thresholds are met.",
+            SCAN_RANGE[0],
+            "info",
+        )
     ocr_cache = _OcrCache() if ocr_engine is not None else None
+    ocr_usage_stats = _OcrUsageStats() if ocr_engine is not None else None
 
     timestamps = _sample_timestamps(duration_ms, config.sample_fps)
     previous_sample: SampleFrame | None = None
@@ -818,6 +855,7 @@ def detect_candidates_hybrid(
                     config,
                     ocr_engine,
                     ocr_cache,
+                    ocr_usage_stats,
                 )
                 if active_event is None:
                     if signal.combined >= config.proposal_threshold or signal.text >= 0.3:
@@ -851,6 +889,23 @@ def detect_candidates_hybrid(
         if finalized is not None:
             _merge_or_append_event(detected_events, finalized, config.min_scene_gap_ms)
 
+    if ocr_engine is not None and ocr_usage_stats is not None:
+        if ocr_usage_stats.model_invocations > 0:
+            cache_note = f" with {ocr_usage_stats.cache_hits} cache hit(s)" if ocr_usage_stats.cache_hits else ""
+            progress_callback(
+                "primary_scan",
+                f"OCR invoked {ocr_usage_stats.model_invocations} time(s) during the scan{cache_note}.",
+                SCAN_RANGE[1],
+                "info",
+            )
+        else:
+            progress_callback(
+                "primary_scan",
+                "OCR stayed enabled, but no sampled frames crossed the OCR thresholds.",
+                SCAN_RANGE[1],
+                "info",
+            )
+
     if not detected_events:
         detected_events.append(
             {
@@ -876,7 +931,7 @@ def detect_candidates_hybrid(
         if ocr_engine is not None and extracted_ocr_text is None:
             screenshot = cv2.imread(str(image_path))
             if screenshot is not None:
-                extracted_ocr_text = ocr_engine.extract_text(screenshot)
+                extracted_ocr_text = _extract_text_from_image(screenshot, ocr_engine, ocr_cache, ocr_usage_stats)
         candidates.append(
             {
                 "id": uuid4().hex,
