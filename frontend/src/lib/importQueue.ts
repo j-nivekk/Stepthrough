@@ -29,6 +29,32 @@ export function createImportQueueItemFromFile(file: File): ImportQueueItem {
   };
 }
 
+export function collectImportQueueItems(
+  currentQueue: ImportQueueItem[],
+  files: FileList | File[],
+): { ignoredCount: number; queueItems: ImportQueueItem[] } {
+  const incomingFiles = Array.from(files);
+  if (!incomingFiles.length) {
+    return { ignoredCount: 0, queueItems: [] };
+  }
+
+  let ignoredCount = 0;
+  const knownSignatures = new Set(
+    currentQueue.map((item) => item.signature).filter((value): value is string => Boolean(value)),
+  );
+  const queueItems = incomingFiles.flatMap((file) => {
+    const signature = buildImportFileSignature(file);
+    if (knownSignatures.has(signature)) {
+      ignoredCount += 1;
+      return [];
+    }
+    knownSignatures.add(signature);
+    return [createImportQueueItemFromFile(file)];
+  });
+
+  return { ignoredCount, queueItems };
+}
+
 export function createImportQueueItemFromRecording(recording: RecordingSummary): ImportQueueItem {
   return {
     localId: `recording-${recording.id}`,

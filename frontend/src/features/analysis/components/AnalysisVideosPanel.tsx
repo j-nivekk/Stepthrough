@@ -4,6 +4,7 @@ import type { RecordingSummary } from '../../../types';
 
 export interface AnalysisVideosPanelProps {
   onDeleteRecording: (recordingId: string, filename: string) => void;
+  onFilesDropped: (files: FileList | File[]) => void;
   onJumpToSelection: () => void;
   onPreviewRecording: (recordingId: string) => void;
   onRenameRecording: (recordingId: string, filename: string) => Promise<void>;
@@ -18,6 +19,7 @@ export interface AnalysisVideosPanelProps {
 
 export function AnalysisVideosPanel({
   onDeleteRecording,
+  onFilesDropped,
   onJumpToSelection,
   onPreviewRecording,
   onRenameRecording,
@@ -29,8 +31,30 @@ export function AnalysisVideosPanel({
   selectedRecordingId,
   videoRenameRequest,
 }: AnalysisVideosPanelProps) {
+  function isFileDrag(event: React.DragEvent<HTMLElement>) {
+    return Array.from(event.dataTransfer.types).includes('Files');
+  }
+
   return (
-    <section className="analysis-column">
+    <section
+      className="analysis-column"
+      onDragOver={(event) => {
+        if (!isFileDrag(event)) {
+          return;
+        }
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={(event) => {
+        if (!isFileDrag(event)) {
+          return;
+        }
+        event.preventDefault();
+        if (event.dataTransfer.files.length > 0) {
+          onFilesDropped(event.dataTransfer.files);
+        }
+      }}
+    >
       <div className="analysis-column-head">
         <p>videos</p>
         <button className="analysis-pill analysis-pill-accent" onClick={onJumpToSelection} type="button">

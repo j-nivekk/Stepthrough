@@ -95,6 +95,7 @@ export interface AnalysisScreenProps {
   ) => Promise<string[]>;
   onCreateManualCandidate: (runId: string, timestampMs: number) => Promise<CandidateFrame>;
   onDeleteRecording: (recordingId: string, filename: string) => void;
+  onDropFiles: (files: FileList | File[]) => void;
   onDeleteSelectedRuns: (runIds: string[]) => Promise<string[] | null>;
   onExportRun: (runId: string, mode: ExportMode, downloadName?: string) => Promise<void>;
   onExportTaskRuns: (runIds: string[]) => Promise<void>;
@@ -149,6 +150,7 @@ export function AnalysisScreen({
   onBulkUpdateCandidates,
   onCreateManualCandidate,
   onDeleteRecording,
+  onDropFiles,
   onDeleteSelectedRuns,
   onExportRun,
   onExportTaskRuns,
@@ -994,6 +996,7 @@ export function AnalysisScreen({
         <div className="analysis-grid">
           <AnalysisVideosPanel
             onDeleteRecording={onDeleteRecording}
+            onFilesDropped={onDropFiles}
             onJumpToSelection={onJumpToSelection}
             onPreviewRecording={onPreviewRecording}
             onRenameRecording={onRenameRecording}

@@ -33,6 +33,7 @@ import {
 } from './lib/analysis';
 import { downloadExportBundle, jumpToAnchor, sleep } from './lib/utils';
 import {
+  collectImportQueueItems,
   createImportQueueItemFromFile,
   getUploadedImportItems,
   syncImportQueueWithRecordings,
@@ -800,26 +801,13 @@ function App() {
   }
 
   function handleImportFileSelection(files: FileList | File[]) {
-    const incomingFiles = Array.from(files);
-    if (!incomingFiles.length) {
+    const { ignoredCount, queueItems } = collectImportQueueItems(importQueue, files);
+    if (!queueItems.length && ignoredCount === 0) {
       return;
     }
-    let ignoredCount = 0;
-    setImportQueue((current) => {
-      const knownSignatures = new Set(
-        current.map((item) => item.signature).filter((value): value is string => Boolean(value)),
-      );
-      const additions = incomingFiles.flatMap((file) => {
-        const signature = `${file.name}::${file.size}::${file.lastModified}`;
-        if (knownSignatures.has(signature)) {
-          ignoredCount += 1;
-          return [];
-        }
-        knownSignatures.add(signature);
-        return [createImportQueueItemFromFile(file)];
-      });
-      return additions.length ? [...current, ...additions] : current;
-    });
+    if (queueItems.length > 0) {
+      setImportQueue((current) => [...current, ...queueItems]);
+    }
     if (ignoredCount > 0) {
       setImportSelectionFeedback(
         `${ignoredCount} duplicate ${ignoredCount === 1 ? 'video was' : 'videos were'} ignored.`,
@@ -827,6 +815,55 @@ function App() {
     } else {
       setImportSelectionFeedback('');
     }
+  }
+
+  function handleQuickImportDrop(files: FileList | File[]) {
+    if (!selectedProjectId) {
+      return;
+    }
+
+    const { ignoredCount, queueItems } = collectImportQueueItems(importQueue, files);
+    if (!queueItems.length && ignoredCount === 0) {
+      return;
+    }
+
+    clearAnalysisMessages();
+
+    if (!queueItems.length) {
+      setAnalysisActionMessage(
+        `${ignoredCount} duplicate ${ignoredCount === 1 ? 'video was' : 'videos were'} ignored.`,
+      );
+      return;
+    }
+
+    setImportQueue((current) => [
+      ...current,
+      ...queueItems.map((item) => ({
+        ...item,
+        status: 'uploading' as const,
+        error: null,
+      })),
+    ]);
+
+    setAnalysisActionMessage(
+      `Importing ${queueItems.length} ${queueItems.length === 1 ? 'video' : 'videos'}${
+        ignoredCount > 0
+          ? ` · ignored ${ignoredCount} duplicate ${ignoredCount === 1 ? 'file' : 'files'}`
+          : ''
+      }.`,
+    );
+
+    queueItems.forEach((item) => {
+      if (!item.file) {
+        return;
+      }
+      importRecordingMutation.mutate({
+        projectId: selectedProjectId,
+        file: item.file,
+        filename: item.filename,
+        localId: item.localId,
+      });
+    });
   }
 
   function handleUploadImportItem(localId: string) {
@@ -1215,6 +1252,7 @@ function App() {
         onBulkUpdateCandidates={handleBulkUpdateCandidates}
         onCreateManualCandidate={handleCreateManualRunCandidate}
         onDeleteRecording={confirmDeleteRecording}
+        onDropFiles={handleQuickImportDrop}
         onDeleteSelectedRuns={handleDeleteSelectedRuns}
         onExportRun={handleExportRun}
         onExportTaskRuns={handleExportTaskRuns}
