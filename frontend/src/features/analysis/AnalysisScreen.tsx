@@ -130,6 +130,7 @@ export interface AnalysisScreenProps {
   selectedRecordingId: string | null;
   selectedRecordingSummary: RecordingSummary | null;
   selectedRun: RunDetail | null;
+  selectedRunLoading?: boolean;
   setRunSettings: Dispatch<SetStateAction<RunSettings>>;
   settingsFeedback: string;
   showPresetText: string;
@@ -187,6 +188,7 @@ export function AnalysisScreen({
   selectedRecordingId,
   selectedRecordingSummary,
   selectedRun,
+  selectedRunLoading = false,
   setRunSettings,
   settingsFeedback,
   showPresetText,
@@ -829,6 +831,10 @@ export function AnalysisScreen({
     setSelectedTaskRunIds(failedRunIds);
   }
 
+  function handleDeleteRun(runId: string) {
+    void onDeleteSelectedRuns([runId]);
+  }
+
   async function handleExportSelectedTasks() {
     await onExportTaskRuns(selectedTaskRunIds);
   }
@@ -1188,6 +1194,7 @@ export function AnalysisScreen({
             expandedTaskRunId={expandedTaskRunId}
             groupedTaskItems={groupedTaskItems}
             onAbortRun={onAbortRun}
+            onDeleteRun={handleDeleteRun}
             onDeleteSelectedTasks={() => {
               void handleDeleteSelectedTasks();
             }}
@@ -1897,7 +1904,9 @@ export function AnalysisScreen({
         ) : selectedRecording ? (
           <section className="analysis-detail-section empty-state">
             <h2>{selectedRecording.filename}</h2>
-            <p>Select a video name or a task link to review candidates, logs, and exports here.</p>
+            {!selectedRunLoading && (
+              <p>Select a video name or a task link to review candidates, logs, and exports here.</p>
+            )}
           </section>
         ) : null}
       </div>

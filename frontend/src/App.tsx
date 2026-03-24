@@ -250,7 +250,10 @@ function App() {
   }, [previewRecordingId, projectRecordings]);
 
   useEffect(() => {
-    const runs = recordingDetailQuery.data?.runs ?? [];
+    if (!recordingDetailQuery.data) {
+      return;
+    }
+    const runs = recordingDetailQuery.data.runs ?? [];
     const stillSelected = runs.some((run) => run.id === selectedRunId);
     if (!stillSelected) {
       setSelectedRunId(null);
@@ -1359,6 +1362,7 @@ function App() {
         selectedRecordingId={selectedRecordingId}
         selectedRecordingSummary={selectedRecordingSummary}
         selectedRun={selectedRun}
+        selectedRunLoading={runDetailQuery.isLoading || runDetailQuery.isFetching}
         setRunSettings={setRunSettings}
         settingsFeedback={settingsFeedback}
         showPresetText={presetText}
