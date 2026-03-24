@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { absoluteApiUrl, getRun } from '../../api';
 import { ComparisonMetrics, CandidateCard } from '../../components/CandidateCard';
@@ -115,6 +115,8 @@ export interface AnalysisScreenProps {
     candidateId: string,
     payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>>,
   ) => void;
+  ocrAvailable: boolean;
+  ocrStatusMessage: string | null;
   previewRecording: RecordingSummary | null;
   projectDefaultSettings: RunSettings;
   recordings: RecordingSummary[];
@@ -124,7 +126,7 @@ export interface AnalysisScreenProps {
   selectedRecordingId: string | null;
   selectedRecordingSummary: RecordingSummary | null;
   selectedRun: RunDetail | null;
-  setRunSettings: React.Dispatch<React.SetStateAction<RunSettings>>;
+  setRunSettings: Dispatch<SetStateAction<RunSettings>>;
   settingsFeedback: string;
   showPresetText: string;
 }
@@ -167,6 +169,8 @@ export function AnalysisScreen({
   onSelectRun,
   onStartRun,
   onUpdateCandidate,
+  ocrAvailable,
+  ocrStatusMessage,
   previewRecording,
   projectDefaultSettings,
   recordings,
@@ -1037,6 +1041,8 @@ export function AnalysisScreen({
             onStartRun={onStartRun}
             onToggleHints={handleToggleHints}
             openPopover={openPopover}
+            ocrAvailable={ocrAvailable}
+            ocrStatusMessage={ocrStatusMessage}
             parameterColumnRef={parameterColumnRef}
             presetCopyFeedback={presetCopyFeedback}
             presetImportDraft={presetImportDraft}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
@@ -43,6 +43,7 @@ import {
   areRunSettingsEqual,
   clampRunSettingsForRecording,
   defaultRunSettings,
+  enforceLocalOcrAvailability,
   getProjectPresetStorageKey,
   loadGlobalRunPreset,
   loadProjectRunPreset,
@@ -74,7 +75,7 @@ function App() {
   const [pendingAnalysisProjectId, setPendingAnalysisProjectId] = useState<string | null>(null);
   const [selectedRecordingId, setSelectedRecordingId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [runSettings, setRunSettings] = useState<RunSettings>(defaultRunSettings);
+  const [runSettings, setRunSettingsState] = useState<RunSettings>(defaultRunSettings);
   const [settingsFeedback, setSettingsFeedback] = useState('');
   const [globalPreset, setGlobalPreset] = useState<GlobalRunPreset | null>(() => loadGlobalRunPreset());
   const [projectDefaultSettings, setProjectDefaultSettings] = useState<RunSettings>(defaultRunSettings);
@@ -92,6 +93,16 @@ function App() {
   }));
 
   const healthQuery = useQuery({ queryKey: ['health'], queryFn: health, refetchInterval: 30_000 });
+  const ocrAvailability = healthQuery.data?.ocr_available;
+  const ocrStatusMessage = healthQuery.data?.ocr_message ?? null;
+  const ocrAvailable = ocrAvailability !== false;
+  const applyLocalOcrAvailability = (settings: RunSettings) =>
+    enforceLocalOcrAvailability(settings, ocrAvailability);
+  const setRunSettings: Dispatch<SetStateAction<RunSettings>> = (next) => {
+    setRunSettingsState((current) =>
+      applyLocalOcrAvailability(typeof next === 'function' ? next(current) : next),
+    );
+  };
   const projectsQuery = useQuery({ queryKey: ['projects'], queryFn: listProjects });
   const projectDetailQuery = useQuery({
     queryKey: ['project', selectedProjectId],
@@ -142,7 +153,7 @@ function App() {
     }
 
     const projectPreset = loadProjectRunPreset(selectedProjectId);
-    const nextSettings = projectPreset?.settings ?? globalPreset?.settings ?? defaultRunSettings;
+    const nextSettings = applyLocalOcrAvailability(projectPreset?.settings ?? globalPreset?.settings ?? defaultRunSettings);
     setProjectDefaultSettings(nextSettings);
     setRunSettings(nextSettings);
     setSettingsFeedback('');
@@ -285,10 +296,10 @@ function App() {
   const previewRecording =
     projectRecordings.find((recording) => recording.id === previewRecordingId) ?? null;
   const effectiveProjectDefaultSettings = useMemo(
-    () => clampRunSettingsForRecording(projectDefaultSettings, selectedRecordingSummary?.fps ?? null),
-    [projectDefaultSettings, selectedRecordingSummary?.fps],
+    () => clampRunSettingsForRecording(applyLocalOcrAvailability(projectDefaultSettings), selectedRecordingSummary?.fps ?? null),
+    [projectDefaultSettings, selectedRecordingSummary?.fps, ocrAvailability],
   );
-  const healthWarning = healthQuery.data && healthQuery.data.missing_tools.length > 0;
+  const healthWarning = Boolean(healthQuery.data && healthQuery.data.missing_tools.length > 0);
   const presetText = useMemo(() => serializeRunPresetText(runSettings), [runSettings]);
   const uploadedImportItems = useMemo(() => getUploadedImportItems(importQueue), [importQueue]);
   const canCompleteImport = uploadedImportItems.length > 0;
@@ -317,6 +328,16 @@ function App() {
       return areRunSettingsEqual(current, nextSettings) ? current : nextSettings;
     });
   }, [selectedRecordingSummary?.fps, runSettings.allow_high_fps_sampling]);
+
+  useEffect(() => {
+    if (ocrAvailability !== false) {
+      return;
+    }
+    setRunSettingsState((current) => {
+      const nextSettings = applyLocalOcrAvailability(current);
+      return areRunSettingsEqual(current, nextSettings) ? current : nextSettings;
+    });
+  }, [ocrAvailability]);
 
   const latestRunByRecordingId = useMemo(() => {
     const nextMap = new Map<string, RunSummary>();
@@ -659,26 +680,29 @@ function App() {
       return;
     }
     clearAnalysisMessages();
-    createRunMutation.mutate({ recordingId: selectedRecordingId, settings: runSettings });
+    createRunMutation.mutate({
+      recordingId: selectedRecordingId,
+      settings: applyLocalOcrAvailability(runSettings),
+    });
   }
 
   function handleSaveProjectDefault() {
     if (!selectedProjectId) {
       return;
     }
-    const savedPreset = persistProjectRunPreset(selectedProjectId, runSettings);
+    const savedPreset = persistProjectRunPreset(selectedProjectId, applyLocalOcrAvailability(runSettings));
     setProjectDefaultSettings(savedPreset.settings);
     setSettingsFeedback('Saved the current settings for this project.');
   }
 
   function handleSaveBrowserDefault() {
-    const savedPreset = persistGlobalRunPreset(runSettings);
+    const savedPreset = persistGlobalRunPreset(applyLocalOcrAvailability(runSettings));
     setGlobalPreset(savedPreset);
     setSettingsFeedback('Saved the current settings as universal defaults.');
   }
 
   function applyAnalysisSettings(nextSettings: RunSettings, feedback: string) {
-    setRunSettings(clampRunSettingsForRecording(sanitizeRunSettings(nextSettings), selectedRecordingSummary?.fps ?? null));
+    setRunSettings(clampRunSettingsForRecording(sanitizeRunSettings(applyLocalOcrAvailability(nextSettings)), selectedRecordingSummary?.fps ?? null));
     setSettingsFeedback(feedback);
   }
 
@@ -1269,6 +1293,8 @@ function App() {
         onSelectRun={handleSelectTaskRun}
         onStartRun={handleStartAnalysisRun}
         onUpdateCandidate={(candidateId, payload) => updateCandidateMutation.mutate({ candidateId, payload })}
+        ocrAvailable={ocrAvailable}
+        ocrStatusMessage={ocrStatusMessage}
         previewRecording={previewRecording}
         projectDefaultSettings={effectiveProjectDefaultSettings}
         recordings={projectRecordings}

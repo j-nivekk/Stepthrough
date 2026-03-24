@@ -23,8 +23,10 @@ export type RunEventLevel = 'info' | 'warning' | 'error' | 'success';
 export interface HealthResponse {
   ffmpeg_available: boolean;
   ffprobe_available: boolean;
+  ocr_available: boolean;
   missing_tools: string[];
   message: string;
+  ocr_message: string;
 }
 
 export interface Project {
