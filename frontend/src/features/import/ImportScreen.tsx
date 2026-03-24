@@ -15,6 +15,7 @@ export interface ImportScreenProps {
   ocrStatusMessage: string | null;
   ocrStatusTone: 'info' | 'warning';
   ocrWarnings: string[];
+  onDismissOcrWarnings: () => void;
   onDeleteRow: (localId: string) => void;
   onDone: () => void;
   onFilesSelected: (files: FileList | File[]) => void;
@@ -36,6 +37,7 @@ export function ImportScreen({
   ocrStatusMessage,
   ocrStatusTone,
   ocrWarnings,
+  onDismissOcrWarnings,
   onDeleteRow,
   onDone,
   onFilesSelected,
@@ -64,6 +66,11 @@ export function ImportScreen({
                 {ocrStatusMessage}
               </p>
             )}
+            {ocrWarnings.length > 0 ? (
+              <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
+                dismiss OCR details
+              </button>
+            ) : null}
             {ocrWarnings.map((warning) => (
               <p className="entry-notice diagnostic" key={warning}>
                 OCR detail: {warning}
