@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+import warnings
 
 import cv2
 import numpy as np
@@ -310,15 +311,16 @@ def test_probe_paddleocr_availability_returns_false_when_package_is_missing(monk
     monkeypatch.delenv("STEPTHROUGH_OCR_REC_MODEL_DIR", raising=False)
     monkeypatch.delenv("STEPTHROUGH_OCR_CACHE_DIR", raising=False)
 
-    def fail_import():
+    def fail_import(_runtime_config):
         raise ModuleNotFoundError("No module named 'paddleocr'")
 
     monkeypatch.setattr(hybrid_detection, "_load_paddleocr_symbols", fail_import)
 
-    available, message = probe_paddleocr_availability()
+    result = probe_paddleocr_availability()
 
-    assert available is False
-    assert "missing `paddleocr`" in message
+    assert result.available is False
+    assert "missing `paddleocr`" in result.message
+    assert result.warnings == ()
 
 
 def test_probe_paddleocr_availability_rejects_local_mode_without_model_dirs(monkeypatch) -> None:
@@ -328,10 +330,10 @@ def test_probe_paddleocr_availability_rejects_local_mode_without_model_dirs(monk
     monkeypatch.delenv("STEPTHROUGH_OCR_REC_MODEL_DIR", raising=False)
     monkeypatch.delenv("STEPTHROUGH_OCR_CACHE_DIR", raising=False)
 
-    available, message = probe_paddleocr_availability()
+    result = probe_paddleocr_availability()
 
-    assert available is False
-    assert "Local OCR mode requires both" in message
+    assert result.available is False
+    assert "Local OCR mode requires both" in result.message
 
 
 def test_probe_paddleocr_availability_accepts_remote_mode_without_cached_models(monkeypatch, tmp_path: Path) -> None:
@@ -342,18 +344,76 @@ def test_probe_paddleocr_availability_accepts_remote_mode_without_cached_models(
     monkeypatch.delenv("STEPTHROUGH_OCR_DET_MODEL_DIR", raising=False)
     monkeypatch.delenv("STEPTHROUGH_OCR_REC_MODEL_DIR", raising=False)
     monkeypatch.setenv("STEPTHROUGH_OCR_CACHE_DIR", str(tmp_path / "ocr-cache"))
-    monkeypatch.setattr(hybrid_detection, "_load_paddleocr_symbols", lambda: (object, object()))
+    monkeypatch.setattr(hybrid_detection, "_load_paddleocr_symbols", lambda _runtime_config: (object, object()))
     monkeypatch.setattr(
         hybrid_detection,
         "_installed_package_version",
         lambda name: "3.3.0" if name in {"paddleocr", "paddlepaddle"} else None,
     )
 
-    available, message = probe_paddleocr_availability()
+    result = probe_paddleocr_availability()
 
-    assert available is True
-    assert "First use may initialize or download models" in message
-    assert "ocr-cache" in message
+    assert result.available is True
+    assert "First use may initialize or download models" in result.message
+    assert "ocr-cache" in result.message
+
+
+def test_probe_paddleocr_availability_sets_probe_env_before_import(monkeypatch, tmp_path: Path) -> None:
+    import app.services.hybrid_detection as hybrid_detection
+
+    probe_paddleocr_availability.cache_clear()
+    monkeypatch.setenv("STEPTHROUGH_OCR_MODEL_SOURCE", "bos")
+    monkeypatch.delenv("STEPTHROUGH_OCR_DET_MODEL_DIR", raising=False)
+    monkeypatch.delenv("STEPTHROUGH_OCR_REC_MODEL_DIR", raising=False)
+    monkeypatch.setenv("STEPTHROUGH_OCR_CACHE_DIR", str(tmp_path / "ocr-cache"))
+    monkeypatch.delenv("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", raising=False)
+    monkeypatch.delenv("PADDLE_PDX_MODEL_SOURCE", raising=False)
+    monkeypatch.delenv("PADDLE_PDX_CACHE_HOME", raising=False)
+
+    def fake_import():
+        assert hybrid_detection.os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] == "True"
+        assert hybrid_detection.os.environ["PADDLE_PDX_MODEL_SOURCE"] == "BOS"
+        assert hybrid_detection.os.environ["PADDLE_PDX_CACHE_HOME"] == str(tmp_path / "ocr-cache")
+        return object, object()
+
+    monkeypatch.setattr(hybrid_detection, "_import_paddleocr_symbols", fake_import)
+    monkeypatch.setattr(
+        hybrid_detection,
+        "_installed_package_version",
+        lambda name: "3.3.0" if name in {"paddleocr", "paddlepaddle"} else None,
+    )
+
+    result = probe_paddleocr_availability()
+
+    assert result.available is True
+
+
+def test_probe_paddleocr_availability_captures_and_dedupes_warning_messages(monkeypatch, tmp_path: Path) -> None:
+    import app.services.hybrid_detection as hybrid_detection
+
+    probe_paddleocr_availability.cache_clear()
+    monkeypatch.setenv("STEPTHROUGH_OCR_MODEL_SOURCE", "bos")
+    monkeypatch.delenv("STEPTHROUGH_OCR_DET_MODEL_DIR", raising=False)
+    monkeypatch.delenv("STEPTHROUGH_OCR_REC_MODEL_DIR", raising=False)
+    monkeypatch.setenv("STEPTHROUGH_OCR_CACHE_DIR", str(tmp_path / "ocr-cache"))
+
+    def fake_import():
+        hybrid_detection.logging.getLogger("paddlex").warning("Connectivity check skipped.")
+        warnings.warn("No ccache found.")
+        warnings.warn("No ccache found.")
+        return object, object()
+
+    monkeypatch.setattr(hybrid_detection, "_import_paddleocr_symbols", fake_import)
+    monkeypatch.setattr(
+        hybrid_detection,
+        "_installed_package_version",
+        lambda name: "3.3.0" if name in {"paddleocr", "paddlepaddle"} else None,
+    )
+
+    result = probe_paddleocr_availability()
+
+    assert result.available is True
+    assert result.warnings == ("Connectivity check skipped.", "No ccache found.")
 
 
 def test_paddle_ocr_engine_uses_cache_home_for_remote_mode_without_forcing_model_dirs(monkeypatch, tmp_path: Path) -> None:
@@ -376,7 +436,7 @@ def test_paddle_ocr_engine_uses_cache_home_for_remote_mode_without_forcing_model
     )
     monkeypatch.delenv("PADDLE_PDX_MODEL_SOURCE", raising=False)
     monkeypatch.delenv("PADDLE_PDX_CACHE_HOME", raising=False)
-    monkeypatch.setattr(hybrid_detection, "_load_paddleocr_symbols", lambda: (FakePaddleOCR, object()))
+    monkeypatch.setattr(hybrid_detection, "_import_paddleocr_symbols", lambda: (FakePaddleOCR, object()))
 
     hybrid_detection.PaddleOcrEngine(runtime_config)
 
@@ -392,7 +452,7 @@ def test_ocr_engine_warning_is_emitted_when_backend_is_missing(monkeypatch) -> N
 
     settings = RunSettings(analysis_engine="hybrid_v2", analysis_preset="balanced")
     config = resolve_hybrid_config(settings, fps=30)
-    monkeypatch.setattr(hybrid_detection, "_load_paddleocr_symbols", lambda: (object, object()))
+    monkeypatch.setattr(hybrid_detection, "_load_paddleocr_symbols", lambda _runtime_config: (object, object()))
     monkeypatch.setattr(
         hybrid_detection,
         "_installed_package_version",

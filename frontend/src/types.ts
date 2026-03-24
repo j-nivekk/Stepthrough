@@ -1,6 +1,7 @@
 export type AnalysisEngine = 'scene_v1' | 'hybrid_v2';
 export type AnalysisPreset = 'subtle_ui' | 'balanced' | 'noise_resistant';
 export type OcrBackend = 'paddleocr';
+export type OcrStatus = 'checking' | 'available' | 'unavailable';
 export type DetectorMode = 'content' | 'adaptive';
 export type CandidateStatus = 'pending' | 'accepted' | 'rejected';
 export type CandidateOrigin = 'detected' | 'manual';
@@ -21,12 +22,14 @@ export type RunPhase =
 export type RunEventLevel = 'info' | 'warning' | 'error' | 'success';
 
 export interface HealthResponse {
+  ocr_status: OcrStatus;
   ffmpeg_available: boolean;
   ffprobe_available: boolean;
-  ocr_available: boolean;
+  ocr_available: boolean | null;
   missing_tools: string[];
   message: string;
   ocr_message: string;
+  ocr_warnings: string[];
 }
 
 export interface Project {
