@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import cv2
 import numpy as np
 
+from app.config import OcrRuntimeConfig
 from app.models import HybridAdvancedSettings, RunSettings
 from app.services.hybrid_detection import (
     _OcrCache,
@@ -353,6 +354,37 @@ def test_probe_paddleocr_availability_accepts_remote_mode_without_cached_models(
     assert available is True
     assert "First use may initialize or download models" in message
     assert "ocr-cache" in message
+
+
+def test_paddle_ocr_engine_uses_cache_home_for_remote_mode_without_forcing_model_dirs(monkeypatch, tmp_path: Path) -> None:
+    import app.services.hybrid_detection as hybrid_detection
+
+    captured_kwargs: dict[str, object] = {}
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs) -> None:
+            captured_kwargs.update(kwargs)
+
+        def predict(self, _image):
+            return []
+
+    runtime_config = OcrRuntimeConfig(
+        model_source="bos",
+        det_model_dir=None,
+        rec_model_dir=None,
+        cache_dir=tmp_path / "ocr-cache",
+    )
+    monkeypatch.delenv("PADDLE_PDX_MODEL_SOURCE", raising=False)
+    monkeypatch.delenv("PADDLE_PDX_CACHE_HOME", raising=False)
+    monkeypatch.setattr(hybrid_detection, "_load_paddleocr_symbols", lambda: (FakePaddleOCR, object()))
+
+    hybrid_detection.PaddleOcrEngine(runtime_config)
+
+    assert captured_kwargs["lang"] == "en"
+    assert "text_detection_model_dir" not in captured_kwargs
+    assert "text_recognition_model_dir" not in captured_kwargs
+    assert hybrid_detection.os.environ["PADDLE_PDX_MODEL_SOURCE"] == "BOS"
+    assert hybrid_detection.os.environ["PADDLE_PDX_CACHE_HOME"] == str(runtime_config.cache_dir)
 
 
 def test_ocr_engine_warning_is_emitted_when_backend_is_missing(monkeypatch) -> None:
