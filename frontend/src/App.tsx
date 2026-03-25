@@ -4,6 +4,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import {
   abortRun,
   createManualCandidate,
+  createManualRun,
   createProject,
   createRun,
   deleteProject,
@@ -717,6 +718,15 @@ function App() {
     onError: (error: Error) => setAppError(error.message),
   });
 
+  const createManualRunMutation = useMutation({
+    mutationFn: (recordingId: string) => createManualRun(recordingId),
+    onSuccess: async (run) => {
+      setSelectedRunId(run.id);
+      await refreshRunQueries(run.id, run.recording_id);
+    },
+    onError: (error: Error) => setAppError(error.message),
+  });
+
   const exportRunMutation = useMutation({
     mutationFn: async ({ downloadName, mode, runId }: { downloadName?: string; mode: ExportMode; runId: string }) => {
       const bundle = await exportRun(runId, mode);
@@ -838,6 +848,12 @@ function App() {
   async function handleCreateManualRunCandidate(runId: string, timestampMs: number) {
     clearAnalysisMessages();
     return createManualCandidateMutation.mutateAsync({ runId, timestampMs });
+  }
+
+  async function handleCreateManualRun(recordingId: string) {
+    clearAnalysisMessages();
+    setSelectedRecordingId(recordingId);
+    return createManualRunMutation.mutateAsync(recordingId);
   }
 
   function confirmDeleteRecording(recordingId: string, filename: string) {
@@ -1416,6 +1432,7 @@ function App() {
         bulkExportPending={bulkExportPending}
         candidateSimilarityLinks={candidateSimilarityLinks}
         createManualCandidatePending={createManualCandidateMutation.isPending}
+        createManualRunPending={createManualRunMutation.isPending}
         createRunPending={createRunMutation.isPending}
         exportRunPending={exportRunMutation.isPending}
         healthMessage={healthWarning ? healthQuery.data?.message ?? 'Video tools are not ready.' : null}
@@ -1425,6 +1442,7 @@ function App() {
         onApplyImportedPreset={handleApplyImportedPreset}
         onBulkUpdateCandidates={handleBulkUpdateCandidates}
         onCreateManualCandidate={handleCreateManualRunCandidate}
+        onCreateManualRun={handleCreateManualRun}
         onDeleteRecording={confirmDeleteRecording}
         onDropFiles={handleQuickImportDrop}
         onDeleteSelectedRuns={handleDeleteSelectedRuns}

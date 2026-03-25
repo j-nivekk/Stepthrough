@@ -716,6 +716,18 @@ def recordings_delete(recording_id: str) -> Response:
     return Response(status_code=204)
 
 
+@app.post("/recordings/{recording_id}/runs/manual", response_model=DetectionRunSummary)
+def runs_create_manual(recording_id: str) -> DetectionRunSummary:
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    settings = RunSettings()
+    run = create_run(recording_id, settings)
+    update_run(run["id"], status="completed", phase="completed", progress=1.0, message="Manual run")
+    _emit_run_event(run["id"], phase="completed", level="info", message="Manual run created", progress=1.0)
+    return _serialize_run_summary(get_run(run["id"]))
+
+
 @app.post("/recordings/{recording_id}/runs", response_model=DetectionRunSummary)
 def runs_create(recording_id: str, settings: RunSettings) -> DetectionRunSummary:
     _require_tools()
