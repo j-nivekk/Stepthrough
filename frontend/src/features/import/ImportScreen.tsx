@@ -57,39 +57,39 @@ export function ImportScreen({
   return (
     <div className="entry-screen import-screen">
       <div className="entry-shell import-shell">
-        <StageNavigator activeStage="import" className="entry-stage-nav" onNavigate={onNavigateStage} />
-
-        {(healthMessage || ocrStatusMessage || ocrWarnings.length > 0 || appError) && (
-          <div className="entry-notices">
-            {ocrWarnings.length > 0 ? (
+        <div className="entry-stage-nav">
+          <StageNavigator activeStage="import" onNavigate={onNavigateStage} />
+          {ocrWarnings.length > 0 && (
+            <div className="nav-ocr-inline">
+              <button
+                className="entry-notice-ocr-summary"
+                onClick={() => setOcrWarningsExpanded((prev) => !prev)}
+                type="button"
+              >
+                {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
+                — {ocrWarningsExpanded ? 'hide' : 'show'}
+              </button>
               <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
                 dismiss
               </button>
-            ) : null}
+            </div>
+          )}
+        </div>
+
+        {(healthMessage || ocrStatusMessage || (ocrWarnings.length > 0 && ocrWarningsExpanded) || appError) && (
+          <div className="entry-notices">
             {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
             {ocrStatusMessage && (
               <p className={ocrStatusTone === 'warning' ? 'entry-notice warning' : 'entry-notice'}>
                 {ocrStatusMessage}
               </p>
             )}
-            {ocrWarnings.length > 0 && (
-              <>
-                <button
-                  className="entry-notice-ocr-summary"
-                  onClick={() => setOcrWarningsExpanded((prev) => !prev)}
-                  type="button"
-                >
-                  {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
-                  — {ocrWarningsExpanded ? 'hide' : 'show'}
-                </button>
-                {ocrWarningsExpanded &&
-                  ocrWarnings.map((warning) => (
-                    <p className="entry-notice diagnostic" key={warning}>
-                      {warning}
-                    </p>
-                  ))}
-              </>
-            )}
+            {ocrWarnings.length > 0 && ocrWarningsExpanded &&
+              ocrWarnings.map((warning) => (
+                <p className="entry-notice diagnostic" key={warning}>
+                  {warning}
+                </p>
+              ))}
             {appError && <p className="entry-notice error">{appError}</p>}
           </div>
         )}

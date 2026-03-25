@@ -106,6 +106,10 @@ export function createRun(recordingId: string, settings: RunSettings): Promise<R
   });
 }
 
+export function createManualRun(recordingId: string): Promise<RunSummary> {
+  return request<RunSummary>(`/recordings/${recordingId}/runs/manual`, { method: 'POST' });
+}
+
 export function getRun(runId: string): Promise<RunDetail> {
   return request<RunDetail>(`/runs/${runId}`);
 }

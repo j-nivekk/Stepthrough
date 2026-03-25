@@ -21,10 +21,10 @@ import {
 import {
   formatPercent,
   formatPhase,
-  formatProjectCounts,
   formatRelativeTime,
   formatRunTiming,
 } from '../../lib/formatters';
+import { StageNavigator } from '../../components/StageNavigator';
 import {
   analysisPresetDefaults,
   defaultHybridAdvancedSettings,
@@ -82,6 +82,7 @@ export interface AnalysisScreenProps {
   bulkExportPending: boolean;
   candidateSimilarityLinks: Map<string, SimilarLink>;
   createManualCandidatePending: boolean;
+  createManualRunPending: boolean;
   createRunPending: boolean;
   exportRunPending: boolean;
   healthMessage: string | null;
@@ -96,6 +97,7 @@ export interface AnalysisScreenProps {
     status: CandidateStatus,
   ) => Promise<string[]>;
   onCreateManualCandidate: (runId: string, timestampMs: number) => Promise<CandidateFrame>;
+  onCreateManualRun: (recordingId: string) => Promise<void>;
   onDeleteRecording: (recordingId: string, filename: string) => void;
   onDropFiles: (files: FileList | File[]) => void;
   onDeleteSelectedRuns: (runIds: string[]) => Promise<string[] | null>;
@@ -150,6 +152,7 @@ export function AnalysisScreen({
   bulkExportPending,
   candidateSimilarityLinks,
   createManualCandidatePending,
+  createManualRunPending,
   createRunPending,
   exportRunPending,
   healthMessage,
@@ -159,6 +162,7 @@ export function AnalysisScreen({
   onAbortRun,
   onBulkUpdateCandidates,
   onCreateManualCandidate,
+  onCreateManualRun,
   onDeleteRecording,
   onDropFiles,
   onDeleteSelectedRuns,
@@ -218,6 +222,7 @@ export function AnalysisScreen({
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [previewSizeKey, setPreviewSizeKey] = useState<'sm' | 'md' | 'lg'>('md');
+  const [previewBg, setPreviewBg] = useState<'dark' | 'light'>('dark');
   const [showRunLogs, setShowRunLogs] = useState(false);
   const [compareRunId, setCompareRunId] = useState<string | null>(null);
   const [presetCopyFeedback, setPresetCopyFeedback] = useState('');
@@ -691,7 +696,7 @@ export function AnalysisScreen({
   }, [activeCandidate, canReviewCandidates, filteredCandidates]);
 
   useEffect(() => {
-    if (!canAddManualCandidate) {
+    if (!previewVideoUrl) {
       return;
     }
 
@@ -708,7 +713,7 @@ export function AnalysisScreen({
 
     window.addEventListener('keydown', handleManualTagKeydown);
     return () => window.removeEventListener('keydown', handleManualTagKeydown);
-  }, [canAddManualCandidate, previewPlaybackMs, selectedRun?.summary.id]);
+  }, [canAddManualCandidate, previewVideoUrl, previewPlaybackMs, selectedRun?.summary.id]);
 
   useEffect(() => {
     if (!previewVideoUrl) return;
@@ -756,6 +761,17 @@ export function AnalysisScreen({
       previewVideoRef.current.playbackRate = playbackRate;
     }
   }, [playbackRate]);
+
+  useEffect(() => {
+    const video = previewVideoRef.current;
+    if (!video) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (!entry.isIntersecting) video.pause(); },
+      { threshold: 0 },
+    );
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, [previewVideoUrl]);
 
   function updateHintCardPosition(element: HTMLElement) {
     const container = parameterColumnRef.current;
@@ -964,16 +980,15 @@ export function AnalysisScreen({
   }
 
   function handleCreateManualCandidate(timestampOverrideMs?: number) {
-    if (!selectedRun || !canAddManualCandidate) {
-      return;
-    }
-
     const timestampMs = timestampOverrideMs ?? getCurrentPreviewTimestampMs();
-    if (timestampMs === null) {
-      return;
-    }
+    if (timestampMs === null) return;
+
     setManualCapturePulseToken((current) => current + 1);
     setQueuedManualMarkItems((current) => [...current, { id: createLocalId('manual-mark'), timestampMs }]);
+
+    if (!canAddManualCandidate && previewRecording) {
+      void onCreateManualRun(previewRecording.id);
+    }
   }
 
   function handleToggleCandidateAnnotation(candidateId: string) {
@@ -1070,67 +1085,51 @@ export function AnalysisScreen({
     <div className="entry-screen analysis-screen">
       <div className="analysis-stage-shell">
         <div className="analysis-stage-nav">
-          <div className="analysis-stage-nav-cell">
-            <div className="analysis-project-path">
-              <button className="analysis-nav-button" onClick={() => onNavigateStage('projects')} type="button">
-                projects/
+          <StageNavigator
+            activeStage="analysis"
+            onNavigate={onNavigateStage}
+          />
+          {activeProject && (
+            <EditableName
+              buttonClassName="entry-rename-button"
+              containerClassName="analysis-pill-project"
+              onSave={(nextValue) => onRenameProject(activeProject.id, nextValue)}
+              renameLabel={`rename project ${activeProject.name}`}
+              textClassName="analysis-pill-project-text"
+              value={activeProject.name}
+            />
+          )}
+          {ocrWarnings.length > 0 && (
+            <div className="nav-ocr-inline">
+              <button
+                className="entry-notice-ocr-summary"
+                onClick={() => setOcrWarningsExpanded((prev) => !prev)}
+                type="button"
+              >
+                {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
+                — {ocrWarningsExpanded ? 'hide' : 'show'}
               </button>
-              {activeProject ? (
-                <EditableName
-                  buttonClassName="entry-rename-button"
-                  containerClassName="analysis-project-name"
-                  onSave={(nextValue) => onRenameProject(activeProject.id, nextValue)}
-                  renameLabel={`rename project ${activeProject.name}`}
-                  textClassName="analysis-project-name-text"
-                  value={activeProject.name}
-                />
-              ) : (
-                <span className="analysis-project-name-text">project</span>
-              )}
-            </div>
-            <p className="analysis-project-counts">{activeProject ? formatProjectCounts(activeProject) : ''}</p>
-          </div>
-          <div className="analysis-stage-nav-cell">
-            <button className="analysis-nav-button" onClick={() => onNavigateStage('import')} type="button">
-              import
-            </button>
-          </div>
-          <div className="analysis-stage-nav-cell">
-            <span className="analysis-nav-button active">analysis</span>
-          </div>
-        </div>
-
-        {(healthMessage || (ocrStatus !== 'available' && ocrStatusMessage) || ocrWarnings.length > 0 || appError || liveMessage || settingsFeedback || analysisActionMessage) && (
-          <div aria-atomic="true" aria-live="polite" className="analysis-notices" role="status">
-            {ocrWarnings.length > 0 ? (
               <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
                 dismiss
               </button>
-            ) : null}
+            </div>
+          )}
+        </div>
+
+        {(healthMessage || (ocrStatus !== 'available' && ocrStatusMessage) || (ocrWarnings.length > 0 && ocrWarningsExpanded) || appError || liveMessage || settingsFeedback || analysisActionMessage) && (
+          <div aria-atomic="true" aria-live="polite" className="analysis-notices" role="status">
             {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
             {ocrStatus !== 'available' && ocrStatusMessage && (
               <p className={ocrStatus === 'unavailable' ? 'entry-notice warning' : 'entry-notice'}>
                 {ocrStatusMessage}
               </p>
             )}
-            {ocrWarnings.length > 0 && (
-              <>
-                <button
-                  className="entry-notice-ocr-summary"
-                  onClick={() => setOcrWarningsExpanded((prev) => !prev)}
-                  type="button"
-                >
-                  {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
-                  — {ocrWarningsExpanded ? 'hide' : 'show'}
-                </button>
-                {ocrWarningsExpanded &&
-                  ocrWarnings.map((warning) => (
-                    <p className="entry-notice diagnostic" key={warning}>
-                      {warning}
-                    </p>
-                  ))}
-              </>
-            )}
+            {ocrWarnings.length > 0 && ocrWarningsExpanded &&
+              ocrWarnings.map((warning) => (
+                <p className="entry-notice diagnostic" key={warning}>
+                  {warning}
+                </p>
+              ))}
             {appError && <p className="entry-notice error">{appError}</p>}
             {liveMessage && <p className="entry-notice">{liveMessage}</p>}
             {settingsFeedback && <p className="entry-notice">{settingsFeedback}</p>}
@@ -1245,7 +1244,7 @@ export function AnalysisScreen({
         </div>
 
         {previewVideoUrl && (
-          <div className="analysis-preview-wrap">
+          <div className="analysis-preview-wrap" data-bg={previewBg}>
             <section className="analysis-panel analysis-preview-panel" data-size={previewSizeKey} id="analysis-video-preview">
                   <span className="analysis-preview-filename">{previewRecording?.filename}</span>
                   <video
@@ -1374,6 +1373,23 @@ export function AnalysisScreen({
                       >
                         {playbackRate === 1 ? '1×' : `${playbackRate}×`}
                       </button>
+                      <button
+                        className="preview-control-btn preview-bg-btn"
+                        onClick={() => setPreviewBg(previewBg === 'dark' ? 'light' : 'dark')}
+                        title={previewBg === 'dark' ? 'switch to light background' : 'switch to dark background'}
+                        type="button"
+                      >
+                        {previewBg === 'dark' ? (
+                          <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
+                            <circle cx="7" cy="7" r="2.5" />
+                            <path d="M7 1.5v1M7 11.5v1M1.5 7h1M11.5 7h1M3.4 3.4l.7.7M9.9 9.9l.7.7M9.9 4.1l-.7.7M4.4 9.6l-.7.7" stroke="currentColor" strokeLinecap="round" strokeWidth="1.25" fill="none"/>
+                          </svg>
+                        ) : (
+                          <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
+                            <path d="M7 2a5 5 0 1 0 5 5 5.006 5.006 0 0 0-5-5zm0 1a4 4 0 0 1 0 8V3z"/>
+                          </svg>
+                        )}
+                      </button>
                       <div className="preview-size-group" role="group" aria-label="video size">
                         {(['sm', 'md', 'lg'] as const).map((size) => (
                           <button
@@ -1392,36 +1408,34 @@ export function AnalysisScreen({
                           </button>
                         ))}
                       </div>
-                      {canAddManualCandidate ? (
-                        <button
-                          aria-busy={createManualCandidatePending || queuedManualMarkItems.length > 0}
-                          className="preview-mark-btn"
-                          onClick={(event) => {
-                            if (event.detail !== 0) return;
-                            handleCreateManualCandidate();
-                          }}
-                          onPointerDown={(event) => {
-                            if (event.button !== 0) return;
-                            event.preventDefault();
-                            const timestampMs = getCurrentPreviewTimestampMs();
-                            if (timestampMs !== null) handleCreateManualCandidate(timestampMs);
-                          }}
-                          title="mark the current frame as a new step (k)"
-                          type="button"
-                        >
-                          {manualCapturePulseToken > 0 ? (
-                            <span aria-hidden="true" className="preview-mark-pulse" key={manualCapturePulseToken} />
-                          ) : null}
-                          <svg aria-hidden="true" height="12" stroke="currentColor" strokeLinecap="round" strokeWidth="2" viewBox="0 0 16 16" width="12">
-                            <path d="M8 2v12M2 8h12" />
-                          </svg>
-                          <span>mark</span>
-                          <kbd>k</kbd>
-                          {queuedManualMarkItems.length > 0 ? (
-                            <span className="preview-mark-queue">{queuedManualMarkItems.length}</span>
-                          ) : null}
-                        </button>
-                      ) : null}
+                      <button
+                        aria-busy={createManualCandidatePending || createManualRunPending || queuedManualMarkItems.length > 0}
+                        className="preview-mark-btn"
+                        onClick={(event) => {
+                          if (event.detail !== 0) return;
+                          handleCreateManualCandidate();
+                        }}
+                        onPointerDown={(event) => {
+                          if (event.button !== 0) return;
+                          event.preventDefault();
+                          const timestampMs = getCurrentPreviewTimestampMs();
+                          if (timestampMs !== null) handleCreateManualCandidate(timestampMs);
+                        }}
+                        title="mark the current frame as a new step (k)"
+                        type="button"
+                      >
+                        {manualCapturePulseToken > 0 ? (
+                          <span aria-hidden="true" className="preview-mark-pulse" key={manualCapturePulseToken} />
+                        ) : null}
+                        <svg aria-hidden="true" height="12" stroke="currentColor" strokeLinecap="round" strokeWidth="2" viewBox="0 0 16 16" width="12">
+                          <path d="M8 2v12M2 8h12" />
+                        </svg>
+                        <span>mark</span>
+                        <kbd>k</kbd>
+                        {queuedManualMarkItems.length > 0 ? (
+                          <span className="preview-mark-queue">{queuedManualMarkItems.length}</span>
+                        ) : null}
+                      </button>
                     </div>
                   </div>
             </section>

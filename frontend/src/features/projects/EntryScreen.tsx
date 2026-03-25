@@ -79,56 +79,55 @@ export function EntryScreen({
   return (
     <div className="entry-screen">
       <div className="entry-shell">
-        <StageNavigator
-          activeStage="projects"
-          className="entry-stage-nav"
-          disabledReasons={{
-            analysis: !selectedProjectId
-              ? 'open a project first'
-              : !selectedProjectCanJumpToAnalysis
-                ? 'import at least one video first'
-                : undefined,
-            import: !selectedProjectId ? 'open a project first' : undefined,
-          }}
-          disabledStages={{
-            analysis: !selectedProjectId || !selectedProjectCanJumpToAnalysis,
-            import: !selectedProjectId,
-          }}
-          onNavigate={onNavigateStage}
-        />
+        <div className="entry-stage-nav">
+          <StageNavigator
+            activeStage="projects"
+            disabledReasons={{
+              analysis: !selectedProjectId
+                ? 'open a project first'
+                : !selectedProjectCanJumpToAnalysis
+                  ? 'import at least one video first'
+                  : undefined,
+              import: !selectedProjectId ? 'open a project first' : undefined,
+            }}
+            disabledStages={{
+              analysis: !selectedProjectId || !selectedProjectCanJumpToAnalysis,
+              import: !selectedProjectId,
+            }}
+            onNavigate={onNavigateStage}
+          />
+          {ocrWarnings.length > 0 && (
+            <div className="nav-ocr-inline">
+              <button
+                className="entry-notice-ocr-summary"
+                onClick={() => setOcrWarningsExpanded((prev) => !prev)}
+                type="button"
+              >
+                {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
+                — {ocrWarningsExpanded ? 'hide' : 'show'}
+              </button>
+              <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
+                dismiss
+              </button>
+            </div>
+          )}
+        </div>
 
         <div className="entry-stage">
-          {(healthMessage || ocrStatusMessage || ocrWarnings.length > 0 || appError) && (
+          {(healthMessage || ocrStatusMessage || (ocrWarnings.length > 0 && ocrWarningsExpanded) || appError) && (
             <div className="entry-notices">
-              {ocrWarnings.length > 0 ? (
-                <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
-                  dismiss
-                </button>
-              ) : null}
               {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
               {ocrStatusMessage && (
                 <p className={ocrStatusTone === 'warning' ? 'entry-notice warning' : 'entry-notice'}>
                   {ocrStatusMessage}
                 </p>
               )}
-              {ocrWarnings.length > 0 && (
-                <>
-                  <button
-                    className="entry-notice-ocr-summary"
-                    onClick={() => setOcrWarningsExpanded((prev) => !prev)}
-                    type="button"
-                  >
-                    {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
-                    — {ocrWarningsExpanded ? 'hide' : 'show'}
-                  </button>
-                  {ocrWarningsExpanded &&
-                    ocrWarnings.map((warning) => (
-                      <p className="entry-notice diagnostic" key={warning}>
-                        {warning}
-                      </p>
-                    ))}
-                </>
-              )}
+              {ocrWarnings.length > 0 && ocrWarningsExpanded &&
+                ocrWarnings.map((warning) => (
+                  <p className="entry-notice diagnostic" key={warning}>
+                    {warning}
+                  </p>
+                ))}
               {appError && <p className="entry-notice error">{appError}</p>}
             </div>
           )}
