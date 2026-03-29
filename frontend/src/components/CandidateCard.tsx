@@ -3,12 +3,21 @@ import { absoluteApiUrl } from '../api';
 import type { SimilarLink } from '../lib/analysis';
 import type { CandidateFrame, CandidateStatus } from '../types';
 
+function hasFiniteNumber(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function formatSigned(value: number): string {
+  return `${value > 0 ? '+' : ''}${value.toFixed(1)}`;
+}
+
 export function ComparisonMetrics({ candidate }: { candidate: CandidateFrame }) {
   return (
     <div className="analysis-compare-metrics">
       <span>overall {candidate.scene_score.toFixed(2)}</span>
       {candidate.score_breakdown ? (
         <>
+          {candidate.score_breakdown.transition_type ? <span>{candidate.score_breakdown.transition_type}</span> : null}
           <span>visual {candidate.score_breakdown.visual.toFixed(2)}</span>
           <span>text {candidate.score_breakdown.text.toFixed(2)}</span>
           <span>motion {candidate.score_breakdown.motion.toFixed(2)}</span>
@@ -217,6 +226,41 @@ export function CandidateCard({
                   <span>
                     motion <strong className="warning-text">{candidate.score_breakdown.motion.toFixed(2)}</strong>
                   </span>
+                  {candidate.score_breakdown.transition_type ? (
+                    <span>
+                      type <strong className="info-text">{candidate.score_breakdown.transition_type}</strong>
+                    </span>
+                  ) : null}
+                  {hasFiniteNumber(candidate.score_breakdown.chrome_change) ? (
+                    <span>
+                      chrome <strong className="info-text">{candidate.score_breakdown.chrome_change.toFixed(2)}</strong>
+                    </span>
+                  ) : null}
+                  {hasFiniteNumber(candidate.score_breakdown.content_change) ? (
+                    <span>
+                      content <strong className="info-text">{candidate.score_breakdown.content_change.toFixed(2)}</strong>
+                    </span>
+                  ) : null}
+                  {hasFiniteNumber(candidate.score_breakdown.scroll_dy) ? (
+                    <span>
+                      scroll y <strong className="warning-text">{formatSigned(candidate.score_breakdown.scroll_dy)}</strong>
+                    </span>
+                  ) : null}
+                  {hasFiniteNumber(candidate.score_breakdown.scroll_confidence) ? (
+                    <span>
+                      scroll conf <strong className="warning-text">{candidate.score_breakdown.scroll_confidence.toFixed(2)}</strong>
+                    </span>
+                  ) : null}
+                  {hasFiniteNumber(candidate.score_breakdown.dwell_before_ms) ? (
+                    <span>
+                      dwell before <strong className="info-text">{candidate.score_breakdown.dwell_before_ms}ms</strong>
+                    </span>
+                  ) : null}
+                  {hasFiniteNumber(candidate.score_breakdown.dwell_after_ms) ? (
+                    <span>
+                      dwell after <strong className="info-text">{candidate.score_breakdown.dwell_after_ms}ms</strong>
+                    </span>
+                  ) : null}
                   <span>{candidate.score_breakdown.changed_regions.length} changed regions</span>
                 </>
               ) : null}

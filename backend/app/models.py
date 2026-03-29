@@ -13,6 +13,7 @@ AnalysisEngine = Literal["scene_v1", "hybrid_v2"]
 AnalysisPreset = Literal["subtle_ui", "balanced", "noise_resistant"]
 OcrBackend = Literal["paddleocr"]
 OcrStatus = Literal["checking", "available", "unavailable"]
+TransitionType = Literal["navigation", "scroll", "feed_card_swap", "modal", "content_update", "small_ui_change", "unknown"]
 RunPhase = Literal[
     "queued",
     "probing",
@@ -156,6 +157,16 @@ class CandidateScoreBreakdown(BaseModel):
     text: float
     motion: float
     changed_regions: list[ChangedRegion] = Field(default_factory=list)
+    scroll_dx: float | None = None
+    scroll_dy: float | None = None
+    scroll_confidence: float | None = None
+    chrome_change: float | None = None
+    content_change: float | None = None
+    transition_type: TransitionType | None = None
+    dwell_before_ms: int | None = None
+    dwell_after_ms: int | None = None
+    event_start_ms: int | None = None
+    event_end_ms: int | None = None
 
 
 class CandidateFrameResponse(BaseModel):

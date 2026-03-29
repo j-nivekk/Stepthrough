@@ -16,6 +16,22 @@
 
 ---
 
+## 🎯 Why Use Screen Recordings Instead Of Taking Screenshots Live?
+
+For walkthrough-driven research, screen recordings are often a better capture medium than trying to take screenshots manually during a session.
+
+Why:
+
+- **They preserve the whole interaction**: You are not limited to the moments you remembered to capture.
+- **They capture dynamic interfaces**: Scrolling, fading, flashing, loading, overlays, and other transient states remain available for later review.
+- **They reduce interruption**: Researchers do not need to awkwardly stop and reach for screenshot buttons or shortcuts while observing a task.
+- **They support backtracking**: If you missed a moment during the session, you can revisit the recording later.
+- **They fit informal, fast-moving interfaces**: Feeds, threads, short-form video apps, and prototypes often contain meaningful states that do not exist as one stable screen.
+
+Stepthrough is built around that workflow: record first, then review and curate the meaningful steps afterward.
+
+---
+
 ## 🏗 Requirements
 
 To run Stepthrough locally, you must have the following installed on your system:
@@ -67,6 +83,18 @@ By default, the backend runs at `http://127.0.0.1:8000` and the frontend at `htt
 - `/backend`: The FastAPI application. Handles SQLite database operations, PySceneDetect execution, manual screenshot extraction, FFmpeg bindings, and the export pipeline.
 - `/frontend`: The Vite + React user interface. Handles video importing, review boards, step annotation, and configuration forms.
 - `/data`: Auto-generated on launch. Contains the `stepthrough.sqlite3` manifest alongside imported MP4 videos and extracted screenshots.
+
+---
+
+## 📚 Documentation
+
+For onboarding and tutorials aimed at new researchers, start with:
+
+- [`docs/wiki/Home.md`](docs/wiki/Home.md)
+- [`docs/wiki/Researcher-Onboarding.md`](docs/wiki/Researcher-Onboarding.md)
+- [`docs/wiki/First-Tutorial.md`](docs/wiki/First-Tutorial.md)
+- [`docs/wiki/Choosing-Settings.md`](docs/wiki/Choosing-Settings.md)
+- [`manual.md`](manual.md)
 
 ---
 

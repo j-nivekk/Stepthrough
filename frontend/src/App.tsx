@@ -853,7 +853,7 @@ function App() {
   async function handleCreateManualRun(recordingId: string) {
     clearAnalysisMessages();
     setSelectedRecordingId(recordingId);
-    return createManualRunMutation.mutateAsync(recordingId);
+    await createManualRunMutation.mutateAsync(recordingId);
   }
 
   function confirmDeleteRecording(recordingId: string, filename: string) {
