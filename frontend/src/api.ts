@@ -61,6 +61,10 @@ export function updateProject(projectId: string, name: string): Promise<Project>
   });
 }
 
+export function deleteProject(projectId: string): Promise<void> {
+  return request<void>(`/projects/${projectId}`, { method: 'DELETE' });
+}
+
 export function getProject(projectId: string): Promise<ProjectDetail> {
   return request<ProjectDetail>(`/projects/${projectId}`);
 }
@@ -100,6 +104,10 @@ export function createRun(recordingId: string, settings: RunSettings): Promise<R
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
   });
+}
+
+export function createManualRun(recordingId: string): Promise<RunSummary> {
+  return request<RunSummary>(`/recordings/${recordingId}/runs/manual`, { method: 'POST' });
 }
 
 export function getRun(runId: string): Promise<RunDetail> {
@@ -145,4 +153,12 @@ export function exportRun(runId: string, mode: ExportMode = 'accepted'): Promise
 
 export function health(): Promise<HealthResponse> {
   return request<HealthResponse>('/health');
+}
+
+export function resetDatabase(): Promise<void> {
+  return request<void>('/admin/reset-db', { method: 'POST' });
+}
+
+export function recheckOcr(): Promise<void> {
+  return request<void>('/admin/recheck-ocr', { method: 'POST' });
 }

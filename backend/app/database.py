@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS detection_runs (
     recording_id TEXT NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
     status TEXT NOT NULL,
     phase TEXT NOT NULL DEFAULT 'queued',
+    analysis_engine TEXT NOT NULL DEFAULT 'scene_v1',
+    analysis_preset TEXT NOT NULL DEFAULT 'balanced',
+    analysis_advanced TEXT,
+    analysis_config TEXT,
     detector_mode TEXT NOT NULL,
     tolerance REAL NOT NULL,
     min_scene_gap_ms INTEGER NOT NULL,
@@ -62,10 +66,13 @@ CREATE TABLE IF NOT EXISTS candidate_frames (
     title TEXT,
     notes TEXT,
     image_hash TEXT,
+    perceptual_hash TEXT,
     histogram_signature TEXT,
+    ocr_text TEXT,
     revisit_group_id TEXT,
     similar_to_candidate_id TEXT,
     similarity_distance REAL,
+    score_breakdown TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(run_id, detector_index)
@@ -141,12 +148,36 @@ def _backfill_detection_run_phase(conn: sqlite3.Connection) -> None:
     )
 
 
+def reset_db() -> None:
+    """Drop all application tables and reinitialise the schema."""
+    ensure_app_dirs()
+    with connect() as conn:
+        conn.executescript("""
+            PRAGMA foreign_keys = OFF;
+            DROP TABLE IF EXISTS export_bundles;
+            DROP TABLE IF EXISTS run_events;
+            DROP TABLE IF EXISTS candidate_frames;
+            DROP TABLE IF EXISTS detection_runs;
+            DROP TABLE IF EXISTS recordings;
+            DROP TABLE IF EXISTS projects;
+            PRAGMA foreign_keys = ON;
+        """)
+    init_db()
+
+
 def init_db() -> None:
     ensure_app_dirs()
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     with connect() as conn:
         conn.executescript(SCHEMA)
         _ensure_column(conn, "detection_runs", "phase", "TEXT NOT NULL DEFAULT 'queued'")
+        _ensure_column(conn, "detection_runs", "analysis_engine", "TEXT NOT NULL DEFAULT 'scene_v1'")
+        _ensure_column(conn, "detection_runs", "analysis_preset", "TEXT NOT NULL DEFAULT 'balanced'")
+        _ensure_column(conn, "detection_runs", "analysis_advanced", "TEXT")
+        _ensure_column(conn, "detection_runs", "analysis_config", "TEXT")
         _ensure_column(conn, "detection_runs", "allow_high_fps_sampling", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "candidate_frames", "candidate_origin", "TEXT NOT NULL DEFAULT 'detected'")
+        _ensure_column(conn, "candidate_frames", "perceptual_hash", "TEXT")
+        _ensure_column(conn, "candidate_frames", "ocr_text", "TEXT")
+        _ensure_column(conn, "candidate_frames", "score_breakdown", "TEXT")
         _backfill_detection_run_phase(conn)

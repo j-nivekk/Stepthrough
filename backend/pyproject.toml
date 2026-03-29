@@ -6,10 +6,12 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",
+  "numpy>=2.1.0",
+  "opencv-contrib-python==4.10.0.84",
   "pillow>=10.4.0",
   "pydantic>=2.9.0",
   "python-multipart>=0.0.12",
-  "scenedetect[opencv]>=0.6.4",
+  "scenedetect>=0.6.4",
   "uvicorn[standard]>=0.32.0"
 ]
 
@@ -19,6 +21,15 @@ dev = [
   "pytest>=8.3.0"
 ]
 
+hybrid = [
+  "paddlepaddle==3.3.0",
+  "paddleocr==3.3.0",
+  "setuptools>=70.0.0"
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+  "smoke: requires a real PaddleOCR 3.x backend environment"
+]

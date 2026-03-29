@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 CandidateStatus = Literal["pending", "accepted", "rejected"]
 CandidateOrigin = Literal["detected", "manual"]
 RunStatus = Literal["queued", "running", "awaiting_fallback", "completed", "failed", "cancelled"]
 DetectorMode = Literal["content", "adaptive"]
 ExportMode = Literal["accepted", "all"]
+AnalysisEngine = Literal["scene_v1", "hybrid_v2"]
+AnalysisPreset = Literal["subtle_ui", "balanced", "noise_resistant"]
+OcrBackend = Literal["paddleocr"]
+OcrStatus = Literal["checking", "available", "unavailable"]
 RunPhase = Literal[
     "queued",
     "probing",
@@ -28,8 +32,12 @@ RunEventLevel = Literal["info", "warning", "error", "success"]
 class HealthResponse(BaseModel):
     ffmpeg_available: bool
     ffprobe_available: bool
+    ocr_status: OcrStatus
+    ocr_available: bool | None
     missing_tools: list[str]
     message: str
+    ocr_message: str
+    ocr_warnings: list[str]
 
 
 class ProjectCreate(BaseModel):
@@ -50,13 +58,40 @@ class ProjectResponse(BaseModel):
     last_activity_at: str
 
 
+class HybridAdvancedSettings(BaseModel):
+    sample_fps_override: float | None = Field(default=None, gt=0)
+    min_dwell_ms: int | None = Field(default=None, ge=0, le=60_000)
+    settle_window_ms: int | None = Field(default=None, ge=0, le=60_000)
+    enable_ocr: bool = True
+    ocr_backend: OcrBackend | None = "paddleocr"
+
+    @model_validator(mode="after")
+    def normalize(self) -> "HybridAdvancedSettings":
+        if not self.enable_ocr:
+            self.ocr_backend = None
+        elif self.ocr_backend is None:
+            self.ocr_backend = "paddleocr"
+        return self
+
+
 class RunSettings(BaseModel):
+    analysis_engine: AnalysisEngine = "hybrid_v2"
+    analysis_preset: AnalysisPreset = "balanced"
+    advanced: HybridAdvancedSettings | None = None
     tolerance: float = Field(default=50, ge=1, le=100)
     min_scene_gap_ms: int = Field(default=900, ge=0, le=60_000)
     sample_fps: float | None = Field(default=4.0, gt=0)
     allow_high_fps_sampling: bool = False
     detector_mode: DetectorMode = "content"
     extract_offset_ms: int = Field(default=200, ge=0, le=10_000)
+
+    @model_validator(mode="after")
+    def normalize(self) -> "RunSettings":
+        if self.analysis_engine == "scene_v1":
+            self.advanced = None
+        elif self.advanced is None:
+            self.advanced = HybridAdvancedSettings()
+        return self
 
 
 class RecordingImportResponse(BaseModel):
@@ -86,6 +121,9 @@ class DetectionRunSummary(BaseModel):
     recording_id: str
     status: RunStatus
     phase: RunPhase
+    analysis_engine: AnalysisEngine = "scene_v1"
+    analysis_preset: AnalysisPreset = "balanced"
+    advanced: HybridAdvancedSettings | None = None
     detector_mode: DetectorMode
     tolerance: float
     min_scene_gap_ms: int
@@ -105,6 +143,20 @@ class DetectionRunSummary(BaseModel):
     is_deletable: bool
 
 
+class ChangedRegion(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
+    score: float
+
+
+class CandidateScoreBreakdown(BaseModel):
+    visual: float
+    text: float
+    motion: float
+    changed_regions: list[ChangedRegion] = Field(default_factory=list)
+
 
 class CandidateFrameResponse(BaseModel):
     id: str
@@ -120,6 +172,7 @@ class CandidateFrameResponse(BaseModel):
     status: CandidateStatus
     title: str | None = None
     notes: str | None = None
+    score_breakdown: CandidateScoreBreakdown | None = None
     revisit_group_id: str | None = None
     similar_to_candidate_id: str | None = None
     similarity_distance: float | None = None
@@ -138,6 +191,7 @@ class AcceptedStepResponse(BaseModel):
     title: str
     notes: str | None = None
     scene_score: float
+    score_breakdown: CandidateScoreBreakdown | None = None
     revisit_group_id: str | None = None
     similar_to_step_id: str | None = None
     source_candidate_id: str

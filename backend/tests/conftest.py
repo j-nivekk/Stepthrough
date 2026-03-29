@@ -23,14 +23,23 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(database, 'DB_PATH', db_path)
     monkeypatch.setattr(storage, 'DATA_ROOT', data_root)
     monkeypatch.setattr(main, 'DATA_ROOT', data_root)
+    monkeypatch.setattr(main, '_start_background_ocr_probe', lambda: None)
 
     with TestClient(main.app) as test_client:
+        main._set_ocr_state(
+            main.OcrHealthState(
+                status='unavailable',
+                available=False,
+                message='OCR disabled in tests by default; enable it explicitly in OCR-specific cases.',
+                warnings=(),
+            )
+        )
         yield test_client
 
 
 @pytest.fixture()
 def video_factory(tmp_path: Path):
-    def create_video(filename: str, colors: list[str], segment_duration: int = 1) -> Path:
+    def create_video(filename: str, colors: list[str], segment_duration: float = 1.0) -> Path:
         output_path = tmp_path / filename
         command = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-y']
         filter_inputs: list[str] = []

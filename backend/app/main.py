@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
+import json
 import math
 import shutil
 from pathlib import Path
-from typing import Any
+from threading import Thread
+from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
@@ -13,7 +16,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import DATA_ROOT, build_tool_diagnostics, ensure_app_dirs
-from .database import init_db
+from .database import init_db, reset_db
 from .models import (
     CandidateFrameResponse,
     CandidateUpdate,
@@ -39,6 +42,7 @@ from .repository import (
     create_recording,
     create_run,
     create_run_event,
+    delete_project_record,
     delete_recording_record,
     delete_run_record,
     get_candidate,
@@ -52,6 +56,7 @@ from .repository import (
     list_recordings,
     list_run_events,
     list_runs,
+    project_has_active_runs,
     recording_has_active_runs,
     replace_candidates,
     update_candidate,
@@ -64,6 +69,7 @@ from .services.detection import (
     detect_candidates,
 )
 from .services.export import build_accepted_steps, create_export_bundle
+from .services.hybrid_detection import detect_candidates_hybrid, probe_paddleocr_availability, resolve_hybrid_config
 from .services.jobs import JobManager
 from .services.similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string
 from .services.video import (
@@ -78,6 +84,7 @@ from .services.video import (
 from .storage import (
     absolute_data_path,
     asset_url,
+    project_dir,
     recording_dir,
     recording_source_path,
     relative_data_path,
@@ -87,14 +94,71 @@ from .utils import sanitize_filename, utc_now
 
 TERMINAL_WEBSOCKET_STATES = {"completed", "failed", "cancelled"}
 
+
+@dataclass(frozen=True)
+class OcrHealthState:
+    status: Literal["checking", "available", "unavailable"]
+    available: bool | None
+    message: str
+    warnings: tuple[str, ...] = ()
+
 app = FastAPI(title="Stepthrough API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _checking_ocr_state() -> OcrHealthState:
+    return OcrHealthState(
+        status="checking",
+        available=None,
+        message="Checking PaddleOCR availability in the background.",
+    )
+
+
+def _get_ocr_state() -> OcrHealthState:
+    return getattr(app.state, "ocr_state", _checking_ocr_state())
+
+
+def _set_ocr_state(state: OcrHealthState) -> None:
+    app.state.ocr_state = state
+
+
+def _refresh_ocr_state() -> None:
+    clear_probe_cache = getattr(probe_paddleocr_availability, "cache_clear", None)
+    if callable(clear_probe_cache):
+        clear_probe_cache()
+    try:
+        result = probe_paddleocr_availability()
+    except Exception as exc:  # pragma: no cover - defensive fallback
+        details = " ".join(str(exc).split()) or exc.__class__.__name__
+        _set_ocr_state(
+            OcrHealthState(
+                status="unavailable",
+                available=False,
+                message=f"PaddleOCR availability check failed in the backend environment: {details}",
+            )
+        )
+        return
+
+    _set_ocr_state(
+        OcrHealthState(
+            status="available" if result.available else "unavailable",
+            available=result.available,
+            message=result.message,
+            warnings=result.warnings,
+        )
+    )
+
+
+def _start_background_ocr_probe() -> None:
+    worker = Thread(target=_refresh_ocr_state, name="stepthrough-ocr-probe", daemon=True)
+    app.state.ocr_probe_thread = worker
+    worker.start()
 
 
 @app.on_event("startup")
@@ -102,7 +166,9 @@ def startup() -> None:
     ensure_app_dirs()
     init_db()
     app.state.tool_diagnostics = build_tool_diagnostics()
+    _set_ocr_state(_checking_ocr_state())
     app.state.job_manager = JobManager()
+    _start_background_ocr_probe()
 
 
 app.mount("/assets", StaticFiles(directory=str(DATA_ROOT), check_dir=False), name="assets")
@@ -118,6 +184,25 @@ def _require_tools() -> None:
         raise HTTPException(status_code=503, detail=diagnostics.message)
 
 
+def _lock_unavailable_ocr(settings: RunSettings) -> RunSettings:
+    if settings.analysis_engine != "hybrid_v2" or settings.advanced is None:
+        return settings
+    if _get_ocr_state().available is not False:
+        return settings
+    if settings.advanced.enable_ocr is False and settings.advanced.ocr_backend is None:
+        return settings
+    return settings.model_copy(
+        update={
+            "advanced": settings.advanced.model_copy(
+                update={
+                    "enable_ocr": False,
+                    "ocr_backend": None,
+                }
+            )
+        }
+    )
+
+
 def _run_is_abortable(run: dict[str, Any]) -> bool:
     return run["status"] in ACTIVE_RUN_STATUSES
 
@@ -131,11 +216,19 @@ def _serialize_project(row: dict) -> ProjectResponse:
 
 
 def _serialize_run_summary(row: dict) -> DetectionRunSummary:
+    advanced = None
+    if isinstance(row.get("analysis_advanced"), str):
+        advanced = json.loads(row["analysis_advanced"])
+    elif row.get("analysis_advanced"):
+        advanced = row["analysis_advanced"]
     return DetectionRunSummary(
         id=row["id"],
         recording_id=row["recording_id"],
         status=row["status"],
         phase=row.get("phase") or "queued",
+        analysis_engine=row.get("analysis_engine") or "scene_v1",
+        analysis_preset=row.get("analysis_preset") or "balanced",
+        advanced=advanced,
         detector_mode=row["detector_mode"],
         tolerance=row["tolerance"],
         min_scene_gap_ms=row["min_scene_gap_ms"],
@@ -173,6 +266,12 @@ def _serialize_recording(row: dict) -> RecordingImportResponse:
 
 
 def _serialize_candidate(row: dict) -> CandidateFrameResponse:
+    score_breakdown = row.get("score_breakdown")
+    if isinstance(score_breakdown, str):
+        try:
+            score_breakdown = json.loads(score_breakdown)
+        except json.JSONDecodeError:
+            score_breakdown = None
     return CandidateFrameResponse(
         id=row["id"],
         run_id=row["run_id"],
@@ -187,6 +286,7 @@ def _serialize_candidate(row: dict) -> CandidateFrameResponse:
         status=row["status"],
         title=row.get("title"),
         notes=row.get("notes"),
+        score_breakdown=score_breakdown,
         revisit_group_id=row.get("revisit_group_id"),
         similar_to_candidate_id=row.get("similar_to_candidate_id"),
         similarity_distance=row.get("similarity_distance"),
@@ -307,6 +407,10 @@ def _sample_fps_guardrail(recording_fps: float, allow_high_fps_sampling: bool) -
 
 
 def _validate_run_settings_for_recording(recording: dict[str, Any], settings: RunSettings) -> None:
+    if settings.analysis_engine == "hybrid_v2":
+        resolve_hybrid_config(settings, recording["fps"])
+        return
+
     max_sample_fps, source_allowed = _sample_fps_guardrail(recording["fps"], settings.allow_high_fps_sampling)
     if settings.sample_fps is None:
         if not source_allowed:
@@ -342,10 +446,11 @@ def _resequence_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, A
                 "detector_index": index,
                 "candidate_origin": candidate.get("candidate_origin") or "detected",
                 "timestamp_tc": display_timecode(candidate["timestamp_ms"]),
-                "scene_score": 0.0,
+                "scene_score": candidate.get("scene_score") or 0.0,
                 "revisit_group_id": None,
                 "similar_to_candidate_id": None,
                 "similarity_distance": None,
+                "score_breakdown": candidate.get("score_breakdown"),
                 "updated_at": updated_at,
             }
         )
@@ -361,8 +466,12 @@ def _run_detection_job(run_id: str) -> None:
     manager = _job_manager()
     temp_root: Path | None = None
     try:
+        detect_fn = detect_candidates
         project, recording, run = _run_context(run_id)
         settings = RunSettings(
+            analysis_engine=run.get("analysis_engine") or "scene_v1",
+            analysis_preset=run.get("analysis_preset") or "balanced",
+            advanced=json.loads(run["analysis_advanced"]) if run.get("analysis_advanced") else None,
             tolerance=run["tolerance"],
             min_scene_gap_ms=run["min_scene_gap_ms"],
             sample_fps=run["sample_fps"],
@@ -370,6 +479,8 @@ def _run_detection_job(run_id: str) -> None:
             detector_mode=run["detector_mode"],
             extract_offset_ms=run["extract_offset_ms"],
         )
+        if settings.analysis_engine == "hybrid_v2":
+            detect_fn = detect_candidates_hybrid
         current_run_dir, target_frames_dir = _run_artifact_paths(project, recording, run_id)
         current_run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -386,12 +497,16 @@ def _run_detection_job(run_id: str) -> None:
             completed_at=None,
         )
 
+        if settings.analysis_engine == "hybrid_v2":
+            resolved_config = resolve_hybrid_config(settings, recording["fps"])
+            update_run(run_id, analysis_config=json.dumps(resolved_config.__dict__))
+
         video_path = absolute_data_path(recording["source_path"])
 
         def publish_progress(phase: str, message: str, progress: float, level: str) -> None:
             _set_run_state(run_id, status="running", phase=phase, progress=progress, message=message, level=level)
 
-        candidates = detect_candidates(
+        candidates = detect_fn(
             video_path=video_path,
             frames_dir=frames_path,
             duration_ms=recording["duration_ms"],
@@ -409,7 +524,11 @@ def _run_detection_job(run_id: str) -> None:
         clear_export_bundle_for_run(run_id)
 
         candidate_count = len(normalized_candidates)
-        completion_message = f"Prepared {candidate_count} screenshot candidates"
+        completion_message = (
+            f"Prepared {candidate_count} screenshot candidates with hybrid ui-change detection"
+            if settings.analysis_engine == "hybrid_v2"
+            else f"Prepared {candidate_count} screenshot candidates"
+        )
         
         _set_run_state(
             run_id,
@@ -453,12 +572,31 @@ def root() -> dict[str, str]:
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     diagnostics = app.state.tool_diagnostics
+    ocr_state = _get_ocr_state()
     return HealthResponse(
         ffmpeg_available=diagnostics.ffmpeg_available,
         ffprobe_available=diagnostics.ffprobe_available,
+        ocr_status=ocr_state.status,
+        ocr_available=ocr_state.available,
         missing_tools=list(diagnostics.missing_tools),
         message=diagnostics.message,
+        ocr_message=ocr_state.message,
+        ocr_warnings=list(ocr_state.warnings),
     )
+
+
+@app.post("/admin/reset-db", status_code=204)
+def admin_reset_db() -> Response:
+    reset_db()
+    app.state.job_manager = JobManager()
+    return Response(status_code=204)
+
+
+@app.post("/admin/recheck-ocr", status_code=204)
+def admin_recheck_ocr() -> Response:
+    _set_ocr_state(_checking_ocr_state())
+    _start_background_ocr_probe()
+    return Response(status_code=204)
 
 
 @app.get("/projects", response_model=list[ProjectResponse])
@@ -489,6 +627,19 @@ def projects_show(project_id: str) -> dict:
         "project": _serialize_project(project),
         "recordings": [_serialize_recording(recording) for recording in list_recordings(project_id)],
     }
+
+
+@app.delete("/projects/{project_id}", status_code=204)
+def projects_delete(project_id: str) -> Response:
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project_has_active_runs(project_id):
+        raise HTTPException(status_code=409, detail="Abort active runs before deleting this project")
+    project_path = project_dir(project["slug"], project["id"])
+    delete_project_record(project_id)
+    shutil.rmtree(project_path, ignore_errors=True)
+    return Response(status_code=204)
 
 
 @app.post("/recordings/import", response_model=RecordingImportResponse)
@@ -565,12 +716,25 @@ def recordings_delete(recording_id: str) -> Response:
     return Response(status_code=204)
 
 
+@app.post("/recordings/{recording_id}/runs/manual", response_model=DetectionRunSummary)
+def runs_create_manual(recording_id: str) -> DetectionRunSummary:
+    recording = get_recording(recording_id)
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    settings = RunSettings()
+    run = create_run(recording_id, settings)
+    update_run(run["id"], status="completed", phase="completed", progress=1.0, message="Manual run")
+    _emit_run_event(run["id"], phase="completed", level="info", message="Manual run created", progress=1.0)
+    return _serialize_run_summary(get_run(run["id"]))
+
+
 @app.post("/recordings/{recording_id}/runs", response_model=DetectionRunSummary)
 def runs_create(recording_id: str, settings: RunSettings) -> DetectionRunSummary:
     _require_tools()
     recording = get_recording(recording_id)
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
+    settings = _lock_unavailable_ocr(settings)
     _validate_run_settings_for_recording(recording, settings)
     run = create_run(recording_id, settings)
     _emit_run_event(run["id"], phase="queued", level="info", message="Run queued", progress=0.0)
@@ -683,8 +847,11 @@ def runs_add_manual_candidate(run_id: str, payload: ManualCandidateCreate) -> Ca
         "status": "pending",
         "title": None,
         "notes": None,
-        "image_hash": hash_to_hex(fingerprint.ahash),
+        "image_hash": hash_to_hex(fingerprint.average_hash),
+        "perceptual_hash": hash_to_hex(fingerprint.perceptual_hash),
         "histogram_signature": histogram_to_string(fingerprint.histogram),
+        "ocr_text": None,
+        "score_breakdown": None,
         "revisit_group_id": None,
         "similar_to_candidate_id": None,
         "similarity_distance": None,
