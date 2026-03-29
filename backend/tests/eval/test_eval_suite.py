@@ -36,7 +36,10 @@ def _run_detection(scenario_result: ScenarioResult, tmp_path: Path) -> list[dict
         settings=RunSettings(
             analysis_engine="hybrid_v2",
             analysis_preset="balanced",
-            advanced=HybridAdvancedSettings(enable_ocr=False),
+            advanced=HybridAdvancedSettings(
+                enable_ocr=False,
+                sample_fps_override=scenario_result.sample_fps,
+            ),
             min_scene_gap_ms=900,
         ),
     )

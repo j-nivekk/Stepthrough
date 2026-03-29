@@ -357,6 +357,22 @@ def generate_html_report(
             </div>
         </div>
         """)
+        for dimension, groups in (aggregate.get("dimensions") or {}).items():
+            html_parts.append(f"""
+            <div class="aggregate aggregate-dimension">
+                <h2>{dimension.replace('_', ' ').title()}</h2>
+                <table class="dimension-table">
+                    <thead><tr><th>Bucket</th><th>Count</th><th>Mean P</th><th>Mean R</th><th>Mean F1</th></tr></thead>
+                    <tbody>
+            """)
+            for bucket, values in groups.items():
+                html_parts.append(
+                    f"<tr><td>{bucket}</td><td>{values.get('count', 0)}</td>"
+                    f"<td>{values.get('mean_precision', 0):.2f}</td>"
+                    f"<td>{values.get('mean_recall', 0):.2f}</td>"
+                    f"<td>{values.get('mean_f1', 0):.2f}</td></tr>"
+                )
+            html_parts.append("</tbody></table></div>")
 
     # Per-scenario sections
     for entry in results:
@@ -369,6 +385,9 @@ def generate_html_report(
 
         status_class = "pass" if metrics.recall >= 0.5 else "fail"
         status_label = "PASS" if metrics.recall >= 0.5 else "FAIL"
+        encoded_size = f"{sr.encoded_width}x{sr.encoded_height}"
+        logical_size = f"{sr.logical_width}x{sr.logical_height}"
+        sample_label = "default" if sr.sample_fps is None else sr.sample_fps
 
         html_parts.append(f"""
         <div class="scenario">
@@ -378,6 +397,13 @@ def generate_html_report(
                     <span class="badge {status_class}">{status_label}</span>
                     <span class="badge difficulty">{sr.difficulty}</span>
                     <span class="badge category">{sr.category}</span>
+                    <span class="badge meta">{sr.profile_id}</span>
+                    <span class="badge meta">{sr.orientation}</span>
+                    <span class="badge meta">{sr.shell}</span>
+                    <span class="badge meta">logical {logical_size}</span>
+                    <span class="badge meta">encoded {encoded_size}</span>
+                    <span class="badge meta">src {sr.source_fps}fps</span>
+                    <span class="badge meta">sample {sample_label}fps</span>
                 </div>
                 <p class="description">{sr.description}</p>
                 <p class="metrics-summary">
@@ -580,6 +606,11 @@ _HTML_HEAD = """<!DOCTYPE html>
     color: var(--info);
   }
 
+  .badge.meta {
+    background: rgba(55, 48, 37, 0.06);
+    color: var(--muted);
+  }
+
   /* ── Visuals ── */
   .timeline, .filmstrip {
     display: block;
@@ -596,6 +627,26 @@ _HTML_HEAD = """<!DOCTYPE html>
     display: inline-block;
   }
   .video-link:hover { text-decoration: underline; }
+
+  .dimension-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.74em;
+  }
+
+  .dimension-table th,
+  .dimension-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--divider);
+    text-align: left;
+  }
+
+  .dimension-table th {
+    font-size: 0.68em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
 
   /* ── Event table ── */
   .events-table {

@@ -14,6 +14,8 @@ from typing import Literal
 
 
 Difficulty = Literal["easy", "medium", "hard"]
+ShellMode = Literal["mobile_app", "desktop_browser", "fullscreen"]
+Orientation = Literal["portrait", "landscape"]
 Category = Literal[
     "navigation",
     "scrolling",
@@ -53,6 +55,25 @@ class GroundTruthEvent:
 
 
 @dataclass(frozen=True)
+class ScenarioContext:
+    """Scenario execution context for device-aware eval variants."""
+
+    variant_id: str
+    profile_id: str
+    shell: ShellMode
+    logical_width: int
+    logical_height: int
+    encoded_width: int
+    encoded_height: int
+    source_fps: float
+    sample_fps: float | None = None
+
+    @property
+    def orientation(self) -> Orientation:
+        return "portrait" if self.logical_height >= self.logical_width else "landscape"
+
+
+@dataclass(frozen=True)
 class ScenarioResult:
     """Output of a scenario generator: the video and its ground truth.
 
@@ -66,6 +87,16 @@ class ScenarioResult:
         description: Human-readable summary of what the scenario tests.
         category: Which capability area this scenario exercises.
         difficulty: Overall difficulty rating (hardest event wins).
+        variant_id: Scenario variant identifier.
+        profile_id: Device/profile identifier.
+        orientation: Portrait or landscape.
+        shell: Visual shell/chrome mode used to render the scenario.
+        logical_width: Width used for logical UI layout before encoding.
+        logical_height: Height used for logical UI layout before encoding.
+        encoded_width: Width of the written video frames.
+        encoded_height: Height of the written video frames.
+        source_fps: Source frame rate used to render the video.
+        sample_fps: Optional detector sample-fps override for this scenario.
     """
 
     video_path: Path
@@ -77,6 +108,30 @@ class ScenarioResult:
     description: str
     category: Category = "navigation"
     difficulty: Difficulty = "medium"
+    variant_id: str = "baseline"
+    profile_id: str = "baseline"
+    orientation: Orientation = "landscape"
+    shell: ShellMode = "mobile_app"
+    logical_width: int | None = None
+    logical_height: int | None = None
+    encoded_width: int | None = None
+    encoded_height: int | None = None
+    source_fps: float | None = None
+    sample_fps: float | None = None
+
+    def __post_init__(self) -> None:
+        logical_width = self.logical_width if self.logical_width is not None else self.width
+        logical_height = self.logical_height if self.logical_height is not None else self.height
+        encoded_width = self.encoded_width if self.encoded_width is not None else self.width
+        encoded_height = self.encoded_height if self.encoded_height is not None else self.height
+        source_fps = self.source_fps if self.source_fps is not None else self.fps
+        orientation: Orientation = "portrait" if logical_height >= logical_width else "landscape"
+        object.__setattr__(self, "logical_width", logical_width)
+        object.__setattr__(self, "logical_height", logical_height)
+        object.__setattr__(self, "encoded_width", encoded_width)
+        object.__setattr__(self, "encoded_height", encoded_height)
+        object.__setattr__(self, "source_fps", source_fps)
+        object.__setattr__(self, "orientation", orientation)
 
 
 @dataclass
