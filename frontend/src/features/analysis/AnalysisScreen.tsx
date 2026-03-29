@@ -64,6 +64,7 @@ import type {
   RecordingSummary,
   RunDetail,
   RunSettings,
+  TransitionType,
 } from '../../types';
 import { AnalysisParametersPanel } from './components/AnalysisParametersPanel';
 import { AnalysisTasksPanel } from './components/AnalysisTasksPanel';
@@ -138,6 +139,60 @@ export interface AnalysisScreenProps {
   setRunSettings: Dispatch<SetStateAction<RunSettings>>;
   settingsFeedback: string;
   showPresetText: string;
+}
+
+type PreviewSizeKey = 'sm' | 'md' | 'lg';
+type TimelineSegmentType = TransitionType | 'dwell';
+type TimelineSegmentKind = 'event' | 'dwell_before' | 'dwell_after';
+
+interface TimelineSegment {
+  candidateId: string;
+  endMs: number;
+  key: string;
+  kind: TimelineSegmentKind;
+  startMs: number;
+  type: TimelineSegmentType;
+}
+
+interface PositionedTimelineSegment extends TimelineSegment {
+  endPct: number;
+  startPct: number;
+}
+
+const TIMELINE_DWELL_VISIBILITY_MS = 500;
+const PREVIEW_TIMELINE_MIN_WIDTH_PCT: Record<PreviewSizeKey, number> = {
+  sm: 0.42,
+  md: 0.26,
+  lg: 0.16,
+};
+const CANDIDATE_TIMELINE_MIN_WIDTH_PCT = 0.2;
+
+function positionTimelineSegments(
+  segments: TimelineSegment[],
+  durationMs: number,
+  minWidthPct: number,
+): PositionedTimelineSegment[] {
+  if (durationMs <= 0) {
+    return [];
+  }
+  return segments.flatMap((segment) => {
+    const startMs = Math.max(0, Math.min(durationMs, Math.min(segment.startMs, segment.endMs)));
+    const endMs = Math.max(0, Math.min(durationMs, Math.max(segment.startMs, segment.endMs)));
+    if (endMs <= startMs) {
+      return [];
+    }
+    const rawStartPct = (startMs / durationMs) * 100;
+    const rawEndPct = (endMs / durationMs) * 100;
+    const widthPct = Math.min(100, Math.max(minWidthPct, rawEndPct - rawStartPct));
+    const startPct = Math.max(0, Math.min(100 - widthPct, rawStartPct));
+    return [
+      {
+        ...segment,
+        startPct,
+        endPct: Math.min(100, startPct + widthPct),
+      },
+    ];
+  });
 }
 
 export function AnalysisScreen({
@@ -221,7 +276,7 @@ export function AnalysisScreen({
   const [previewPlaybackMs, setPreviewPlaybackMs] = useState(0);
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [previewSizeKey, setPreviewSizeKey] = useState<'sm' | 'md' | 'lg'>('md');
+  const [previewSizeKey, setPreviewSizeKey] = useState<PreviewSizeKey>('md');
   const [previewBg, setPreviewBg] = useState<'dark' | 'light'>('dark');
   const [showRunLogs, setShowRunLogs] = useState(false);
   const [compareRunId, setCompareRunId] = useState<string | null>(null);
@@ -416,12 +471,85 @@ export function AnalysisScreen({
       candidateMatchesFilter(candidate, activeCandidateFilter),
     );
   }, [activeCandidateFilter, canReviewCandidates, selectedRun]);
+  const scrubDurationMs = previewRecording?.duration_ms ?? selectedRecordingSummary?.duration_ms ?? 0;
   const timelineCandidates = useMemo(() => {
     if (!selectedRun) {
       return [];
     }
     return [...selectedRun.candidates].sort((left, right) => left.timestamp_ms - right.timestamp_ms);
   }, [selectedRun]);
+  const timelineSegments = useMemo(() => {
+    const durationMs = selectedRecordingSummary?.duration_ms ?? 0;
+    if (durationMs <= 0 || timelineCandidates.length === 0) {
+      return [];
+    }
+    return timelineCandidates.flatMap((candidate) => {
+      const breakdown = candidate.score_breakdown;
+      if (!breakdown) {
+        return [];
+      }
+      const eventStartMs = Math.max(0, breakdown.event_start_ms ?? candidate.timestamp_ms);
+      const eventEndMs = Math.max(eventStartMs, breakdown.event_end_ms ?? candidate.timestamp_ms);
+      const segments: TimelineSegment[] = [];
+
+      if (eventEndMs > eventStartMs) {
+        segments.push({
+          candidateId: candidate.id,
+          endMs: eventEndMs,
+          key: `${candidate.id}-event`,
+          kind: 'event',
+          startMs: eventStartMs,
+          type: breakdown.transition_type ?? 'unknown',
+        });
+      }
+
+      const dwellBeforeMs = breakdown.dwell_before_ms ?? 0;
+      if (dwellBeforeMs >= TIMELINE_DWELL_VISIBILITY_MS && eventStartMs > 0) {
+        segments.push({
+          candidateId: candidate.id,
+          endMs: eventStartMs,
+          key: `${candidate.id}-dwell-before`,
+          kind: 'dwell_before',
+          startMs: eventStartMs - dwellBeforeMs,
+          type: 'dwell',
+        });
+      }
+
+      const dwellAfterMs = breakdown.dwell_after_ms ?? 0;
+      if (dwellAfterMs >= TIMELINE_DWELL_VISIBILITY_MS && eventEndMs < durationMs) {
+        segments.push({
+          candidateId: candidate.id,
+          endMs: eventEndMs + dwellAfterMs,
+          key: `${candidate.id}-dwell-after`,
+          kind: 'dwell_after',
+          startMs: eventEndMs,
+          type: 'dwell',
+        });
+      }
+
+      return segments;
+    });
+  }, [selectedRecordingSummary?.duration_ms, timelineCandidates]);
+  const previewTimelineSegments = useMemo(
+    () =>
+      previewMatchesSelectedRun
+        ? positionTimelineSegments(
+            timelineSegments,
+            scrubDurationMs,
+            PREVIEW_TIMELINE_MIN_WIDTH_PCT[previewSizeKey],
+          )
+        : [],
+    [previewMatchesSelectedRun, previewSizeKey, scrubDurationMs, timelineSegments],
+  );
+  const candidateTimelineSegments = useMemo(
+    () =>
+      positionTimelineSegments(
+        timelineSegments,
+        selectedRecordingSummary?.duration_ms ?? 0,
+        CANDIDATE_TIMELINE_MIN_WIDTH_PCT,
+      ),
+    [selectedRecordingSummary?.duration_ms, timelineSegments],
+  );
   const activeCandidate = useMemo(() => {
     if (!selectedRun || !activeCandidateId) {
       return null;
@@ -436,7 +564,6 @@ export function AnalysisScreen({
     () => selectedCandidateIds.filter((candidateId) => selectablePendingCandidateIds.has(candidateId)),
     [selectedCandidateIds, selectablePendingCandidateIds],
   );
-  const scrubDurationMs = previewRecording?.duration_ms ?? selectedRecordingSummary?.duration_ms ?? 0;
   const canShowTimeline = Boolean(
     isCompletedReview &&
       selectedRecordingSummary &&
@@ -1278,6 +1405,15 @@ export function AnalysisScreen({
                           className="preview-scrubber-progress"
                           style={{ width: `${Math.min(100, Math.max(0, (previewPlaybackMs / scrubDurationMs) * 100))}%` }}
                         />
+                        {previewTimelineSegments.map((segment) => (
+                          <span
+                            aria-hidden="true"
+                            className={`preview-scrubber-segment timeline-segment timeline-segment--${segment.type}`}
+                            data-kind={segment.kind}
+                            key={segment.key}
+                            style={{ left: `${segment.startPct}%`, width: `${segment.endPct - segment.startPct}%` }}
+                          />
+                        ))}
                         {previewMatchesSelectedRun &&
                           timelineCandidates.map((candidate) => (
                             <span
@@ -1694,6 +1830,15 @@ export function AnalysisScreen({
                 {canShowTimeline ? (
                   <div className="candidate-timeline-shell">
                     <div className="candidate-timeline-rail" aria-label="candidate timeline">
+                      {candidateTimelineSegments.map((segment) => (
+                        <span
+                          aria-hidden="true"
+                          className={`candidate-timeline-segment timeline-segment timeline-segment--${segment.type}`}
+                          data-kind={segment.kind}
+                          key={segment.key}
+                          style={{ left: `${segment.startPct}%`, width: `${segment.endPct - segment.startPct}%` }}
+                        />
+                      ))}
                       {previewMatchesSelectedRun ? (
                         <span
                           aria-hidden="true"

@@ -2,7 +2,21 @@
 
 ## What Stepthrough Is
 
-Stepthrough is a local-first research tool for turning screen recordings into a structured set of reviewable screenshots.
+Stepthrough is a local-first research tool for turning screen recordings into a structured set of reviewable screenshots. It is primarily developed for the "walkthrough method" and UI/UX research that offloads the manual work of taking screenshots every time a UI change happens. Works in principle for anything that can be screen-recorded, but bear in mind that the more animations (scrolling, fading, flashing, etc.) the more likely it is that the detector will miss steps.
+
+## Why Start From A Screen Recording?
+
+In walkthrough-driven research, a screen recording is often a better starting medium than taking screenshots manually during the session.
+
+A recording helps because:
+
+- it captures the whole interaction, including moments you may not have expected to matter
+- it preserves dynamic behavior such as scrolling, fading, flashing, loading states, and overlays
+- it removes the need to interrupt a session to reach for screenshot shortcuts
+- it lets you backtrack later if you realize an important state was missed
+- it works well for informal or fast-moving interfaces such as feeds, threaded conversations, and short-form video apps
+
+This matters because many meaningful interface states are not stable enough to capture comfortably in real time. They appear briefly during motion, transition, or interaction and are easier to review afterward from a recording.
 
 In practice, it helps you:
 
@@ -11,6 +25,8 @@ In practice, it helps you:
 - review and curate those candidate steps
 - add manual steps when the detector misses something important
 - export a clean walkthrough package for analysis, reporting, or design review
+
+If you are new to the app, the beginner onboarding pages in `docs/wiki/` are a good place to start before reading the full manual.
 
 Everything runs locally on your machine. Imported videos, generated frames, metadata, and exports are stored under the project's local data directory.
 

@@ -11,13 +11,19 @@ import numpy as np
 from app.config import OcrRuntimeConfig
 from app.models import HybridAdvancedSettings, RunSettings
 from app.services.hybrid_detection import (
+    CandidateSignal,
     _OcrCache,
     _SequentialReader,
+    _TileStabilityMap,
+    _annotate_dwell_durations,
     _build_signal,
+    _classify_transition,
+    _is_micro_change_candidate,
     _merge_or_append_event,
     _maybe_load_ocr_engine,
     _normalize_predict_result,
     _prepare_frame,
+    _scroll_displacement,
     _seek_frame,
     _transition_signal,
     detect_candidates_hybrid,
@@ -43,6 +49,29 @@ class FakeOcrEngine:
 class FakePredictResult:
     def __init__(self, payload) -> None:
         self.json = payload
+
+
+def make_signal(**overrides) -> CandidateSignal:
+    values = {
+        "timestamp_ms": 0,
+        "visual": 0.2,
+        "text": 0.0,
+        "motion": 0.2,
+        "combined": 0.2,
+        "structural": 0.2,
+        "changed_regions": [],
+        "scroll_dx": 0.0,
+        "scroll_dy": 0.0,
+        "scroll_confidence": 0.0,
+        "chrome_change": 0.0,
+        "content_change": 0.0,
+        "changed_tiles": np.zeros((8, 8), dtype=bool),
+        "frame_width": 640,
+        "frame_height": 360,
+        "ocr_text": None,
+    }
+    values.update(overrides)
+    return CandidateSignal(**values)
 
 
 def test_resolve_hybrid_config_uses_preset_defaults() -> None:
@@ -80,11 +109,11 @@ def test_transition_signal_detects_local_interface_change() -> None:
     previous = _prepare_frame(baseline, 0, 960)
     current = _prepare_frame(changed, 200, 960)
 
-    visual, motion, regions = _transition_signal(previous, current)
+    features = _transition_signal(previous, current)
 
-    assert visual > 0.1
-    assert motion > 0.05
-    assert regions
+    assert features.visual > 0.1
+    assert features.motion > 0.05
+    assert features.changed_regions
 
 
 def test_transition_signal_detects_dark_low_contrast_change() -> None:
@@ -95,11 +124,116 @@ def test_transition_signal_detects_dark_low_contrast_change() -> None:
     previous = _prepare_frame(baseline, 0, 960)
     current = _prepare_frame(changed, 200, 960)
 
-    visual, motion, regions = _transition_signal(previous, current)
+    features = _transition_signal(previous, current)
 
-    assert visual > 0.08
-    assert regions
-    assert max(region["score"] for region in regions) > 0.1
+    assert features.visual > 0.08
+    assert features.changed_regions
+    assert max(region["score"] for region in features.changed_regions) > 0.1
+
+
+def test_scroll_displacement_detects_vertical_scroll_and_ignores_static_frames() -> None:
+    baseline = np.full((320, 240), 32, dtype=np.uint8)
+    for index, y in enumerate(range(24, 280, 40), start=1):
+        cv2.putText(baseline, f"Row {index}", (48, y), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 220, 2, cv2.LINE_AA)
+
+    transform = np.float32([[1, 0, 0], [0, 1, -28]])
+    shifted = cv2.warpAffine(baseline, transform, (baseline.shape[1], baseline.shape[0]), borderMode=cv2.BORDER_REPLICATE)
+
+    dx, dy, confidence = _scroll_displacement(baseline, shifted)
+    static_dx, static_dy, static_confidence = _scroll_displacement(baseline, baseline.copy())
+
+    assert abs(dx) < 4
+    assert abs(dy) >= 10
+    assert confidence >= 0.2
+    assert abs(static_dx) < 1
+    assert abs(static_dy) < 1
+    assert static_confidence >= 0.0
+
+
+def test_scroll_displacement_rejects_crossfade_like_global_change() -> None:
+    baseline = np.full((320, 240), 24, dtype=np.uint8)
+    cv2.rectangle(baseline, (24, 32), (216, 132), 160, -1)
+    changed = np.full((320, 240), 24, dtype=np.uint8)
+    cv2.circle(changed, (120, 180), 72, 220, -1)
+
+    dx, dy, confidence = _scroll_displacement(baseline, changed)
+
+    assert confidence < 0.2
+    assert abs(dy) < 320
+
+
+def test_tile_stability_map_marks_repeatedly_changing_tiles_as_unstable() -> None:
+    stability_map = _TileStabilityMap(grid_size=4, window_size=5, stability_threshold=0.8)
+
+    for _ in range(5):
+        changed_tiles = np.zeros((4, 4), dtype=bool)
+        changed_tiles[1, 2] = True
+        stability_map.update(changed_tiles)
+
+    stable_mask = stability_map.stable_mask()
+
+    assert stable_mask.shape == (4, 4)
+    assert bool(stable_mask[1, 2]) is False
+    assert bool(stable_mask[0, 0]) is True
+
+
+def test_classify_transition_distinguishes_action_types() -> None:
+    nav_signal = make_signal(chrome_change=0.3, content_change=0.35)
+    assert _classify_transition(nav_signal, nav_signal) == "navigation"
+
+    scroll_signal = make_signal(chrome_change=0.02, content_change=0.25, scroll_confidence=0.55)
+    assert _classify_transition(scroll_signal, scroll_signal, cumulative_scroll_dy=48) == "scroll"
+
+    feed_signal = make_signal(chrome_change=0.02, content_change=0.6, scroll_confidence=0.6, frame_height=640)
+    assert _classify_transition(feed_signal, feed_signal, cumulative_scroll_dy=420) == "feed_card_swap"
+
+    modal_signal = make_signal(
+        chrome_change=0.1,
+        content_change=0.3,
+        changed_regions=[{"x": 0, "y": 220, "width": 640, "height": 120, "score": 0.8}],
+        frame_width=640,
+        frame_height=360,
+    )
+    assert _classify_transition(modal_signal, modal_signal) == "modal"
+
+    content_signal = make_signal(
+        chrome_change=0.02,
+        content_change=0.1,
+        text=0.32,
+        changed_regions=[{"x": 220, "y": 170, "width": 110, "height": 24, "score": 0.4}],
+    )
+    assert _classify_transition(content_signal, content_signal) == "content_update"
+
+    small_ui_signal = make_signal(
+        chrome_change=0.02,
+        content_change=0.06,
+        changed_regions=[{"x": 530, "y": 290, "width": 60, "height": 32, "score": 0.5}],
+    )
+    assert _classify_transition(small_ui_signal, small_ui_signal) == "small_ui_change"
+
+
+def test_annotate_dwell_durations_uses_event_windows() -> None:
+    events = [
+        {
+            "timestamp_ms": 1200,
+            "event_start_ms": 1000,
+            "event_end_ms": 1300,
+            "score_breakdown": {},
+        },
+        {
+            "timestamp_ms": 3300,
+            "event_start_ms": 3000,
+            "event_end_ms": 3450,
+            "score_breakdown": {},
+        },
+    ]
+
+    _annotate_dwell_durations(events, duration_ms=5000)
+
+    assert events[0]["score_breakdown"]["dwell_before_ms"] == 1000
+    assert events[0]["score_breakdown"]["dwell_after_ms"] == 1700
+    assert events[1]["score_breakdown"]["dwell_before_ms"] == 1700
+    assert events[1]["score_breakdown"]["dwell_after_ms"] == 1550
 
 
 def test_build_signal_uses_anchor_frame_for_gradual_changes() -> None:
@@ -162,6 +296,62 @@ def test_build_signal_region_probe_runs_below_full_frame_trigger() -> None:
     assert signal.text > 0
     assert engine.calls
     assert all(width < 640 and height < 360 for width, height in engine.calls)
+
+
+def test_build_signal_marks_typing_like_micro_changes_for_secondary_proposal_path() -> None:
+    baseline = np.full((360, 640, 3), 0xF2, dtype=np.uint8)
+    cv2.rectangle(baseline, (100, 120), (540, 240), (255, 255, 255), -1)
+    cv2.putText(baseline, "Message", (120, 155), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (80, 80, 80), 2, cv2.LINE_AA)
+    changed = baseline.copy()
+    cv2.putText(changed, "H", (140, 205), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (40, 40, 40), 2, cv2.LINE_AA)
+
+    config = replace(
+        resolve_hybrid_config(
+            RunSettings(
+                analysis_engine="hybrid_v2",
+                analysis_preset="balanced",
+                advanced=HybridAdvancedSettings(enable_ocr=True),
+            ),
+            fps=30,
+        ),
+        ocr_trigger_threshold=0.4,
+        settle_threshold=0.1,
+    )
+
+    signal = _build_signal(
+        _prepare_frame(baseline, 0, 960),
+        _prepare_frame(changed, 200, 960),
+        None,
+        config,
+        FakeOcrEngine(),
+        _OcrCache(),
+    )
+
+    assert signal.text > 0
+    assert signal.chrome_change < 0.05
+    assert _is_micro_change_candidate(signal, config) is True
+
+
+def test_multi_region_navigation_change_is_not_treated_as_micro_change_candidate() -> None:
+    signal = make_signal(
+        motion=0.03,
+        structural=0.2,
+        changed_regions=[
+            {"x": 12, "y": 24, "width": 48, "height": 36, "score": 0.4},
+            {"x": 88, "y": 96, "width": 52, "height": 38, "score": 0.4},
+            {"x": 160, "y": 140, "width": 64, "height": 40, "score": 0.4},
+        ],
+    )
+    config = resolve_hybrid_config(
+        RunSettings(
+            analysis_engine="hybrid_v2",
+            analysis_preset="balanced",
+            advanced=HybridAdvancedSettings(enable_ocr=False),
+        ),
+        fps=30,
+    )
+
+    assert _is_micro_change_candidate(signal, config) is False
 
 
 def test_build_signal_region_probe_uses_cache_for_repeated_crops() -> None:
@@ -493,6 +683,8 @@ def test_detect_candidates_hybrid_creates_score_breakdowns(
     assert candidates
     assert all(candidate["score_breakdown"] is not None for candidate in candidates)
     assert all("perceptual_hash" in candidate for candidate in candidates)
+    assert all("transition_type" in candidate["score_breakdown"] for candidate in candidates)
+    assert all("dwell_before_ms" in candidate["score_breakdown"] for candidate in candidates)
 
 
 def test_sequential_reader_matches_seek_reader_for_monotonic_timestamps(tmp_path: Path, video_factory) -> None:

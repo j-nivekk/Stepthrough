@@ -2,6 +2,14 @@ export type AnalysisEngine = 'scene_v1' | 'hybrid_v2';
 export type AnalysisPreset = 'subtle_ui' | 'balanced' | 'noise_resistant';
 export type OcrBackend = 'paddleocr';
 export type OcrStatus = 'checking' | 'available' | 'unavailable';
+export type TransitionType =
+  | 'navigation'
+  | 'scroll'
+  | 'feed_card_swap'
+  | 'modal'
+  | 'content_update'
+  | 'small_ui_change'
+  | 'unknown';
 export type DetectorMode = 'content' | 'adaptive';
 export type CandidateStatus = 'pending' | 'accepted' | 'rejected';
 export type CandidateOrigin = 'detected' | 'manual';
@@ -113,6 +121,16 @@ export interface CandidateScoreBreakdown {
   text: number;
   motion: number;
   changed_regions: ChangedRegion[];
+  scroll_dx?: number | null;
+  scroll_dy?: number | null;
+  scroll_confidence?: number | null;
+  chrome_change?: number | null;
+  content_change?: number | null;
+  transition_type?: TransitionType | null;
+  dwell_before_ms?: number | null;
+  dwell_after_ms?: number | null;
+  event_start_ms?: number | null;
+  event_end_ms?: number | null;
 }
 
 export interface CandidateFrame {

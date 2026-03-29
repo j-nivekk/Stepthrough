@@ -2534,6 +2534,11 @@ a {
 /* ── Preview scrubber ─────────────────────────────────────────── */
 
 .preview-scrubber {
+  --timeline-segment-base-alpha: 0.08;
+  --timeline-segment-strong-alpha: 0.2;
+  --timeline-segment-soft-alpha: 0.08;
+  --timeline-segment-outline-alpha: 0.16;
+  --timeline-segment-stripe-size: 5px;
   position: relative;
   height: 28px;
   display: flex;
@@ -2551,6 +2556,7 @@ a {
   border-radius: 2px;
   transition: height 80ms ease;
   overflow: visible;
+  isolation: isolate;
 }
 
 .preview-scrubber:hover .preview-scrubber-track {
@@ -2567,6 +2573,99 @@ a {
   pointer-events: none;
 }
 
+.analysis-preview-panel[data-size='sm'] .preview-scrubber {
+  --timeline-segment-base-alpha: 0.1;
+  --timeline-segment-strong-alpha: 0.24;
+  --timeline-segment-soft-alpha: 0.1;
+  --timeline-segment-outline-alpha: 0.18;
+  --timeline-segment-stripe-size: 4px;
+}
+
+.analysis-preview-panel[data-size='md'] .preview-scrubber {
+  --timeline-segment-base-alpha: 0.08;
+  --timeline-segment-strong-alpha: 0.2;
+  --timeline-segment-soft-alpha: 0.08;
+  --timeline-segment-outline-alpha: 0.16;
+  --timeline-segment-stripe-size: 5px;
+}
+
+.analysis-preview-panel[data-size='lg'] .preview-scrubber {
+  --timeline-segment-base-alpha: 0.06;
+  --timeline-segment-strong-alpha: 0.18;
+  --timeline-segment-soft-alpha: 0.06;
+  --timeline-segment-outline-alpha: 0.14;
+  --timeline-segment-stripe-size: 6px;
+}
+
+.analysis-preview-wrap[data-bg='light'] .preview-scrubber {
+  --timeline-segment-base-alpha: 0.06;
+  --timeline-segment-strong-alpha: 0.16;
+  --timeline-segment-soft-alpha: 0.06;
+  --timeline-segment-outline-alpha: 0.12;
+}
+
+.timeline-segment {
+  --segment-rgb: 111, 102, 90;
+  position: absolute;
+  pointer-events: none;
+  background-color: rgba(var(--segment-rgb), var(--timeline-segment-base-alpha));
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(var(--segment-rgb), var(--timeline-segment-strong-alpha)) 0,
+    rgba(var(--segment-rgb), var(--timeline-segment-strong-alpha)) var(--timeline-segment-stripe-size),
+    rgba(var(--segment-rgb), var(--timeline-segment-soft-alpha)) var(--timeline-segment-stripe-size),
+    rgba(var(--segment-rgb), var(--timeline-segment-soft-alpha)) calc(var(--timeline-segment-stripe-size) * 2)
+  );
+  box-shadow: inset 0 0 0 1px rgba(var(--segment-rgb), var(--timeline-segment-outline-alpha));
+}
+
+.preview-scrubber-segment,
+.candidate-timeline-segment {
+  top: 0;
+  bottom: 0;
+}
+
+.preview-scrubber-segment {
+  z-index: 1;
+  border-radius: 999px;
+}
+
+.candidate-timeline-segment {
+  z-index: 0;
+}
+
+.timeline-segment--scroll {
+  --segment-rgb: 47, 100, 130;
+}
+
+.timeline-segment--dwell {
+  --segment-rgb: 162, 105, 27;
+}
+
+.timeline-segment--navigation {
+  --segment-rgb: 209, 109, 56;
+}
+
+.timeline-segment--modal {
+  --segment-rgb: 177, 69, 60;
+}
+
+.timeline-segment--feed_card_swap {
+  --segment-rgb: 45, 122, 90;
+}
+
+.timeline-segment--content_update {
+  --segment-rgb: 111, 102, 90;
+}
+
+.timeline-segment--small_ui_change {
+  --segment-rgb: 157, 77, 38;
+}
+
+.timeline-segment--unknown {
+  --segment-rgb: 96, 118, 128;
+}
+
 .preview-scrubber-pin {
   position: absolute;
   top: 50%;
@@ -2575,6 +2674,7 @@ a {
   height: 10px;
   border-radius: 1.5px;
   pointer-events: none;
+  z-index: 2;
 }
 
 .preview-scrubber-pin.pending {
@@ -2604,6 +2704,7 @@ a {
   box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0, 0, 0, 0.2);
   pointer-events: none;
   transition: transform 60ms ease;
+  z-index: 3;
 }
 
 .preview-scrubber:hover .preview-scrubber-playhead {
@@ -3653,6 +3754,11 @@ button:disabled {
 }
 
 .candidate-timeline-shell {
+  --timeline-segment-base-alpha: 0.12;
+  --timeline-segment-strong-alpha: 0.28;
+  --timeline-segment-soft-alpha: 0.12;
+  --timeline-segment-outline-alpha: 0.2;
+  --timeline-segment-stripe-size: 10px;
   display: flex;
   align-items: center;
   min-height: 24px;
@@ -3664,6 +3770,7 @@ button:disabled {
   height: 24px;
   background: var(--analysis-surface-muted);
   overflow: visible;
+  isolation: isolate;
 }
 
 .candidate-timeline-playhead {
@@ -3673,6 +3780,7 @@ button:disabled {
   width: 1px;
   background: rgba(0, 0, 0, 0.45);
   transform: translateX(-50%);
+  z-index: 1;
 }
 
 .candidate-timeline-pin {
@@ -3686,6 +3794,7 @@ button:disabled {
   transform: translateX(-50%);
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease;
+  z-index: 2;
 }
 
 .candidate-timeline-pin.pending {
