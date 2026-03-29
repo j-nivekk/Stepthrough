@@ -19,6 +19,12 @@ python -m tests.eval.runner --compare
 
 # Run as pytest
 pytest tests/eval/ -v
+
+# Run the curated realistic smoke matrix
+python -m tests.eval.runner --matrix realistic-smoke
+
+# Run one high-resolution fullscreen realistic variant
+python -m tests.eval.runner --matrix realistic-full --profile fullscreen_vertical --resolution-tier 1080x1920 --source-fps 60 --sample-fps 12 --scenario feed_fullscreen_swipe
 ```
 
 ## Architecture
@@ -80,7 +86,7 @@ UI rendering toolkit using OpenCV + numpy.  No external assets.
 
 ### `scenarios.py`
 
-19 scenarios organized by category:
+Baseline scenarios organized by category:
 
 | Category | Scenarios | Tests |
 |----------|-----------|-------|
@@ -120,15 +126,42 @@ breakdowns.
 CLI runner with options:
 
 ```
+--matrix NAME         Scenario matrix: baseline, realistic-smoke, realistic-full
 --scenario NAME       Filter scenarios by name substring
 --category CAT        Filter by category prefix
+--profile PROFILE     Filter realistic matrices by device profile
+--resolution-tier T   Filter realistic matrices by encoded resolution tier
 --preset PRESET       Analysis preset: subtle_ui, balanced, noise_resistant
 --ocr                 Enable OCR during detection
 --debug               Print per-candidate debug detail
 --compare             Compare the two most recent saved runs
 --no-save             Don't save results to disk
---fps FPS             FPS for generated videos (default 30)
+--source-fps FPS      Override source FPS used to render scenarios
+--sample-fps FPS      Override detector sampling FPS for eval runs
+--fps FPS             Backward-compatible alias for --source-fps
 ```
+
+### Realistic variant matrices
+
+The realistic matrices add device-aware rendering and detector sampling
+metadata on top of the baseline suite.
+
+Profiles:
+
+| Profile | Shell | Logical size | Resolution tiers |
+|---------|-------|--------------|------------------|
+| `phone_portrait` | `mobile_app` | `390x844` | `390x844`, `780x1688` |
+| `laptop_landscape` | `desktop_browser` | `1280x800` | `1280x800` |
+| `fullscreen_vertical` | `fullscreen` | `540x960` | `540x960`, `1080x1920` |
+| `fullscreen_horizontal` | `fullscreen` | `960x540` | `960x540`, `1920x1080` |
+
+Variant names use:
+
+```text
+base__profile__resolution__src{fps}__sample{fps}
+```
+
+This keeps existing `nav` / `scroll` / `feed` prefix filtering working.
 
 Results are saved to `tests/eval/results/eval_YYYYMMDD_HHMMSS.json`.
 

@@ -14,16 +14,19 @@ Use ``all_scenarios()`` to get the full registry or filter by category.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
+import cv2
 import numpy as np
 
 from . import rendering as r
-from .types import Category, Difficulty, GroundTruthEvent, ScenarioResult
+from .types import Category, Difficulty, GroundTruthEvent, ScenarioContext, ScenarioResult, ShellMode
 
-ScenarioFactory = Callable[[Path, float], ScenarioResult]
+ScenarioFactory = Callable[[Path], ScenarioResult]
+ScenarioBuilder = Callable[[Path, ScenarioContext], ScenarioResult]
 
 
 def _result(
@@ -50,6 +53,198 @@ def _result(
     )
 
 
+def _context_result(
+    path: Path,
+    context: ScenarioContext,
+    *,
+    ground_truth: list[GroundTruthEvent],
+    duration_ms: int,
+    description: str,
+    category: Category,
+    difficulty: Difficulty,
+) -> ScenarioResult:
+    return ScenarioResult(
+        video_path=path,
+        ground_truth=ground_truth,
+        duration_ms=duration_ms,
+        fps=context.source_fps,
+        width=context.encoded_width,
+        height=context.encoded_height,
+        description=description,
+        category=category,
+        difficulty=difficulty,
+        variant_id=context.variant_id,
+        profile_id=context.profile_id,
+        orientation=context.orientation,
+        shell=context.shell,
+        logical_width=context.logical_width,
+        logical_height=context.logical_height,
+        encoded_width=context.encoded_width,
+        encoded_height=context.encoded_height,
+        source_fps=context.source_fps,
+        sample_fps=context.sample_fps,
+    )
+
+
+@dataclass(frozen=True)
+class ViewportProfile:
+    profile_id: str
+    shell: ShellMode
+    logical_width: int
+    logical_height: int
+    resolution_tiers: dict[str, tuple[int, int]]
+
+
+PROFILES: dict[str, ViewportProfile] = {
+    "phone_portrait": ViewportProfile(
+        profile_id="phone_portrait",
+        shell="mobile_app",
+        logical_width=390,
+        logical_height=844,
+        resolution_tiers={
+            "390x844": (390, 844),
+            "780x1688": (780, 1688),
+        },
+    ),
+    "laptop_landscape": ViewportProfile(
+        profile_id="laptop_landscape",
+        shell="desktop_browser",
+        logical_width=1280,
+        logical_height=800,
+        resolution_tiers={
+            "1280x800": (1280, 800),
+        },
+    ),
+    "fullscreen_vertical": ViewportProfile(
+        profile_id="fullscreen_vertical",
+        shell="fullscreen",
+        logical_width=540,
+        logical_height=960,
+        resolution_tiers={
+            "540x960": (540, 960),
+            "1080x1920": (1080, 1920),
+        },
+    ),
+    "fullscreen_horizontal": ViewportProfile(
+        profile_id="fullscreen_horizontal",
+        shell="fullscreen",
+        logical_width=960,
+        logical_height=540,
+        resolution_tiers={
+            "960x540": (960, 540),
+            "1920x1080": (1920, 1080),
+        },
+    ),
+}
+
+BASELINE_CONTEXT = ScenarioContext(
+    variant_id="baseline",
+    profile_id="baseline",
+    shell="mobile_app",
+    logical_width=r.DEFAULT_WIDTH,
+    logical_height=r.DEFAULT_HEIGHT,
+    encoded_width=r.DEFAULT_WIDTH,
+    encoded_height=r.DEFAULT_HEIGHT,
+    source_fps=r.DEFAULT_FPS,
+    sample_fps=None,
+)
+
+
+def _fps_token(value: float | int | None) -> str:
+    if value is None:
+        return "default"
+    value = float(value)
+    return str(int(value)) if value.is_integer() else str(value).replace(".", "_")
+
+
+def _build_variant_name(base_name: str, context: ScenarioContext) -> str:
+    return (
+        f"{base_name}__{context.profile_id}__{context.encoded_width}x{context.encoded_height}"
+        f"__src{_fps_token(context.source_fps)}__sample{_fps_token(context.sample_fps)}"
+    )
+
+
+def _scenario_with_metadata(name: str, result: ScenarioResult, *, source_fps: float | None, sample_fps: float | None) -> ScenarioResult:
+    src_fps = source_fps if source_fps is not None else result.fps
+    return replace(
+        result,
+        variant_id=name,
+        profile_id=result.profile_id or "baseline",
+        shell=result.shell or "mobile_app",
+        logical_width=result.logical_width or result.width,
+        logical_height=result.logical_height or result.height,
+        encoded_width=result.encoded_width or result.width,
+        encoded_height=result.encoded_height or result.height,
+        source_fps=src_fps,
+        sample_fps=sample_fps,
+    )
+
+
+def _wrap_baseline_factory(
+    name: str,
+    factory: Callable[[Path, float], ScenarioResult],
+    *,
+    source_fps: float,
+    sample_fps: float | None,
+) -> ScenarioFactory:
+    def _wrapped(output_dir: Path) -> ScenarioResult:
+        result = factory(output_dir, source_fps)
+        return _scenario_with_metadata(name, result, source_fps=source_fps, sample_fps=sample_fps)
+
+    return _wrapped
+
+
+def _make_context(
+    *,
+    base_name: str,
+    profile_id: str,
+    resolution_tier: str,
+    source_fps: float,
+    sample_fps: float | None,
+) -> ScenarioContext:
+    profile = PROFILES[profile_id]
+    encoded_width, encoded_height = profile.resolution_tiers[resolution_tier]
+    provisional = ScenarioContext(
+        variant_id="pending",
+        profile_id=profile.profile_id,
+        shell=profile.shell,
+        logical_width=profile.logical_width,
+        logical_height=profile.logical_height,
+        encoded_width=encoded_width,
+        encoded_height=encoded_height,
+        source_fps=source_fps,
+        sample_fps=sample_fps,
+    )
+    return replace(provisional, variant_id=_build_variant_name(base_name, provisional))
+
+
+def _bind_context(factory: ScenarioBuilder, context: ScenarioContext) -> ScenarioFactory:
+    def _wrapped(output_dir: Path) -> ScenarioResult:
+        return factory(output_dir, context)
+
+    return _wrapped
+
+
+@dataclass(frozen=True)
+class VariantSpec:
+    base_name: str
+    factory: ScenarioBuilder | None
+    profile_id: str
+    resolution_tier: str
+    source_fps: float
+    sample_fps: float | None
+
+
+REALISTIC_SMOKE_VARIANTS: tuple[VariantSpec, ...] = (
+    VariantSpec("nav_with_fade", None, "phone_portrait", "390x844", 30, 6),
+    VariantSpec("scroll_list", None, "phone_portrait", "390x844", 30, 6),
+    VariantSpec("overlay_bottom_sheet", None, "phone_portrait", "390x844", 30, 6),
+    VariantSpec("content_typing", None, "phone_portrait", "390x844", 30, 6),
+    VariantSpec("nav_with_fade", None, "laptop_landscape", "1280x800", 30, 6),
+    VariantSpec("overlay_modal", None, "laptop_landscape", "1280x800", 30, 6),
+    VariantSpec("feed_fullscreen_swipe", None, "fullscreen_vertical", "540x960", 60, 12),
+    VariantSpec("feed_fullscreen_swipe", None, "fullscreen_horizontal", "960x540", 60, 12),
+)
 # ═══════════════════════════════════════════════════════════════════════════
 # NAVIGATION — full-screen / major layout changes
 # ═══════════════════════════════════════════════════════════════════════════
@@ -935,10 +1130,378 @@ def composite_with_noise(output_dir: Path, fps: float = r.DEFAULT_FPS) -> Scenar
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# REALISTIC VARIANTS — device-aware builders used by realistic matrices
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _viewport_for_context(context: ScenarioContext) -> r.ViewportSpec:
+    return r.default_viewport(
+        logical_width=context.logical_width,
+        logical_height=context.logical_height,
+        encoded_width=context.encoded_width,
+        encoded_height=context.encoded_height,
+        shell=context.shell,
+    )
+
+
+def _variant_nav_with_fade(output_dir: Path, context: ScenarioContext) -> ScenarioResult:
+    viewport = _viewport_for_context(context)
+    path = output_dir / f"{context.variant_id}.avi"
+
+    with r.use_viewport(viewport):
+        w, h, ch = viewport.logical_width, viewport.logical_height, viewport.content_height
+        writer = r.create_viewport_writer(path, viewport, context.source_fps)
+
+        screens = [
+            r.app_chrome(r.list_screen(w, ch), header_text="Messages"),
+            r.app_chrome(r.chat_screen(w, ch), header_text="Chat"),
+            r.app_chrome(r.form_screen(w, ch), header_text="New Message"),
+        ]
+        dwell = r.frames_for_duration(context.source_fps, 1.2)
+        fade_frames = r.frames_for_duration(context.source_fps, 0.3)
+
+        r.write_n(writer, screens[0], dwell)
+        r.write_transition(writer, screens[0], screens[1], fade_frames, transition="fade")
+        r.write_n(writer, screens[1], dwell)
+        r.write_transition(writer, screens[1], screens[2], fade_frames, transition="fade")
+        r.write_n(writer, screens[2], dwell)
+        writer.release()
+
+    t1 = round(1.2 * 1000)
+    t2 = round((1.2 + 0.3 + 1.2) * 1000)
+    return _context_result(
+        Path(str(path)),
+        context,
+        category="navigation",
+        difficulty="medium",
+        duration_ms=round((1.2 * 3 + 0.3 * 2) * 1000),
+        description=f"3 screens with 300ms crossfade transitions on {context.profile_id}",
+        ground_truth=[
+            GroundTruthEvent("navigation", t1, t1 + 300, {"transition": "fade", "profile": context.profile_id}, "medium"),
+            GroundTruthEvent("navigation", t2, t2 + 300, {"transition": "fade", "profile": context.profile_id}, "medium"),
+        ],
+    )
+
+
+def _variant_scroll_list(output_dir: Path, context: ScenarioContext) -> ScenarioResult:
+    viewport = _viewport_for_context(context)
+    path = output_dir / f"{context.variant_id}.avi"
+
+    with r.use_viewport(viewport):
+        w, h, ch = viewport.logical_width, viewport.logical_height, viewport.content_height
+        writer = r.create_viewport_writer(path, viewport, context.source_fps)
+
+        tall = r.tall_content_strip(w, num_items=14, item_height=r.px(64))
+        chrome_fn = partial(r.app_chrome, header_text="Contacts", width=w, total_height=h)
+
+        scroll_distance = min(ch * 2, max(0, tall.shape[0] - ch))
+        dwell = r.frames_for_duration(context.source_fps, 1.0)
+        scroll_frames = r.frames_for_duration(context.source_fps, 2.0)
+
+        r.write_n(writer, chrome_fn(r.scroll_crop(tall, ch, 0)), dwell)
+        r.write_scroll(writer, tall, ch, 0, scroll_distance, scroll_frames, chrome_fn=chrome_fn)
+        r.write_n(writer, chrome_fn(r.scroll_crop(tall, ch, scroll_distance)), dwell)
+        writer.release()
+
+    return _context_result(
+        Path(str(path)),
+        context,
+        category="scrolling",
+        difficulty="easy",
+        duration_ms=4000,
+        description=f"Scroll through contact list with fixed chrome on {context.profile_id}",
+        ground_truth=[
+            GroundTruthEvent("scroll", 1000, 3000, {"scroll_dy": scroll_distance, "chrome_stable": True}, "easy"),
+        ],
+    )
+
+
+def _variant_overlay_modal(output_dir: Path, context: ScenarioContext) -> ScenarioResult:
+    viewport = _viewport_for_context(context)
+    path = output_dir / f"{context.variant_id}.avi"
+
+    with r.use_viewport(viewport):
+        w, h, ch = viewport.logical_width, viewport.logical_height, viewport.content_height
+        writer = r.create_viewport_writer(path, viewport, context.source_fps)
+
+        base = r.app_chrome(r.dashboard_screen(w, ch), header_text="Dashboard")
+
+        modal_frame = base.copy()
+        overlay = np.full_like(modal_frame, 40)
+        modal_frame = r.fade(modal_frame, overlay, 0.4)
+        modal_w = min(r.px(420), w - r.px(96))
+        modal_h = min(r.px(240), h - r.px(160))
+        mx, my = (w - modal_w) // 2, (h - modal_h) // 2
+        r.rect(modal_frame, mx, my, modal_w, modal_h, r.WHITE, radius=r.px(12))
+        r.text_centered(modal_frame, "Delete Item?", my + r.px(56), color=r.NEAR_BLACK, scale=0.6, thickness=2)
+        r.text_centered(modal_frame, "This action cannot be undone.", my + r.px(90), color=r.GRAY_500, scale=0.38)
+        button_y = my + modal_h - r.px(56)
+        button_w = max(r.px(120), (modal_w - r.px(56)) // 2)
+        r.button(modal_frame, "Cancel", mx + r.px(20), button_y, button_w, r.px(36), bg=r.GRAY_200, text_color=r.NEAR_BLACK)
+        r.button(modal_frame, "Delete", mx + modal_w - button_w - r.px(20), button_y, button_w, r.px(36), bg=r.RED_500)
+
+        dwell = r.frames_for_duration(context.source_fps, 2.0)
+        fade_frames = r.frames_for_duration(context.source_fps, 0.25)
+
+        r.write_n(writer, base, dwell)
+        r.write_transition(writer, base, modal_frame, fade_frames, transition="fade")
+        r.write_n(writer, modal_frame, dwell)
+        writer.release()
+
+    t = round(2.0 * 1000)
+    return _context_result(
+        Path(str(path)),
+        context,
+        category="overlay",
+        difficulty="easy",
+        duration_ms=round((2.0 + 0.25 + 2.0) * 1000),
+        description=f"Dashboard with centered modal dialog appearing via fade on {context.profile_id}",
+        ground_truth=[
+            GroundTruthEvent("modal", t, t + 250, {"modal_bounds": {"x": mx, "y": my, "w": modal_w, "h": modal_h}}, "easy"),
+        ],
+    )
+
+
+def _variant_overlay_bottom_sheet(output_dir: Path, context: ScenarioContext) -> ScenarioResult:
+    viewport = _viewport_for_context(context)
+    path = output_dir / f"{context.variant_id}.avi"
+
+    with r.use_viewport(viewport):
+        w, h, ch = viewport.logical_width, viewport.logical_height, viewport.content_height
+        writer = r.create_viewport_writer(path, viewport, context.source_fps)
+
+        base = r.app_chrome(r.list_screen(w, ch), header_text="Photos")
+
+        sheet_h = round(h * 0.4)
+        sheet_frame = base.copy()
+        r.rect(sheet_frame, 0, h - sheet_h, w, sheet_h, r.WHITE, radius=0)
+        r.divider(sheet_frame, h - sheet_h, color=r.GRAY_300)
+        r.rect(sheet_frame, w // 2 - r.px(20), h - sheet_h + r.px(8), r.px(40), r.px(4), r.GRAY_300, radius=r.px(2))
+        r.text(sheet_frame, "Share to...", r.px(20), h - sheet_h + r.px(36), color=r.NEAR_BLACK, scale=0.5, thickness=1)
+        icons_y = h - sheet_h + r.px(56)
+        labels = ["Copy Link", "Messages", "Email", "More"]
+        for i, label in enumerate(labels):
+            center_x = round(((i + 0.5) / len(labels)) * w)
+            r.circle(sheet_frame, center_x, icons_y + r.px(20), r.px(22), r.GRAY_200)
+            text_w, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, r.pt(0.3), max(1, round(r.current_viewport().font_scale)))
+            r.text(sheet_frame, label, center_x - text_w[0] // 2, icons_y + r.px(60), color=r.GRAY_600, scale=0.3)
+
+        dwell = r.frames_for_duration(context.source_fps, 1.5)
+        slide_frames = r.frames_for_duration(context.source_fps, 0.3)
+
+        r.write_n(writer, base, dwell)
+        for i in range(slide_frames):
+            progress = i / max(1, slide_frames - 1)
+            anim = base.copy()
+            visible_h = round(sheet_h * progress)
+            if visible_h > 0:
+                anim[h - visible_h :, :] = sheet_frame[h - visible_h :, :]
+            writer.write(anim)
+        r.write_n(writer, sheet_frame, dwell)
+        writer.release()
+
+    t = round(1.5 * 1000)
+    return _context_result(
+        Path(str(path)),
+        context,
+        category="overlay",
+        difficulty="medium",
+        duration_ms=round((1.5 + 0.3 + 1.5) * 1000),
+        description=f"Bottom sheet slides up covering lower 40% of screen on {context.profile_id}",
+        ground_truth=[
+            GroundTruthEvent("modal", t, t + 300, {"style": "bottom_sheet", "coverage": 0.4}, "medium"),
+        ],
+    )
+
+
+def _variant_content_typing(output_dir: Path, context: ScenarioContext) -> ScenarioResult:
+    viewport = _viewport_for_context(context)
+    path = output_dir / f"{context.variant_id}.avi"
+
+    with r.use_viewport(viewport):
+        w, ch = viewport.logical_width, viewport.content_height
+        writer = r.create_viewport_writer(path, viewport, context.source_fps)
+
+        message = "Hello, how are you today?"
+        chars_per_second = 6
+        frames_per_char = max(1, round(context.source_fps / chars_per_second))
+
+        base_content = r.form_screen(w, ch, fields=[("To", "Alice"), ("Subject", "Meeting"), ("Message", "")])
+        base = r.app_chrome(base_content, header_text="Compose")
+        r.write_n(writer, base, r.frames_for_duration(context.source_fps, 1.0))
+
+        screen = base
+        for i in range(len(message)):
+            typed = message[: i + 1]
+            content = r.form_screen(w, ch, fields=[("To", "Alice"), ("Subject", "Meeting"), ("Message", typed)])
+            screen = r.app_chrome(content, header_text="Compose")
+            r.write_n(writer, screen, frames_per_char)
+
+        r.write_n(writer, screen, r.frames_for_duration(context.source_fps, 1.0))
+        writer.release()
+
+    typing_duration_ms = round(len(message) * (1000 / chars_per_second))
+    return _context_result(
+        Path(str(path)),
+        context,
+        category="content",
+        difficulty="hard",
+        duration_ms=round(1000 + typing_duration_ms + 1000),
+        description=f"Typing 25 chars into a form field at 6 chars/sec on {context.profile_id}",
+        ground_truth=[
+            GroundTruthEvent("content_update", 1000, 1000 + typing_duration_ms, {"type": "typing", "chars": len(message)}, "hard"),
+        ],
+    )
+
+
+def _variant_feed_fullscreen_swipe(output_dir: Path, context: ScenarioContext) -> ScenarioResult:
+    viewport = _viewport_for_context(context)
+    path = output_dir / f"{context.variant_id}.avi"
+
+    with r.use_viewport(viewport):
+        w, h = viewport.logical_width, viewport.logical_height
+        writer = r.create_viewport_writer(path, viewport, context.source_fps)
+
+        reels = [
+            r.reel_frame(w, h, bg_color=(50, 120, 200), username="alex_travels",
+                         caption="Golden hour in Santorini #travel #greece",
+                         likes="87.3K", comments="2.1K", shares="4.5K",
+                         sound="Somewhere Over - DJ Mix", avatar_color=r.BLUE_500),
+            r.reel_frame(w, h, bg_color=(30, 160, 90), username="chef_maria",
+                         caption="5-min pasta that hits every time #cooking #food",
+                         likes="134.2K", comments="8.7K", shares="22.1K",
+                         sound="Italian Vibes - Lofi", avatar_color=r.GREEN_500_BGR),
+            r.reel_frame(w, h, bg_color=(180, 60, 100), username="urban_lens",
+                         caption="NYC at 3am is a different world #nyc #streetphoto",
+                         likes="56.8K", comments="1.4K", shares="3.2K",
+                         sound="City Rain - Ambient", avatar_color=r.PURPLE_500),
+        ]
+
+        dwell = r.frames_for_duration(context.source_fps, 1.5)
+        slide_f = r.frames_for_duration(context.source_fps, 0.3)
+
+        r.write_n(writer, reels[0], dwell)
+        r.write_transition(writer, reels[0], reels[1], slide_f, transition="slide_up")
+        r.write_n(writer, reels[1], dwell)
+        r.write_transition(writer, reels[1], reels[2], slide_f, transition="slide_up")
+        r.write_n(writer, reels[2], dwell)
+        writer.release()
+
+    t1 = round(1.5 * 1000)
+    t2 = round((1.5 + 0.3 + 1.5) * 1000)
+    return _context_result(
+        Path(str(path)),
+        context,
+        category="feed",
+        difficulty="medium",
+        duration_ms=round((1.5 * 3 + 0.3 * 2) * 1000),
+        description=f"3 fullscreen reels, slide-up swipe, stable overlay UI on {context.profile_id}",
+        ground_truth=[
+            GroundTruthEvent("card_swap", t1, t1 + 300, {"from": "alex_travels", "to": "chef_maria", "fullscreen": True}, "medium"),
+            GroundTruthEvent("card_swap", t2, t2 + 300, {"from": "chef_maria", "to": "urban_lens", "fullscreen": True}, "medium"),
+        ],
+    )
+
+
+def _variant_composite_browse_session(output_dir: Path, context: ScenarioContext) -> ScenarioResult:
+    viewport = _viewport_for_context(context)
+    path = output_dir / f"{context.variant_id}.avi"
+
+    with r.use_viewport(viewport):
+        w, h, ch = viewport.logical_width, viewport.logical_height, viewport.content_height
+        writer = r.create_viewport_writer(path, viewport, context.source_fps)
+
+        tall = r.tall_content_strip(w, num_items=12, item_height=r.px(60))
+        list_chrome = partial(r.app_chrome, header_text="Inbox", width=w, total_height=h)
+        chat = r.app_chrome(r.chat_screen(w, ch), header_text="Alice")
+
+        modal = chat.copy()
+        overlay = np.full_like(modal, 40)
+        modal = r.fade(modal, overlay, 0.4)
+        modal_w = min(r.px(320), w - r.px(64))
+        modal_h = min(r.px(180), h - r.px(96))
+        mx, my = (w - modal_w) // 2, (h - modal_h) // 2
+        r.rect(modal, mx, my, modal_w, modal_h, r.WHITE, radius=r.px(12))
+        r.text_centered(modal, "Block user?", my + r.px(58), color=r.NEAR_BLACK, scale=0.5, thickness=1)
+        r.button(modal, "No", mx + r.px(20), my + modal_h - r.px(52), r.px(100), r.px(36), bg=r.GRAY_200, text_color=r.NEAR_BLACK)
+        r.button(modal, "Yes", mx + modal_w - r.px(120), my + modal_h - r.px(52), r.px(100), r.px(36), bg=r.RED_500)
+
+        dwell = r.frames_for_duration(context.source_fps, 1.2)
+        short_dwell = r.frames_for_duration(context.source_fps, 0.8)
+        scroll_frames = r.frames_for_duration(context.source_fps, 1.5)
+        fade_f = r.frames_for_duration(context.source_fps, 0.2)
+
+        t = 0.0
+        scroll_distance = min(ch, max(0, tall.shape[0] - ch))
+
+        r.write_n(writer, list_chrome(r.scroll_crop(tall, ch, 0)), dwell)
+        t += 1.2
+
+        scroll_start = t
+        r.write_scroll(writer, tall, ch, 0, scroll_distance, scroll_frames, chrome_fn=list_chrome)
+        t += 1.5
+        scroll_end = t
+
+        r.write_n(writer, list_chrome(r.scroll_crop(tall, ch, scroll_distance)), short_dwell)
+        t += 0.8
+
+        nav1_t = t
+        r.write_transition(writer, list_chrome(r.scroll_crop(tall, ch, scroll_distance)), chat, fade_f, transition="fade")
+        t += 0.2
+        r.write_n(writer, chat, dwell)
+        t += 1.2
+
+        modal_t = t
+        r.write_transition(writer, chat, modal, fade_f, transition="fade")
+        t += 0.2
+        r.write_n(writer, modal, dwell)
+        t += 1.2
+
+        r.write_transition(writer, modal, chat, fade_f, transition="fade")
+        t += 0.2
+        r.write_n(writer, chat, short_dwell)
+        t += 0.8
+
+        nav2_t = t
+        back_frame = list_chrome(r.scroll_crop(tall, ch, scroll_distance))
+        r.write_transition(writer, chat, back_frame, fade_f, transition="fade")
+        t += 0.2
+        r.write_n(writer, back_frame, dwell)
+        t += 1.2
+
+        writer.release()
+
+    return _context_result(
+        Path(str(path)),
+        context,
+        category="composite",
+        difficulty="medium",
+        duration_ms=round(t * 1000),
+        description=f"Full session: dwell, scroll, navigate, modal open/dismiss, navigate back on {context.profile_id}",
+        ground_truth=[
+            GroundTruthEvent("scroll", round(scroll_start * 1000), round(scroll_end * 1000), {"scroll_dy": scroll_distance, "chrome_stable": True}, "medium"),
+            GroundTruthEvent("navigation", round(nav1_t * 1000), round(nav1_t * 1000 + 200), {"from": "inbox", "to": "chat"}, "easy"),
+            GroundTruthEvent("modal", round(modal_t * 1000), round(modal_t * 1000 + 200), {"style": "dialog"}, "easy"),
+            GroundTruthEvent("navigation", round(nav2_t * 1000), round(nav2_t * 1000 + 200), {"from": "chat", "to": "inbox"}, "easy"),
+        ],
+    )
+
+
+VARIANT_BUILDERS: dict[str, ScenarioBuilder] = {
+    "nav_with_fade": _variant_nav_with_fade,
+    "scroll_list": _variant_scroll_list,
+    "overlay_bottom_sheet": _variant_overlay_bottom_sheet,
+    "content_typing": _variant_content_typing,
+    "overlay_modal": _variant_overlay_modal,
+    "feed_fullscreen_swipe": _variant_feed_fullscreen_swipe,
+    "composite_browse_session": _variant_composite_browse_session,
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Scenario registry
 # ═══════════════════════════════════════════════════════════════════════════
 
-ALL_SCENARIOS: list[tuple[str, ScenarioFactory]] = [
+BASELINE_SCENARIOS: list[tuple[str, Callable[[Path, float], ScenarioResult]]] = [
     # Navigation
     ("nav_basic", nav_basic),
     ("nav_with_fade", nav_with_fade),
@@ -969,12 +1532,151 @@ ALL_SCENARIOS: list[tuple[str, ScenarioFactory]] = [
     ("composite_with_noise", composite_with_noise),
 ]
 
+REALISTIC_FULL_PROFILE_MAP: dict[str, tuple[str, ...]] = {
+    "nav_with_fade": ("phone_portrait", "laptop_landscape"),
+    "scroll_list": ("phone_portrait",),
+    "overlay_bottom_sheet": ("phone_portrait",),
+    "content_typing": ("phone_portrait",),
+    "overlay_modal": ("laptop_landscape",),
+    "feed_fullscreen_swipe": ("fullscreen_vertical", "fullscreen_horizontal"),
+    "composite_browse_session": ("phone_portrait", "laptop_landscape"),
+}
 
-def all_scenarios() -> list[tuple[str, ScenarioFactory]]:
-    """Return all registered (name, factory) pairs."""
-    return list(ALL_SCENARIOS)
+FULL_SOURCE_FPS: tuple[float, ...] = (24, 30, 60)
+FULL_SAMPLE_FPS: tuple[float, ...] = (6, 12)
 
 
-def scenarios_by_category(category: Category) -> list[tuple[str, ScenarioFactory]]:
-    """Return scenarios filtered by category."""
-    return [(n, f) for n, f in ALL_SCENARIOS if n.startswith(category)]
+def _iter_realistic_smoke_specs(
+    *,
+    profile: str | None = None,
+    source_fps: float | None = None,
+    sample_fps: float | None = None,
+    resolution_tier: str | None = None,
+) -> Iterable[VariantSpec]:
+    for raw_spec in REALISTIC_SMOKE_VARIANTS:
+        if profile and raw_spec.profile_id != profile:
+            continue
+        if resolution_tier and raw_spec.resolution_tier != resolution_tier:
+            continue
+        src = source_fps if source_fps is not None else raw_spec.source_fps
+        sample = sample_fps if sample_fps is not None else raw_spec.sample_fps
+        if sample is not None and sample > src:
+            continue
+        yield VariantSpec(
+            raw_spec.base_name,
+            VARIANT_BUILDERS[raw_spec.base_name],
+            raw_spec.profile_id,
+            raw_spec.resolution_tier,
+            src,
+            sample,
+        )
+
+
+def _iter_realistic_full_specs(
+    *,
+    profile: str | None = None,
+    source_fps: float | None = None,
+    sample_fps: float | None = None,
+    resolution_tier: str | None = None,
+) -> Iterable[VariantSpec]:
+    source_values = (source_fps,) if source_fps is not None else FULL_SOURCE_FPS
+    sample_values = (sample_fps,) if sample_fps is not None else FULL_SAMPLE_FPS
+
+    for base_name, profile_ids in REALISTIC_FULL_PROFILE_MAP.items():
+        for profile_id in profile_ids:
+            if profile and profile_id != profile:
+                continue
+            profile_def = PROFILES[profile_id]
+            tier_ids = (resolution_tier,) if resolution_tier is not None else tuple(profile_def.resolution_tiers.keys())
+            for tier_id in tier_ids:
+                if tier_id not in profile_def.resolution_tiers:
+                    continue
+                for src in source_values:
+                    for sample in sample_values:
+                        if sample is not None and sample > src:
+                            continue
+                        yield VariantSpec(
+                            base_name,
+                            VARIANT_BUILDERS[base_name],
+                            profile_id,
+                            tier_id,
+                            src,
+                            sample,
+                        )
+
+
+def _build_variant_factories(specs: Iterable[VariantSpec]) -> list[tuple[str, ScenarioFactory]]:
+    scenarios: list[tuple[str, ScenarioFactory]] = []
+    for spec in specs:
+        if spec.factory is None:
+            continue
+        context = _make_context(
+            base_name=spec.base_name,
+            profile_id=spec.profile_id,
+            resolution_tier=spec.resolution_tier,
+            source_fps=spec.source_fps,
+            sample_fps=spec.sample_fps,
+        )
+        scenarios.append((context.variant_id, _bind_context(spec.factory, context)))
+    return scenarios
+
+
+def all_scenarios(
+    *,
+    matrix: str = "baseline",
+    profile: str | None = None,
+    source_fps: float | None = None,
+    sample_fps: float | None = None,
+    resolution_tier: str | None = None,
+) -> list[tuple[str, ScenarioFactory]]:
+    """Return registered scenarios for the requested matrix."""
+    if matrix == "baseline":
+        baseline_fps = source_fps if source_fps is not None else r.DEFAULT_FPS
+        if profile or resolution_tier:
+            return []
+        return [
+            (name, _wrap_baseline_factory(name, factory, source_fps=baseline_fps, sample_fps=sample_fps))
+            for name, factory in BASELINE_SCENARIOS
+        ]
+    if matrix == "realistic-smoke":
+        return _build_variant_factories(
+            _iter_realistic_smoke_specs(
+                profile=profile,
+                source_fps=source_fps,
+                sample_fps=sample_fps,
+                resolution_tier=resolution_tier,
+            )
+        )
+    if matrix == "realistic-full":
+        return _build_variant_factories(
+            _iter_realistic_full_specs(
+                profile=profile,
+                source_fps=source_fps,
+                sample_fps=sample_fps,
+                resolution_tier=resolution_tier,
+            )
+        )
+    raise ValueError(f"Unknown scenario matrix: {matrix}")
+
+
+def scenarios_by_category(
+    category: Category,
+    *,
+    matrix: str = "baseline",
+    profile: str | None = None,
+    source_fps: float | None = None,
+    sample_fps: float | None = None,
+    resolution_tier: str | None = None,
+) -> list[tuple[str, ScenarioFactory]]:
+    """Return scenarios filtered by category prefix."""
+    return [
+        (name, factory)
+        for name, factory in all_scenarios(
+            matrix=matrix,
+            profile=profile,
+            source_fps=source_fps,
+            sample_fps=sample_fps,
+            resolution_tier=resolution_tier,
+        )
+        if name.startswith(category)
+    ]

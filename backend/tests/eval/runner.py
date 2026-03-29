@@ -38,7 +38,7 @@ from .evaluator import (
     metrics_to_dict,
 )
 from .rendering import DEFAULT_FPS
-from .scenarios import all_scenarios
+from .scenarios import PROFILES, all_scenarios
 from .types import ScenarioResult
 from .visualize import (
     generate_html_report,
@@ -65,7 +65,10 @@ def _run_detection(
     settings = RunSettings(
         analysis_engine="hybrid_v2",
         analysis_preset=preset,
-        advanced=HybridAdvancedSettings(enable_ocr=enable_ocr),
+        advanced=HybridAdvancedSettings(
+            enable_ocr=enable_ocr,
+            sample_fps_override=scenario_result.sample_fps,
+        ),
         min_scene_gap_ms=900,
     )
 
@@ -78,11 +81,49 @@ def _run_detection(
     )
 
 
+def _aggregate_dimensions(all_results: dict[str, dict]) -> dict[str, dict[str, dict[str, float | int | str | None]]]:
+    buckets: dict[str, dict[str, list[dict]]] = {
+        "profile_id": {},
+        "orientation": {},
+        "encoded_size": {},
+        "source_fps": {},
+        "sample_fps": {},
+    }
+
+    for result in all_results.values():
+        bucket_values = {
+            "profile_id": str(result.get("profile_id", "baseline")),
+            "orientation": str(result.get("orientation", "landscape")),
+            "encoded_size": f"{result.get('encoded_width')}x{result.get('encoded_height')}",
+            "source_fps": str(result.get("source_fps")),
+            "sample_fps": "default" if result.get("sample_fps") is None else str(result.get("sample_fps")),
+        }
+        for key, bucket in bucket_values.items():
+            buckets[key].setdefault(bucket, []).append(result)
+
+    dimensions: dict[str, dict[str, dict[str, float | int | str | None]]] = {}
+    for dimension, groups in buckets.items():
+        grouped: dict[str, dict[str, float | int | str | None]] = {}
+        for bucket, results in sorted(groups.items()):
+            grouped[bucket] = {
+                "count": len(results),
+                "mean_precision": round(sum(float(r.get("precision", 0.0)) for r in results) / len(results), 4),
+                "mean_recall": round(sum(float(r.get("recall", 0.0)) for r in results) / len(results), 4),
+                "mean_f1": round(sum(float(r.get("f1", 0.0)) for r in results) / len(results), 4),
+            }
+        dimensions[dimension] = grouped
+    return dimensions
+
+
 def run_eval(
     *,
     scenario_filter: str | None = None,
     category_filter: str | None = None,
-    fps: float = DEFAULT_FPS,
+    matrix: str = "baseline",
+    source_fps: float | None = None,
+    sample_fps: float | None = None,
+    profile: str | None = None,
+    resolution_tier: str | None = None,
     preset: str = "balanced",
     enable_ocr: bool = False,
     save: bool = True,
@@ -91,7 +132,13 @@ def run_eval(
     save_videos: bool = False,
 ) -> dict:
     """Run all (or filtered) scenarios and return results dict."""
-    scenarios = all_scenarios()
+    scenarios = all_scenarios(
+        matrix=matrix,
+        profile=profile,
+        source_fps=source_fps,
+        sample_fps=sample_fps,
+        resolution_tier=resolution_tier,
+    )
     if scenario_filter:
         scenarios = [(n, f) for n, f in scenarios if scenario_filter in n]
     if category_filter:
@@ -124,7 +171,7 @@ def run_eval(
 
             print(f"  [{name}] generating...", end=" ", flush=True)
             t0 = time.monotonic()
-            scenario_result = factory(scenario_dir, fps)
+            scenario_result = factory(scenario_dir)
             gen_time = time.monotonic() - t0
 
             print(f"({gen_time:.1f}s) detecting...", end=" ", flush=True)
@@ -138,6 +185,16 @@ def run_eval(
             metrics_dict["description"] = scenario_result.description
             metrics_dict["category"] = scenario_result.category
             metrics_dict["difficulty"] = scenario_result.difficulty
+            metrics_dict["variant_id"] = scenario_result.variant_id
+            metrics_dict["profile_id"] = scenario_result.profile_id
+            metrics_dict["orientation"] = scenario_result.orientation
+            metrics_dict["shell"] = scenario_result.shell
+            metrics_dict["logical_width"] = scenario_result.logical_width
+            metrics_dict["logical_height"] = scenario_result.logical_height
+            metrics_dict["encoded_width"] = scenario_result.encoded_width
+            metrics_dict["encoded_height"] = scenario_result.encoded_height
+            metrics_dict["source_fps"] = scenario_result.source_fps
+            metrics_dict["sample_fps"] = scenario_result.sample_fps
             metrics_dict["by_event_type"] = category_breakdown(metrics)
             metrics_dict["by_difficulty"] = difficulty_breakdown(metrics)
             all_results[name] = metrics_dict
@@ -185,7 +242,10 @@ def run_eval(
     # Summary
     print()
     print("=" * 100)
-    print(f"EVAL RESULTS — preset={preset}, ocr={'on' if enable_ocr else 'off'}, {len(scenarios)} scenarios")
+    print(
+        f"EVAL RESULTS — matrix={matrix}, preset={preset}, ocr={'on' if enable_ocr else 'off'}, "
+        f"{len(scenarios)} scenarios"
+    )
     print("=" * 100)
     for line in summary_lines:
         print(line)
@@ -223,9 +283,18 @@ def run_eval(
         for block in debug_lines:
             print(block)
 
+    dimensions = _aggregate_dimensions(all_results)
     output = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "config": {"preset": preset, "enable_ocr": enable_ocr, "fps": fps},
+        "config": {
+            "matrix": matrix,
+            "preset": preset,
+            "enable_ocr": enable_ocr,
+            "source_fps": source_fps if source_fps is not None else (DEFAULT_FPS if matrix == "baseline" else None),
+            "sample_fps": sample_fps,
+            "profile": profile,
+            "resolution_tier": resolution_tier,
+        },
         "scenarios": all_results,
         "aggregate": {
             "precision": round(agg_p, 4),
@@ -234,6 +303,7 @@ def run_eval(
             "true_positives": total_tp,
             "missed_events": total_missed,
             "false_positives": total_fp,
+            "dimensions": dimensions,
         },
     }
 
@@ -314,8 +384,10 @@ def main() -> None:
         epilog="""
 Examples:
   python -m tests.eval.runner                           Run all scenarios
+  python -m tests.eval.runner --matrix realistic-smoke  Run curated realistic smoke matrix
   python -m tests.eval.runner --scenario scroll         Filter by name
   python -m tests.eval.runner --category feed           Filter by category
+  python -m tests.eval.runner --profile phone_portrait  Filter realistic matrices to one profile
   python -m tests.eval.runner --preset subtle_ui        Use different preset
   python -m tests.eval.runner --debug                   Show per-candidate detail
   python -m tests.eval.runner --report                  Generate HTML report with visuals
@@ -324,8 +396,14 @@ Examples:
   python -m tests.eval.runner --compare                 Compare last two runs
 """,
     )
+    parser.add_argument("--matrix", type=str, default="baseline", choices=["baseline", "realistic-smoke", "realistic-full"],
+                        help="Scenario matrix to run (default: baseline)")
     parser.add_argument("--scenario", type=str, default=None, help="Filter scenarios by name substring")
     parser.add_argument("--category", type=str, default=None, help="Filter by category prefix (nav, scroll, feed, overlay, content, composite)")
+    parser.add_argument("--profile", type=str, default=None, choices=sorted(PROFILES.keys()),
+                        help="Filter realistic matrices to one device profile")
+    parser.add_argument("--resolution-tier", type=str, default=None,
+                        help="Filter realistic matrices to one resolution tier, e.g. 780x1688")
     parser.add_argument("--preset", type=str, default="balanced", choices=["subtle_ui", "balanced", "noise_resistant"],
                         help="Analysis preset (default: balanced)")
     parser.add_argument("--ocr", action="store_true", help="Enable OCR during detection")
@@ -334,7 +412,9 @@ Examples:
     parser.add_argument("--no-save", action="store_true", help="Do not save results to disk")
     parser.add_argument("--report", action="store_true", help="Generate HTML report with timeline and filmstrip visuals")
     parser.add_argument("--save-videos", action="store_true", help="Persist generated and annotated videos to results/demos/")
-    parser.add_argument("--fps", type=float, default=DEFAULT_FPS, help="FPS for generated videos")
+    parser.add_argument("--source-fps", type=float, default=None, help="Override source FPS used to render scenarios")
+    parser.add_argument("--sample-fps", type=float, default=None, help="Override detector sample FPS for eval scenarios")
+    parser.add_argument("--fps", type=float, default=None, help="Backward-compatible alias for --source-fps")
     args = parser.parse_args()
 
     if args.compare:
@@ -342,10 +422,15 @@ Examples:
     else:
         print("Stepthrough Hybrid v2 Eval Pipeline")
         print("-" * 50)
+        resolved_source_fps = args.source_fps if args.source_fps is not None else args.fps
         run_eval(
+            matrix=args.matrix,
             scenario_filter=args.scenario,
             category_filter=args.category,
-            fps=args.fps,
+            source_fps=resolved_source_fps,
+            sample_fps=args.sample_fps,
+            profile=args.profile,
+            resolution_tier=args.resolution_tier,
             preset=args.preset,
             enable_ocr=args.ocr,
             save=not args.no_save,
