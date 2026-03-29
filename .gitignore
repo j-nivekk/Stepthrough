@@ -6,3 +6,5 @@ frontend/dist/
 data/
 *.pyc
 .DS_Store
+backend/tests/eval/results/*.json
+backend/tests/eval/results/demos/
