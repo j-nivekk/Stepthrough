@@ -287,6 +287,8 @@ export function AnalysisScreen({
   const [focusedHintKey, setFocusedHintKey] = useState<AnalysisHintKey | null>(null);
   const [hoveredHintKey, setHoveredHintKey] = useState<AnalysisHintKey | null>(null);
   const [hintCardPosition, setHintCardPosition] = useState<{ left: number; top: number } | null>(null);
+  const [hoveredLegendType, setHoveredLegendType] = useState<string | null>(null);
+  const [hiddenSegmentTypes, setHiddenSegmentTypes] = useState<Set<string>>(new Set());
   const parameterColumnRef = useRef<HTMLElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const saveMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1399,13 +1401,20 @@ export function AnalysisScreen({
                           className="preview-scrubber-progress"
                           style={{ width: `${Math.min(100, Math.max(0, (previewPlaybackMs / scrubDurationMs) * 100))}%` }}
                         />
-                        {previewTimelineSegments.map((segment) => (
+                        {previewTimelineSegments
+                          .filter((segment) => !hiddenSegmentTypes.has(segment.type))
+                          .map((segment) => (
                           <span
                             aria-hidden="true"
                             className={`preview-scrubber-segment timeline-segment timeline-segment--${segment.type}`}
                             data-kind={segment.kind}
                             key={segment.key}
-                            style={{ left: `${segment.startPct}%`, width: `${segment.endPct - segment.startPct}%` }}
+                            style={{
+                              left: `${segment.startPct}%`,
+                              width: `${segment.endPct - segment.startPct}%`,
+                              opacity: hoveredLegendType && hoveredLegendType !== segment.type ? 0.1 : 1,
+                              transition: 'opacity 150ms ease',
+                            }}
                           />
                         ))}
                         {previewMatchesSelectedRun &&
@@ -1822,15 +1831,59 @@ export function AnalysisScreen({
                 )}
 
                 {canShowTimeline ? (
-                  <div className="candidate-timeline-shell">
-                    <div className="candidate-timeline-rail" aria-label="candidate timeline">
-                      {candidateTimelineSegments.map((segment) => (
+                  <div className="candidate-timeline-wrapper">
+                    <div className="timeline-legend" aria-hidden="false">
+                      {[
+                        { type: 'scroll', label: 'scroll' },
+                        { type: 'dwell', label: 'dwell' },
+                        { type: 'navigation', label: 'navigation' },
+                        { type: 'modal', label: 'modal' },
+                        { type: 'feed_card_swap', label: 'feed swap' },
+                        { type: 'content_update', label: 'update' },
+                        { type: 'small_ui_change', label: 'ui change' },
+                        { type: 'unknown', label: 'unknown' }
+                      ]
+                        .filter(({ type }) =>
+                          candidateTimelineSegments.some((s) => s.type === type) ||
+                          previewTimelineSegments.some((s) => s.type === type)
+                        )
+                        .map(({ type, label }) => (
+                          <button
+                            key={type}
+                            className={`timeline-legend-item ${hiddenSegmentTypes.has(type) ? 'hidden' : ''}`}
+                            onMouseEnter={() => setHoveredLegendType(type)}
+                            onMouseLeave={() => setHoveredLegendType(null)}
+                            onClick={() => {
+                              setHiddenSegmentTypes((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(type)) next.delete(type);
+                                else next.add(type);
+                                return next;
+                              });
+                            }}
+                            type="button"
+                          >
+                            <span className={`timeline-legend-color ${type}`} />
+                            {label}
+                          </button>
+                        ))}
+                    </div>
+                    <div className="candidate-timeline-shell">
+                      <div className="candidate-timeline-rail" aria-label="candidate timeline">
+                      {candidateTimelineSegments
+                        .filter((segment) => !hiddenSegmentTypes.has(segment.type))
+                        .map((segment) => (
                         <span
                           aria-hidden="true"
                           className={`candidate-timeline-segment timeline-segment timeline-segment--${segment.type}`}
                           data-kind={segment.kind}
                           key={segment.key}
-                          style={{ left: `${segment.startPct}%`, width: `${segment.endPct - segment.startPct}%` }}
+                          style={{
+                            left: `${segment.startPct}%`,
+                            width: `${segment.endPct - segment.startPct}%`,
+                            opacity: hoveredLegendType && hoveredLegendType !== segment.type ? 0.1 : 1,
+                            transition: 'opacity 150ms ease',
+                          }}
                         />
                       ))}
                       {previewMatchesSelectedRun ? (
@@ -1889,6 +1942,7 @@ export function AnalysisScreen({
                         />
                       ))}
                     </div>
+                  </div>
                   </div>
                 ) : null}
 
