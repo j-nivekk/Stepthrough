@@ -1,4 +1,5 @@
 import type {
+  AnalysisMetadata,
   CandidateFrame,
   ExportBundle,
   ExportMode,
@@ -153,6 +154,10 @@ export function exportRun(runId: string, mode: ExportMode = 'accepted'): Promise
 
 export function health(): Promise<HealthResponse> {
   return request<HealthResponse>('/health');
+}
+
+export function getAnalysisMetadata(): Promise<AnalysisMetadata> {
+  return request<AnalysisMetadata>('/analysis/metadata');
 }
 
 export function resetDatabase(): Promise<void> {

@@ -40,6 +40,31 @@ export interface HealthResponse {
   ocr_warnings: string[];
 }
 
+export interface HybridPresetMetadata {
+  label: string;
+  short_description: string;
+  intended_use: string;
+  good_for: string[];
+  tradeoffs: string[];
+  sample_fps: number;
+  min_dwell_ms: number;
+  settle_window_ms: number;
+  proposal_threshold: number;
+  settle_threshold: number;
+  ocr_trigger_threshold: number;
+}
+
+export interface AnalysisControlMetadata {
+  supported: boolean;
+  reason?: string | null;
+  note?: string | null;
+}
+
+export interface AnalysisMetadata {
+  hybrid_presets: Record<AnalysisPreset, HybridPresetMetadata>;
+  controls_by_engine: Record<AnalysisEngine, Record<string, AnalysisControlMetadata>>;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -73,6 +98,9 @@ export interface HybridAdvancedSettings {
   sample_fps_override?: number | null;
   min_dwell_ms?: number | null;
   settle_window_ms?: number | null;
+  proposal_threshold?: number | null;
+  settle_threshold?: number | null;
+  ocr_trigger_threshold?: number | null;
   enable_ocr: boolean;
   ocr_backend?: OcrBackend | null;
 }

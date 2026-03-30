@@ -63,6 +63,9 @@ class HybridAdvancedSettings(BaseModel):
     sample_fps_override: float | None = Field(default=None, gt=0)
     min_dwell_ms: int | None = Field(default=None, ge=0, le=60_000)
     settle_window_ms: int | None = Field(default=None, ge=0, le=60_000)
+    proposal_threshold: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
+    settle_threshold: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
+    ocr_trigger_threshold: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
     enable_ocr: bool = True
     ocr_backend: OcrBackend | None = "paddleocr"
 
@@ -167,6 +170,31 @@ class CandidateScoreBreakdown(BaseModel):
     dwell_after_ms: int | None = None
     event_start_ms: int | None = None
     event_end_ms: int | None = None
+
+
+class HybridPresetMetadataResponse(BaseModel):
+    label: str
+    short_description: str
+    intended_use: str
+    good_for: list[str] = Field(default_factory=list)
+    tradeoffs: list[str] = Field(default_factory=list)
+    sample_fps: int
+    min_dwell_ms: int
+    settle_window_ms: int
+    proposal_threshold: float
+    settle_threshold: float
+    ocr_trigger_threshold: float
+
+
+class AnalysisControlMetadataResponse(BaseModel):
+    supported: bool
+    reason: str | None = None
+    note: str | None = None
+
+
+class AnalysisMetadataResponse(BaseModel):
+    hybrid_presets: dict[AnalysisPreset, HybridPresetMetadataResponse]
+    controls_by_engine: dict[AnalysisEngine, dict[str, AnalysisControlMetadataResponse]]
 
 
 class CandidateFrameResponse(BaseModel):

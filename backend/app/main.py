@@ -15,9 +15,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .analysis_metadata import serialize_analysis_metadata
 from .config import DATA_ROOT, build_tool_diagnostics, ensure_app_dirs
 from .database import init_db, reset_db
 from .models import (
+    AnalysisMetadataResponse,
     CandidateFrameResponse,
     CandidateUpdate,
     ExportRequest,
@@ -583,6 +585,11 @@ def health() -> HealthResponse:
         ocr_message=ocr_state.message,
         ocr_warnings=list(ocr_state.warnings),
     )
+
+
+@app.get("/analysis/metadata", response_model=AnalysisMetadataResponse)
+def analysis_metadata() -> AnalysisMetadataResponse:
+    return AnalysisMetadataResponse(**serialize_analysis_metadata())
 
 
 @app.post("/admin/reset-db", status_code=204)

@@ -5,23 +5,26 @@ import {
   AnalysisStepperInput,
 } from '../../../components/AnalysisControls';
 import type { AnalysisHintKey, AnalysisPopoverKey } from '../../../lib/analysis';
+import { getHybridPresetRuntimeValues } from '../../../lib/analysisMetadata';
 import { clampInteger } from '../../../lib/utils';
 import {
-  analysisPresetDefaults,
   buildV1SampleFpsAnnotation,
   clampRunSettingsForRecording,
   defaultHybridAdvancedSettings,
   describeAnalysisPreset,
   formatHybridMinDwellAnnotation,
+  formatHybridOcrTriggerThresholdAnnotation,
   formatHybridOcrAnnotation,
+  formatHybridProposalThresholdAnnotation,
   formatHybridSampleFpsAnnotation,
+  formatHybridSettleThresholdAnnotation,
   formatHybridSettleWindowAnnotation,
   getSampleFpsGuardrail,
   mapToleranceToDetectorThreshold,
   sanitizeRunSettings,
 } from '../../../lib/runSettings';
 import type { HybridAdvancedDirtyState } from '../../../lib/runSettings';
-import type { RecordingSummary, RunSettings } from '../../../types';
+import type { AnalysisMetadata, RecordingSummary, RunSettings } from '../../../types';
 
 type HintBindingProps = Pick<
   HTMLAttributes<HTMLElement>,
@@ -29,6 +32,7 @@ type HintBindingProps = Pick<
 >;
 
 export interface AnalysisParametersPanelProps {
+  analysisMetadata: AnalysisMetadata | null;
   bindHint: (key: AnalysisHintKey) => HintBindingProps;
   closePopover: () => void;
   createRunPending: boolean;
@@ -78,7 +82,24 @@ export interface AnalysisParametersPanelProps {
   togglePopover: (key: AnalysisPopoverKey) => void;
 }
 
+function clampThresholdInputValue(value: number): number {
+  return Number(Math.max(0, Math.min(1, value)).toFixed(2));
+}
+
+function parseThresholdInputValue(rawValue: string): number | null {
+  if (rawValue === '') {
+    return null;
+  }
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) ? clampThresholdInputValue(parsed) : null;
+}
+
+function formatThresholdInputValue(value: number | null | undefined): string {
+  return value == null ? '' : value.toFixed(2);
+}
+
 export function AnalysisParametersPanel({
+  analysisMetadata,
   bindHint,
   closePopover,
   createRunPending,
@@ -387,7 +408,7 @@ export function AnalysisParametersPanel({
                   />
                 )}
               </div>
-              <span className="analysis-parameter-annotation">{describeAnalysisPreset(runSettings)}</span>
+              <span className="analysis-parameter-annotation">{describeAnalysisPreset(runSettings, analysisMetadata)}</span>
             </div>
 
             <details className="analysis-tuning-section">
@@ -432,9 +453,10 @@ export function AnalysisParametersPanel({
                             ),
                           )
                         }
-                        onStep={(direction) =>
+                          onStep={(direction) =>
                           setRunSettings((current) => {
-                            const fallback = analysisPresetDefaults[current.analysis_preset].sampleFps;
+                            const fallback =
+                              getHybridPresetRuntimeValues(analysisMetadata, current.analysis_preset).sampleFps ?? 1;
                             const currentValue = current.advanced?.sample_fps_override ?? fallback;
                             return clampRunSettingsForRecording(
                               {
@@ -477,7 +499,7 @@ export function AnalysisParametersPanel({
                     ) : null}
                   </label>
                   <span className="analysis-parameter-annotation">
-                    {formatHybridSampleFpsAnnotation(runSettings, selectedRecordingSummary?.fps)}
+                    {formatHybridSampleFpsAnnotation(runSettings, analysisMetadata, selectedRecordingSummary?.fps)}
                   </span>
                 </div>
 
@@ -501,7 +523,8 @@ export function AnalysisParametersPanel({
                           }
                           onStep={(direction) =>
                             setRunSettings((current) => {
-                              const fallback = analysisPresetDefaults[current.analysis_preset].minDwellMs;
+                              const fallback =
+                                getHybridPresetRuntimeValues(analysisMetadata, current.analysis_preset).minDwellMs ?? 0;
                               const currentValue = current.advanced?.min_dwell_ms ?? fallback;
                               return {
                                 ...current,
@@ -534,7 +557,7 @@ export function AnalysisParametersPanel({
                     ) : null}
                   </label>
                   <span className="analysis-parameter-annotation">
-                    {formatHybridMinDwellAnnotation(runSettings)}
+                    {formatHybridMinDwellAnnotation(runSettings, analysisMetadata)}
                   </span>
                 </div>
 
@@ -558,7 +581,8 @@ export function AnalysisParametersPanel({
                           }
                           onStep={(direction) =>
                             setRunSettings((current) => {
-                              const fallback = analysisPresetDefaults[current.analysis_preset].settleWindowMs;
+                              const fallback =
+                                getHybridPresetRuntimeValues(analysisMetadata, current.analysis_preset).settleWindowMs ?? 0;
                               const currentValue = current.advanced?.settle_window_ms ?? fallback;
                               return {
                                 ...current,
@@ -591,7 +615,179 @@ export function AnalysisParametersPanel({
                     ) : null}
                   </label>
                   <span className="analysis-parameter-annotation">
-                    {formatHybridSettleWindowAnnotation(runSettings)}
+                    {formatHybridSettleWindowAnnotation(runSettings, analysisMetadata)}
+                  </span>
+                </div>
+
+                <div className="analysis-parameter-group">
+                  <label className="analysis-parameter-row" {...bindHint('hybrid_proposal_threshold')}>
+                    <span>proposal threshold</span>
+                    <div className="analysis-parameter-control">
+                      <AnalysisStepperInput
+                        ariaLabel="hybrid proposal threshold"
+                        className="analysis-parameter-input threshold"
+                        max={1}
+                        min={0}
+                        onChange={(rawValue) =>
+                          setRunSettings((current) => ({
+                            ...current,
+                            advanced: {
+                              ...(current.advanced ?? defaultHybridAdvancedSettings),
+                              proposal_threshold: parseThresholdInputValue(rawValue),
+                            },
+                          }))
+                        }
+                        onStep={(direction) =>
+                          setRunSettings((current) => {
+                            const fallback =
+                              getHybridPresetRuntimeValues(analysisMetadata, current.analysis_preset).proposalThreshold ?? 0;
+                            const currentValue = current.advanced?.proposal_threshold ?? fallback;
+                            return {
+                              ...current,
+                              advanced: {
+                                ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                proposal_threshold: clampThresholdInputValue(currentValue + direction * 0.01),
+                              },
+                            };
+                          })
+                        }
+                        step={0.01}
+                        value={formatThresholdInputValue(runSettings.advanced?.proposal_threshold ?? null)}
+                      />
+                    </div>
+                    {hybridAdvancedDirtyState.proposalThreshold ? (
+                      <AnalysisResetDiamondButton
+                        className="outside"
+                        label="hybrid proposal threshold"
+                        onClick={() =>
+                          setRunSettings((current) => ({
+                            ...current,
+                            advanced: {
+                              ...(current.advanced ?? defaultHybridAdvancedSettings),
+                              proposal_threshold: projectHybridAdvancedDefaults.proposal_threshold ?? null,
+                            },
+                          }))
+                        }
+                      />
+                    ) : null}
+                  </label>
+                  <span className="analysis-parameter-annotation">
+                    {formatHybridProposalThresholdAnnotation(runSettings, analysisMetadata)}
+                  </span>
+                </div>
+
+                <div className="analysis-parameter-group">
+                  <label className="analysis-parameter-row" {...bindHint('hybrid_settle_threshold')}>
+                    <span>settle threshold</span>
+                    <div className="analysis-parameter-control">
+                      <AnalysisStepperInput
+                        ariaLabel="hybrid settle threshold"
+                        className="analysis-parameter-input threshold"
+                        max={1}
+                        min={0}
+                        onChange={(rawValue) =>
+                          setRunSettings((current) => ({
+                            ...current,
+                            advanced: {
+                              ...(current.advanced ?? defaultHybridAdvancedSettings),
+                              settle_threshold: parseThresholdInputValue(rawValue),
+                            },
+                          }))
+                        }
+                        onStep={(direction) =>
+                          setRunSettings((current) => {
+                            const fallback =
+                              getHybridPresetRuntimeValues(analysisMetadata, current.analysis_preset).settleThreshold ?? 0;
+                            const currentValue = current.advanced?.settle_threshold ?? fallback;
+                            return {
+                              ...current,
+                              advanced: {
+                                ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                settle_threshold: clampThresholdInputValue(currentValue + direction * 0.01),
+                              },
+                            };
+                          })
+                        }
+                        step={0.01}
+                        value={formatThresholdInputValue(runSettings.advanced?.settle_threshold ?? null)}
+                      />
+                    </div>
+                    {hybridAdvancedDirtyState.settleThreshold ? (
+                      <AnalysisResetDiamondButton
+                        className="outside"
+                        label="hybrid settle threshold"
+                        onClick={() =>
+                          setRunSettings((current) => ({
+                            ...current,
+                            advanced: {
+                              ...(current.advanced ?? defaultHybridAdvancedSettings),
+                              settle_threshold: projectHybridAdvancedDefaults.settle_threshold ?? null,
+                            },
+                          }))
+                        }
+                      />
+                    ) : null}
+                  </label>
+                  <span className="analysis-parameter-annotation">
+                    {formatHybridSettleThresholdAnnotation(runSettings, analysisMetadata)}
+                  </span>
+                </div>
+
+                <div className="analysis-parameter-group">
+                  <label className="analysis-parameter-row" {...bindHint('hybrid_ocr_trigger_threshold')}>
+                    <span>ocr trigger threshold</span>
+                    <div className="analysis-parameter-control">
+                      <AnalysisStepperInput
+                        ariaLabel="hybrid ocr trigger threshold"
+                        className="analysis-parameter-input threshold"
+                        max={1}
+                        min={0}
+                        onChange={(rawValue) =>
+                          setRunSettings((current) => ({
+                            ...current,
+                            advanced: {
+                              ...(current.advanced ?? defaultHybridAdvancedSettings),
+                              ocr_trigger_threshold: parseThresholdInputValue(rawValue),
+                            },
+                          }))
+                        }
+                        onStep={(direction) =>
+                          setRunSettings((current) => {
+                            const fallback =
+                              getHybridPresetRuntimeValues(analysisMetadata, current.analysis_preset).ocrTriggerThreshold ??
+                              0;
+                            const currentValue = current.advanced?.ocr_trigger_threshold ?? fallback;
+                            return {
+                              ...current,
+                              advanced: {
+                                ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                ocr_trigger_threshold: clampThresholdInputValue(currentValue + direction * 0.01),
+                              },
+                            };
+                          })
+                        }
+                        step={0.01}
+                        value={formatThresholdInputValue(runSettings.advanced?.ocr_trigger_threshold ?? null)}
+                      />
+                    </div>
+                    {hybridAdvancedDirtyState.ocrTriggerThreshold ? (
+                      <AnalysisResetDiamondButton
+                        className="outside"
+                        label="hybrid ocr trigger threshold"
+                        onClick={() =>
+                          setRunSettings((current) => ({
+                            ...current,
+                            advanced: {
+                              ...(current.advanced ?? defaultHybridAdvancedSettings),
+                              ocr_trigger_threshold: projectHybridAdvancedDefaults.ocr_trigger_threshold ?? null,
+                            },
+                          }))
+                        }
+                      />
+                    ) : null}
+                  </label>
+                  <span className="analysis-parameter-annotation">
+                    {formatHybridOcrTriggerThresholdAnnotation(runSettings, analysisMetadata)}
                   </span>
                 </div>
 
@@ -991,7 +1187,7 @@ export function AnalysisParametersPanel({
         {showLowCandidateHint ? (
           <p className="analysis-guidance-copy warning">
             {runSettings.analysis_engine === 'hybrid_v2'
-              ? 'this run found very few interface changes. try the subtle ui preset or lower the hybrid dwell/settle timing.'
+              ? 'this run found very few interface changes. try the subtle ui preset, then lower proposal threshold or hybrid dwell timing.'
               : 'this run found very few scenes. try higher sample fps first, then lower tolerance or minimum scene gaps.'}
           </p>
         ) : null}

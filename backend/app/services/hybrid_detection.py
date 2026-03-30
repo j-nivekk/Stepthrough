@@ -17,8 +17,9 @@ import warnings
 import cv2
 import numpy as np
 
+from ..analysis_metadata import get_hybrid_preset_metadata
 from ..config import OcrRuntimeConfig, build_ocr_runtime_config, validate_ocr_runtime_config
-from ..models import AnalysisPreset, RunSettings
+from ..models import RunSettings
 from ..utils import timecode_from_ms, utc_now
 from .detection import CancellationRequested, CancellationCallback, ProgressCallback
 from .similarity import (
@@ -242,34 +243,6 @@ class _SequentialReader:
 
         self.last_frame_index = target_frame_index
         return frame
-
-
-PRESET_DEFAULTS: dict[AnalysisPreset, dict[str, float | int]] = {
-    "subtle_ui": {
-        "sample_fps": 8,
-        "min_dwell_ms": 250,
-        "settle_window_ms": 250,
-        "proposal_threshold": 0.19,
-        "settle_threshold": 0.09,
-        "ocr_trigger_threshold": 0.13,
-    },
-    "balanced": {
-        "sample_fps": 6,
-        "min_dwell_ms": 350,
-        "settle_window_ms": 350,
-        "proposal_threshold": 0.20,
-        "settle_threshold": 0.10,
-        "ocr_trigger_threshold": 0.15,
-    },
-    "noise_resistant": {
-        "sample_fps": 4,
-        "min_dwell_ms": 700,
-        "settle_window_ms": 700,
-        "proposal_threshold": 0.31,
-        "settle_threshold": 0.16,
-        "ocr_trigger_threshold": 0.22,
-    },
-}
 
 
 PADDLEOCR_SUPPORTED_VERSION = "3.3.0"
@@ -530,15 +503,30 @@ def probe_paddleocr_availability() -> PaddleOcrProbeResult:
 
 
 def resolve_hybrid_config(settings: RunSettings, fps: float) -> HybridDetectorConfig:
-    preset_defaults = PRESET_DEFAULTS[settings.analysis_preset]
+    preset_defaults = get_hybrid_preset_metadata(settings.analysis_preset)
     advanced = settings.advanced
-    sample_fps = float(advanced.sample_fps_override) if advanced and advanced.sample_fps_override else float(preset_defaults["sample_fps"])
+    sample_fps = float(advanced.sample_fps_override) if advanced and advanced.sample_fps_override else float(preset_defaults.sample_fps)
     sample_fps = max(1.0, min(max(fps, 1.0), sample_fps))
-    min_dwell_ms = int(advanced.min_dwell_ms) if advanced and advanced.min_dwell_ms is not None else int(preset_defaults["min_dwell_ms"])
+    min_dwell_ms = int(advanced.min_dwell_ms) if advanced and advanced.min_dwell_ms is not None else int(preset_defaults.min_dwell_ms)
     settle_window_ms = (
         int(advanced.settle_window_ms)
         if advanced and advanced.settle_window_ms is not None
-        else int(preset_defaults["settle_window_ms"])
+        else int(preset_defaults.settle_window_ms)
+    )
+    proposal_threshold = (
+        float(advanced.proposal_threshold)
+        if advanced and advanced.proposal_threshold is not None
+        else float(preset_defaults.proposal_threshold)
+    )
+    settle_threshold = (
+        float(advanced.settle_threshold)
+        if advanced and advanced.settle_threshold is not None
+        else float(preset_defaults.settle_threshold)
+    )
+    ocr_trigger_threshold = (
+        float(advanced.ocr_trigger_threshold)
+        if advanced and advanced.ocr_trigger_threshold is not None
+        else float(preset_defaults.ocr_trigger_threshold)
     )
     enable_ocr = bool(advanced.enable_ocr) if advanced is not None else True
     ocr_backend = advanced.ocr_backend if advanced is not None else "paddleocr"
@@ -551,9 +539,9 @@ def resolve_hybrid_config(settings: RunSettings, fps: float) -> HybridDetectorCo
         enable_ocr=enable_ocr,
         ocr_backend=ocr_backend,
         max_frame_edge=960,
-        proposal_threshold=float(preset_defaults["proposal_threshold"]),
-        settle_threshold=float(preset_defaults["settle_threshold"]),
-        ocr_trigger_threshold=float(preset_defaults["ocr_trigger_threshold"]),
+        proposal_threshold=proposal_threshold,
+        settle_threshold=settle_threshold,
+        ocr_trigger_threshold=ocr_trigger_threshold,
         tile_grid_size=8,
         contour_threshold_floor=8,
         contour_threshold_ceiling=30,
