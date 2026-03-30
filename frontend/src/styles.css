@@ -2036,6 +2036,10 @@ a {
   width: 42px;
 }
 
+.analysis-parameter-input.threshold {
+  width: 46px;
+}
+
 .analysis-parameter-input::-webkit-outer-spin-button,
 .analysis-parameter-input::-webkit-inner-spin-button {
   -webkit-appearance: none;

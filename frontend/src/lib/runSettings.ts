@@ -1,4 +1,5 @@
-import type { GlobalRunPreset, HybridAdvancedSettings, ProjectRunPreset, RunSettings } from '../types';
+import type { AnalysisMetadata, GlobalRunPreset, HybridAdvancedSettings, ProjectRunPreset, RunSettings } from '../types';
+import { getHybridEffectiveSampleFps, getHybridPresetLabel, getHybridPresetRuntimeValues } from './analysisMetadata';
 import { clampInteger, describeFrameSkip } from './utils';
 
 export const defaultRunSettings: RunSettings = {
@@ -17,6 +18,9 @@ export const defaultHybridAdvancedSettings: HybridAdvancedSettings = {
   sample_fps_override: null,
   min_dwell_ms: null,
   settle_window_ms: null,
+  proposal_threshold: null,
+  settle_threshold: null,
+  ocr_trigger_threshold: null,
   enable_ocr: true,
   ocr_backend: 'paddleocr',
 };
@@ -27,16 +31,54 @@ const PRESET_STORAGE_VERSION = 1;
 const GLOBAL_PRESET_STORAGE_KEY = 'stepthrough.run-preset.global.v1';
 const PROJECT_PRESET_STORAGE_KEY_PREFIX = 'stepthrough.run-preset.project.v1';
 
-export const analysisPresetDefaults = {
-  subtle_ui: { minDwellMs: 250, sampleFps: 8, settleWindowMs: 250 },
-  balanced: { minDwellMs: 400, sampleFps: 6, settleWindowMs: 400 },
-  noise_resistant: { minDwellMs: 700, sampleFps: 4, settleWindowMs: 700 },
-} as const;
+function clampHybridThreshold(value: number): number {
+  return Number(Math.max(0, Math.min(1, value)).toFixed(2));
+}
+
+function sanitizeHybridThreshold(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? clampHybridThreshold(value) : null;
+}
+
+function formatHybridThresholdValue(value: number | null | undefined): string {
+  return value == null ? 'loading…' : value.toFixed(2);
+}
+
+function buildHybridThresholdHintCopy(
+  presetValue: number | null,
+  overrideValue: number | null | undefined,
+  effectCopy: string,
+  subjectCopy: string,
+): string {
+  if (overrideValue == null && presetValue != null) {
+    return `${subjectCopy} current: auto, using the preset baseline of ${formatHybridThresholdValue(presetValue)}. ${effectCopy}`;
+  }
+  if (overrideValue == null) {
+    return `${subjectCopy} loading the preset baseline from backend metadata. ${effectCopy}`;
+  }
+  return `${subjectCopy} preset baseline: ${formatHybridThresholdValue(presetValue)}. current override: ${formatHybridThresholdValue(overrideValue)}. ${effectCopy}`;
+}
+
+function buildHybridThresholdAnnotationCopy(
+  presetValue: number | null,
+  overrideValue: number | null | undefined,
+  effectCopy: string,
+): string {
+  if (overrideValue == null && presetValue != null) {
+    return `effective: ${formatHybridThresholdValue(presetValue)} from preset. ${effectCopy}`;
+  }
+  if (overrideValue == null) {
+    return `effective value loading from backend metadata. ${effectCopy}`;
+  }
+  return `effective: ${formatHybridThresholdValue(overrideValue)} from override (preset ${formatHybridThresholdValue(presetValue)}). ${effectCopy}`;
+}
 
 export interface HybridAdvancedDirtyState {
   sampleFpsOverride: boolean;
   minDwellMs: boolean;
   settleWindowMs: boolean;
+  proposalThreshold: boolean;
+  settleThreshold: boolean;
+  ocrTriggerThreshold: boolean;
   enableOcr: boolean;
   any: boolean;
 }
@@ -54,6 +96,15 @@ export function getHybridAdvancedDirtyState(
   const settleWindowMs =
     (settings.advanced?.settle_window_ms ?? null) !==
     (defaultSettings.advanced?.settle_window_ms ?? null);
+  const proposalThreshold =
+    (settings.advanced?.proposal_threshold ?? null) !==
+    (defaultSettings.advanced?.proposal_threshold ?? null);
+  const settleThreshold =
+    (settings.advanced?.settle_threshold ?? null) !==
+    (defaultSettings.advanced?.settle_threshold ?? null);
+  const ocrTriggerThreshold =
+    (settings.advanced?.ocr_trigger_threshold ?? null) !==
+    (defaultSettings.advanced?.ocr_trigger_threshold ?? null);
   const enableOcr =
     (settings.advanced?.enable_ocr ?? true) !== (defaultSettings.advanced?.enable_ocr ?? true);
 
@@ -61,8 +112,18 @@ export function getHybridAdvancedDirtyState(
     sampleFpsOverride,
     minDwellMs,
     settleWindowMs,
+    proposalThreshold,
+    settleThreshold,
+    ocrTriggerThreshold,
     enableOcr,
-    any: sampleFpsOverride || minDwellMs || settleWindowMs || enableOcr,
+    any:
+      sampleFpsOverride ||
+      minDwellMs ||
+      settleWindowMs ||
+      proposalThreshold ||
+      settleThreshold ||
+      ocrTriggerThreshold ||
+      enableOcr,
   };
 }
 
@@ -90,6 +151,9 @@ export function sanitizeRunSettings(settings?: Partial<RunSettings> | null): Run
           Number.isFinite(settings.advanced.settle_window_ms)
             ? Math.max(0, Math.round(settings.advanced.settle_window_ms))
             : null,
+        proposal_threshold: sanitizeHybridThreshold(settings.advanced.proposal_threshold),
+        settle_threshold: sanitizeHybridThreshold(settings.advanced.settle_threshold),
+        ocr_trigger_threshold: sanitizeHybridThreshold(settings.advanced.ocr_trigger_threshold),
         enable_ocr: settings.advanced.enable_ocr !== false,
         ocr_backend: settings.advanced.enable_ocr === false ? null : 'paddleocr',
       }
@@ -272,8 +336,11 @@ export function describeDetectorMode(mode: RunSettings['detector_mode']): string
   return 'strictly compares against the immediately previous sampled frame. better for cuts and hard screen swaps. content threshold scales from 8 to 48.';
 }
 
-export function describeAnalysisPreset(settings: RunSettings): string {
-  const presetDefaults = analysisPresetDefaults[settings.analysis_preset];
+export function describeAnalysisPreset(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetDefaults = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset);
   const overrideFps = settings.advanced?.sample_fps_override;
   const overrideDwell = settings.advanced?.min_dwell_ms;
   const overrideSettle = settings.advanced?.settle_window_ms;
@@ -284,7 +351,10 @@ export function describeAnalysisPreset(settings: RunSettings): string {
     settings.advanced?.enable_ocr === false
       ? 'ocr confirmation disabled.'
       : 'ocr confirmation enabled, with backend-configured paddleocr for strong visual changes and bounded probes on localized changed regions.';
-  return `${formatAnalysisPresetLabel(settings.analysis_preset)} samples around ${sampleFps} fps, waits ~${dwell}ms for dwell and ~${settle}ms for settle windows. ${ocrCopy}`;
+  if (sampleFps == null || dwell == null || settle == null) {
+    return `${getHybridPresetLabel(analysisMetadata, settings.analysis_preset)} preset selected. loading backend preset baselines. ${ocrCopy}`;
+  }
+  return `${getHybridPresetLabel(analysisMetadata, settings.analysis_preset)} samples around ${sampleFps} fps, waits ~${dwell}ms for dwell and ~${settle}ms for settle windows. ${ocrCopy}`;
 }
 
 export function describeMinSceneGap(minSceneGapMs: number): string {
@@ -313,19 +383,77 @@ function formatHybridOcrState(
   return `on (${ocrBackend === 'paddleocr' || !ocrBackend ? 'paddleocr' : ocrBackend})`;
 }
 
-export function describeHybridSampleFpsOverrideHint(settings: RunSettings): string {
-  const presetSampleFps = analysisPresetDefaults[settings.analysis_preset].sampleFps;
+export function describeHybridSampleFpsOverrideHint(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetSampleFps = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).sampleFps;
+  if (presetSampleFps == null) {
+    return 'overrides the preset sampling rate. loading the preset baseline from backend metadata.';
+  }
   return `overrides the preset sampling rate. raise it when brief overlays or menu states are being missed, and leave it on auto to keep the preset baseline of ${presetSampleFps} fps.`;
 }
 
-export function describeHybridMinDwellHint(settings: RunSettings): string {
-  const presetMinDwellMs = analysisPresetDefaults[settings.analysis_preset].minDwellMs;
+export function describeHybridMinDwellHint(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetMinDwellMs = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).minDwellMs;
+  if (presetMinDwellMs == null) {
+    return 'overrides how long a visual change must persist before it becomes a candidate. loading the preset baseline from backend metadata.';
+  }
   return `overrides how long a visual change must persist before it becomes a candidate. lower it for brief states, or raise it to ignore flicker and transient motion. preset baseline: ${presetMinDwellMs}ms.`;
 }
 
-export function describeHybridSettleWindowHint(settings: RunSettings): string {
-  const presetSettleWindowMs = analysisPresetDefaults[settings.analysis_preset].settleWindowMs;
+export function describeHybridSettleWindowHint(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetSettleWindowMs = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).settleWindowMs;
+  if (presetSettleWindowMs == null) {
+    return 'overrides how long the detector waits for motion to settle before capturing the representative frame. loading the preset baseline from backend metadata.';
+  }
   return `overrides how long the detector waits for motion to settle before capturing the representative frame. raise it for longer animations or loading states, and lower it when captures land too late. preset baseline: ${presetSettleWindowMs}ms.`;
+}
+
+export function describeHybridProposalThresholdHint(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetProposalThreshold = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).proposalThreshold;
+  return buildHybridThresholdHintCopy(
+    presetProposalThreshold,
+    settings.advanced?.proposal_threshold,
+    'lower values propose more event windows; higher values are stricter.',
+    'overrides the score needed to propose a new event window.',
+  );
+}
+
+export function describeHybridSettleThresholdHint(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetSettleThreshold = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).settleThreshold;
+  return buildHybridThresholdHintCopy(
+    presetSettleThreshold,
+    settings.advanced?.settle_threshold,
+    'lower values keep an active event alive longer; higher values end it sooner.',
+    'overrides the score needed to keep an event window active while motion is settling.',
+  );
+}
+
+export function describeHybridOcrTriggerThresholdHint(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetOcrTriggerThreshold =
+    getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).ocrTriggerThreshold;
+  return buildHybridThresholdHintCopy(
+    presetOcrTriggerThreshold,
+    settings.advanced?.ocr_trigger_threshold,
+    'lower values run OCR confirmation more readily; higher values save OCR work but can miss text-led changes.',
+    'overrides the score needed before hybrid escalates to OCR confirmation.',
+  );
 }
 
 export function describeHybridOcrConfirmationHint(): string {
@@ -334,14 +462,17 @@ export function describeHybridOcrConfirmationHint(): string {
 
 export function formatHybridSampleFpsAnnotation(
   settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
   recordingFps?: number | null,
 ): string {
-  const presetSampleFps = analysisPresetDefaults[settings.analysis_preset].sampleFps;
+  const presetSampleFps = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).sampleFps;
   const overrideSampleFps = settings.advanced?.sample_fps_override;
   const base =
-    overrideSampleFps == null
+    overrideSampleFps == null && presetSampleFps != null
       ? `preset: ${presetSampleFps} fps. current: auto, using the preset value.`
-      : `preset: ${presetSampleFps} fps. current override: ${overrideSampleFps} fps.`;
+      : overrideSampleFps == null
+        ? 'preset baseline loading from backend. current: auto.'
+        : `preset: ${presetSampleFps == null ? 'loading…' : `${presetSampleFps} fps`}. current override: ${overrideSampleFps} fps.`;
   if (!recordingFps || !Number.isFinite(recordingFps)) return base;
   const maxFps = Math.max(1, Math.ceil(recordingFps));
   return `${base} source: ${Math.round(recordingFps * 10) / 10} fps · max: ${maxFps} fps.`;
@@ -360,20 +491,67 @@ export function buildV1SampleFpsAnnotation(
   return frameNote ? `${frameNote} · ${fpsNote}` : fpsNote;
 }
 
-export function formatHybridMinDwellAnnotation(settings: RunSettings): string {
-  const presetMinDwellMs = analysisPresetDefaults[settings.analysis_preset].minDwellMs;
+export function formatHybridMinDwellAnnotation(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetMinDwellMs = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).minDwellMs;
   const overrideMinDwellMs = settings.advanced?.min_dwell_ms;
-  return overrideMinDwellMs == null
+  return overrideMinDwellMs == null && presetMinDwellMs != null
     ? `preset: ${presetMinDwellMs}ms. current: auto, using the preset value.`
-    : `preset: ${presetMinDwellMs}ms. current override: ${overrideMinDwellMs}ms.`;
+    : overrideMinDwellMs == null
+      ? 'preset baseline loading from backend. current: auto.'
+      : `preset: ${presetMinDwellMs == null ? 'loading…' : `${presetMinDwellMs}ms`}. current override: ${overrideMinDwellMs}ms.`;
 }
 
-export function formatHybridSettleWindowAnnotation(settings: RunSettings): string {
-  const presetSettleWindowMs = analysisPresetDefaults[settings.analysis_preset].settleWindowMs;
+export function formatHybridSettleWindowAnnotation(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetSettleWindowMs = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).settleWindowMs;
   const overrideSettleWindowMs = settings.advanced?.settle_window_ms;
-  return overrideSettleWindowMs == null
+  return overrideSettleWindowMs == null && presetSettleWindowMs != null
     ? `preset: ${presetSettleWindowMs}ms. current: auto, using the preset value.`
-    : `preset: ${presetSettleWindowMs}ms. current override: ${overrideSettleWindowMs}ms.`;
+    : overrideSettleWindowMs == null
+      ? 'preset baseline loading from backend. current: auto.'
+      : `preset: ${presetSettleWindowMs == null ? 'loading…' : `${presetSettleWindowMs}ms`}. current override: ${overrideSettleWindowMs}ms.`;
+}
+
+export function formatHybridProposalThresholdAnnotation(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetProposalThreshold = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).proposalThreshold;
+  return buildHybridThresholdAnnotationCopy(
+    presetProposalThreshold,
+    settings.advanced?.proposal_threshold,
+    'lower values propose more event windows; higher values are stricter.',
+  );
+}
+
+export function formatHybridSettleThresholdAnnotation(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetSettleThreshold = getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).settleThreshold;
+  return buildHybridThresholdAnnotationCopy(
+    presetSettleThreshold,
+    settings.advanced?.settle_threshold,
+    'lower values keep active events alive longer; higher values end them sooner.',
+  );
+}
+
+export function formatHybridOcrTriggerThresholdAnnotation(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
+  const presetOcrTriggerThreshold =
+    getHybridPresetRuntimeValues(analysisMetadata, settings.analysis_preset).ocrTriggerThreshold;
+  return buildHybridThresholdAnnotationCopy(
+    presetOcrTriggerThreshold,
+    settings.advanced?.ocr_trigger_threshold,
+    'lower values run OCR confirmation more readily; higher values save OCR work but may miss text-led changes.',
+  );
 }
 
 export function formatHybridOcrAnnotation(settings: RunSettings): string {
@@ -434,6 +612,9 @@ export function areRunSettingsEqual(left: RunSettings, right: RunSettings): bool
     (left.advanced?.sample_fps_override ?? null) === (right.advanced?.sample_fps_override ?? null) &&
     (left.advanced?.min_dwell_ms ?? null) === (right.advanced?.min_dwell_ms ?? null) &&
     (left.advanced?.settle_window_ms ?? null) === (right.advanced?.settle_window_ms ?? null) &&
+    (left.advanced?.proposal_threshold ?? null) === (right.advanced?.proposal_threshold ?? null) &&
+    (left.advanced?.settle_threshold ?? null) === (right.advanced?.settle_threshold ?? null) &&
+    (left.advanced?.ocr_trigger_threshold ?? null) === (right.advanced?.ocr_trigger_threshold ?? null) &&
     (left.advanced?.enable_ocr ?? true) === (right.advanced?.enable_ocr ?? true) &&
     (left.advanced?.ocr_backend ?? null) === (right.advanced?.ocr_backend ?? null) &&
     left.tolerance === right.tolerance &&
@@ -445,14 +626,18 @@ export function areRunSettingsEqual(left: RunSettings, right: RunSettings): bool
   );
 }
 
-export function formatRunSettingsSummary(settings: RunSettings): string {
+export function formatRunSettingsSummary(
+  settings: RunSettings,
+  analysisMetadata?: AnalysisMetadata | null,
+): string {
   if (settings.analysis_engine === 'hybrid_v2') {
-    const sampleFps =
-      settings.advanced?.sample_fps_override ?? analysisPresetDefaults[settings.analysis_preset].sampleFps;
     return [
       formatAnalysisEngineLabel(settings.analysis_engine),
       formatAnalysisPresetLabel(settings.analysis_preset),
-      `${sampleFps} fps`,
+      (() => {
+        const sampleFps = getHybridEffectiveSampleFps(settings, analysisMetadata);
+        return sampleFps == null ? 'preset fps' : `${sampleFps} fps`;
+      })(),
       settings.advanced?.enable_ocr === false ? 'ocr off' : 'ocr on',
     ].join(' · ');
   }
@@ -470,6 +655,10 @@ export function formatRunSettingsSummary(settings: RunSettings): string {
 }
 
 export function serializeRunPresetText(settings: RunSettings): string {
+  const extractOffsetLine =
+    settings.analysis_engine === 'hybrid_v2'
+      ? `extract offset: ${settings.extract_offset_ms} ms (v1 only)`
+      : `extract offset: ${settings.extract_offset_ms} ms`;
   return [
     'stepthrough detection preset',
     `engine: ${settings.analysis_engine}`,
@@ -477,13 +666,22 @@ export function serializeRunPresetText(settings: RunSettings): string {
     `hybrid sample fps override: ${settings.advanced?.sample_fps_override ?? 'auto'}`,
     `hybrid min dwell: ${settings.advanced?.min_dwell_ms ?? 'auto'} ms`,
     `hybrid settle window: ${settings.advanced?.settle_window_ms ?? 'auto'} ms`,
+    `hybrid proposal threshold: ${
+      settings.advanced?.proposal_threshold == null ? 'auto' : settings.advanced.proposal_threshold.toFixed(2)
+    }`,
+    `hybrid settle threshold: ${
+      settings.advanced?.settle_threshold == null ? 'auto' : settings.advanced.settle_threshold.toFixed(2)
+    }`,
+    `hybrid ocr trigger threshold: ${
+      settings.advanced?.ocr_trigger_threshold == null ? 'auto' : settings.advanced.ocr_trigger_threshold.toFixed(2)
+    }`,
     `hybrid ocr: ${settings.advanced?.enable_ocr === false ? 'disabled' : 'enabled'}`,
     `mode: ${formatDetectorModeLabel(settings.detector_mode)}`,
     `tolerance: ${settings.tolerance}`,
     `min scene gap: ${settings.min_scene_gap_ms} ms`,
     `sample fps: ${settings.sample_fps ?? 'source stream'}`,
     `high-fps sampling: ${settings.allow_high_fps_sampling ? 'enabled' : 'disabled'}`,
-    `extract offset: ${settings.extract_offset_ms} ms`,
+    extractOffsetLine,
   ].join('\n');
 }
 
@@ -504,6 +702,23 @@ export function parseRunPresetText(rawText: string): { error: string } | { setti
 
   const fieldValues = new Map<string, string>();
   const supportedFields = new Set([
+    'engine',
+    'preset',
+    'hybrid sample fps override',
+    'hybrid min dwell',
+    'hybrid settle window',
+    'hybrid proposal threshold',
+    'hybrid settle threshold',
+    'hybrid ocr trigger threshold',
+    'hybrid ocr',
+    'mode',
+    'tolerance',
+    'min scene gap',
+    'sample fps',
+    'high-fps sampling',
+    'extract offset',
+  ]);
+  const requiredFields = new Set([
     'engine',
     'preset',
     'hybrid sample fps override',
@@ -540,7 +755,7 @@ export function parseRunPresetText(rawText: string): { error: string } | { setti
     fieldValues.set(label, value);
   }
 
-  const missingFields = [...supportedFields].filter((label) => !fieldValues.has(label));
+  const missingFields = [...requiredFields].filter((label) => !fieldValues.has(label));
   if (missingFields.length) {
     return { error: `Preset text is missing ${missingFields.join(', ')}.` };
   }
@@ -575,6 +790,21 @@ export function parseRunPresetText(rawText: string): { error: string } | { setti
     return { error: 'Hybrid OCR must be Enabled or Disabled.' };
   }
 
+  const hybridProposalThresholdValue = fieldValues.get('hybrid proposal threshold') ?? 'auto';
+  if (!/^auto$/i.test(hybridProposalThresholdValue) && !/^-?\d+(?:\.\d+)?$/.test(hybridProposalThresholdValue)) {
+    return { error: 'Hybrid proposal threshold must be a decimal number or "Auto".' };
+  }
+
+  const hybridSettleThresholdValue = fieldValues.get('hybrid settle threshold') ?? 'auto';
+  if (!/^auto$/i.test(hybridSettleThresholdValue) && !/^-?\d+(?:\.\d+)?$/.test(hybridSettleThresholdValue)) {
+    return { error: 'Hybrid settle threshold must be a decimal number or "Auto".' };
+  }
+
+  const hybridOcrTriggerThresholdValue = fieldValues.get('hybrid ocr trigger threshold') ?? 'auto';
+  if (!/^auto$/i.test(hybridOcrTriggerThresholdValue) && !/^-?\d+(?:\.\d+)?$/.test(hybridOcrTriggerThresholdValue)) {
+    return { error: 'Hybrid OCR trigger threshold must be a decimal number or "Auto".' };
+  }
+
   const modeValue = fieldValues.get('mode')!.toLowerCase();
   if (modeValue !== 'content' && modeValue !== 'adaptive') {
     return { error: 'Mode must be Content or Adaptive.' };
@@ -601,7 +831,7 @@ export function parseRunPresetText(rawText: string): { error: string } | { setti
   }
 
   const extractOffsetValue = fieldValues.get('extract offset')!;
-  if (!/^-?\d+\s*ms$/i.test(extractOffsetValue)) {
+  if (!/^-?\d+\s*ms(?:\s*\(v1 only\))?$/i.test(extractOffsetValue)) {
     return { error: 'Extract offset must end with "ms".' };
   }
 
@@ -621,6 +851,15 @@ export function parseRunPresetText(rawText: string): { error: string } | { setti
               settle_window_ms: /^auto\s*ms$/i.test(hybridSettleValue)
                 ? null
                 : Number.parseInt(hybridSettleValue, 10),
+              proposal_threshold: /^auto$/i.test(hybridProposalThresholdValue)
+                ? null
+                : Number.parseFloat(hybridProposalThresholdValue),
+              settle_threshold: /^auto$/i.test(hybridSettleThresholdValue)
+                ? null
+                : Number.parseFloat(hybridSettleThresholdValue),
+              ocr_trigger_threshold: /^auto$/i.test(hybridOcrTriggerThresholdValue)
+                ? null
+                : Number.parseFloat(hybridOcrTriggerThresholdValue),
               enable_ocr: hybridOcrValue === 'enabled',
               ocr_backend: hybridOcrValue === 'enabled' ? 'paddleocr' : null,
             }

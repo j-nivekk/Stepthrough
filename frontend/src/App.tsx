@@ -11,6 +11,7 @@ import {
   deleteRecording,
   deleteRun,
   exportRun,
+  getAnalysisMetadata,
   getProject,
   getRecording,
   getRun,
@@ -61,6 +62,7 @@ import {
 } from './lib/runSettings';
 import { workflowViewportMinimums, type ProjectEntryTarget, type WorkflowStage } from './lib/workflow';
 import type {
+  AnalysisMetadata,
   CandidateFrame,
   CandidateStatus,
   ExportMode,
@@ -120,6 +122,13 @@ function App() {
     },
   });
   const backendReady = healthQuery.isSuccess;
+  const analysisMetadataQuery = useQuery<AnalysisMetadata>({
+    queryKey: ['analysis-metadata'],
+    queryFn: getAnalysisMetadata,
+    enabled: backendReady,
+    staleTime: Infinity,
+  });
+  const analysisMetadata = analysisMetadataQuery.data ?? null;
   const ocrStatus = healthQuery.data?.ocr_status ?? null;
   const ocrAvailability = healthQuery.data?.ocr_available;
   const ocrStatusMessage = backendReady ? healthQuery.data?.ocr_message ?? null : null;
@@ -1423,6 +1432,7 @@ function App() {
     <>
       <AnalysisScreen
         acceptedStepSimilarityLinks={acceptedStepSimilarityLinks}
+        analysisMetadata={analysisMetadata}
         abortRunPending={abortRunMutation.isPending}
         activeProject={activeProject}
         analysisActionMessage={analysisActionMessage}

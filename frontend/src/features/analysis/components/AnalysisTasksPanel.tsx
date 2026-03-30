@@ -1,8 +1,9 @@
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
+import { getHybridEffectiveSampleFps } from '../../../lib/analysisMetadata';
 import { formatElapsedDuration } from '../../../lib/utils';
-import { analysisPresetDefaults, formatAnalysisEngineLabel, formatAnalysisPresetLabel } from '../../../lib/runSettings';
+import { formatAnalysisEngineLabel, formatAnalysisPresetLabel } from '../../../lib/runSettings';
 import { formatPercent, formatRunShortTimestamp } from '../../../lib/formatters';
-import type { RunSettings, RunSummary } from '../../../types';
+import type { AnalysisMetadata, RunSettings, RunSummary } from '../../../types';
 
 interface AnalysisTaskRowSetting {
   isDirty: boolean;
@@ -14,6 +15,7 @@ interface AnalysisTaskRowSetting {
 
 export interface AnalysisTasksPanelProps {
   analysisTaskItems: AnalysisTaskItem[];
+  analysisMetadata: AnalysisMetadata | null;
   bulkDeletePending: boolean;
   bulkExportPending: boolean;
   enableV1Engine: boolean;
@@ -43,6 +45,7 @@ export interface AnalysisTasksPanelProps {
 
 export function AnalysisTasksPanel({
   analysisTaskItems,
+  analysisMetadata,
   bulkDeletePending,
   bulkExportPending,
   enableV1Engine,
@@ -105,7 +108,10 @@ export function AnalysisTasksPanel({
             {
               key: 'hybrid-fps',
               label: 'fps',
-              value: String(run.advanced?.sample_fps_override ?? analysisPresetDefaults[run.analysis_preset].sampleFps),
+              value: (() => {
+                const sampleFps = getHybridEffectiveSampleFps(run, analysisMetadata);
+                return sampleFps == null ? 'preset' : String(sampleFps);
+              })(),
               valueClassName: 'sample-fps',
               isDirty:
                 (run.advanced?.sample_fps_override ?? null) !==
@@ -132,6 +138,42 @@ export function AnalysisTasksPanel({
                     isDirty:
                       (run.advanced.settle_window_ms ?? null) !==
                       (projectDefaultSettings.advanced?.settle_window_ms ?? null),
+                  },
+                ]
+              : []),
+            ...(run.advanced?.proposal_threshold != null
+              ? [
+                  {
+                    key: 'proposal-threshold',
+                    label: 'proposal',
+                    value: run.advanced.proposal_threshold.toFixed(2),
+                    isDirty:
+                      (run.advanced.proposal_threshold ?? null) !==
+                      (projectDefaultSettings.advanced?.proposal_threshold ?? null),
+                  },
+                ]
+              : []),
+            ...(run.advanced?.settle_threshold != null
+              ? [
+                  {
+                    key: 'settle-threshold',
+                    label: 'settle thr',
+                    value: run.advanced.settle_threshold.toFixed(2),
+                    isDirty:
+                      (run.advanced.settle_threshold ?? null) !==
+                      (projectDefaultSettings.advanced?.settle_threshold ?? null),
+                  },
+                ]
+              : []),
+            ...(run.advanced?.ocr_trigger_threshold != null
+              ? [
+                  {
+                    key: 'ocr-trigger-threshold',
+                    label: 'ocr trig',
+                    value: run.advanced.ocr_trigger_threshold.toFixed(2),
+                    isDirty:
+                      (run.advanced.ocr_trigger_threshold ?? null) !==
+                      (projectDefaultSettings.advanced?.ocr_trigger_threshold ?? null),
                   },
                 ]
               : []),

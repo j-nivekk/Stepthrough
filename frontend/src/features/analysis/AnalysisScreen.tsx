@@ -26,14 +26,15 @@ import {
 } from '../../lib/formatters';
 import { StageNavigator } from '../../components/StageNavigator';
 import {
-  analysisPresetDefaults,
-  defaultHybridAdvancedSettings,
   describeAnalysisPreset,
   describeDetectorMode,
   describeExtractOffset,
   describeHybridMinDwellHint,
+  describeHybridOcrTriggerThresholdHint,
   describeHybridOcrConfirmationHint,
+  describeHybridProposalThresholdHint,
   describeHybridSampleFpsOverrideHint,
+  describeHybridSettleThresholdHint,
   describeHybridSettleWindowHint,
   describeMinSceneGap,
   describeSampleFps,
@@ -44,7 +45,6 @@ import {
   getHybridAdvancedDirtyState,
   getSampleFpsGuardrail,
   parseRunPresetText,
-  sanitizeRunSettings,
 } from '../../lib/runSettings';
 import {
   buildReviewExportName,
@@ -56,6 +56,7 @@ import {
   clampInteger,
 } from '../../lib/utils';
 import type {
+  AnalysisMetadata,
   CandidateFrame,
   CandidateStatus,
   ExportMode,
@@ -74,6 +75,7 @@ import type { WorkflowStage } from '../../lib/workflow';
 
 export interface AnalysisScreenProps {
   acceptedStepSimilarityLinks: Map<string, SimilarLink>;
+  analysisMetadata: AnalysisMetadata | null;
   abortRunPending: boolean;
   activeProject: Project | null;
   enableV1Engine: boolean;
@@ -198,6 +200,7 @@ function positionTimelineSegments(
 
 export function AnalysisScreen({
   acceptedStepSimilarityLinks,
+  analysisMetadata,
   abortRunPending,
   activeProject,
   analysisActionMessage,
@@ -315,7 +318,7 @@ export function AnalysisScreen({
       'choose the classic scene detector for continuity, or the hybrid detector to prioritize interface-level changes such as menus, buttons, and content shifts.',
     analysis_preset:
       runSettings.analysis_engine === 'hybrid_v2'
-        ? describeAnalysisPreset(runSettings)
+        ? describeAnalysisPreset(runSettings, analysisMetadata)
         : 'hybrid presets only affect the v2 detector. switch engines to use the ui-change pipeline.',
     allow_high_fps_sampling: sampleFpsGuardrail.isHighFpsRecording
       ? `turn this on to sample above 30 fps or use source fps for this ~${sampleFpsGuardrail.sourceFpsCeiling} fps recording.`
@@ -326,10 +329,13 @@ export function AnalysisScreen({
       runSettings.analysis_engine === 'hybrid_v2'
         ? 'start with the preset. use overrides only when a specific recording still misses or overfires on interface changes.'
         : 'hybrid advanced controls are only used by the v2 detector.',
-    hybrid_min_dwell_ms: describeHybridMinDwellHint(runSettings),
+    hybrid_min_dwell_ms: describeHybridMinDwellHint(runSettings, analysisMetadata),
     hybrid_ocr_confirmation: describeHybridOcrConfirmationHint(),
-    hybrid_sample_fps_override: describeHybridSampleFpsOverrideHint(runSettings),
-    hybrid_settle_window_ms: describeHybridSettleWindowHint(runSettings),
+    hybrid_ocr_trigger_threshold: describeHybridOcrTriggerThresholdHint(runSettings, analysisMetadata),
+    hybrid_proposal_threshold: describeHybridProposalThresholdHint(runSettings, analysisMetadata),
+    hybrid_sample_fps_override: describeHybridSampleFpsOverrideHint(runSettings, analysisMetadata),
+    hybrid_settle_threshold: describeHybridSettleThresholdHint(runSettings, analysisMetadata),
+    hybrid_settle_window_ms: describeHybridSettleWindowHint(runSettings, analysisMetadata),
     load: 'paste stepthrough preset text to load a saved parameter set into the active analysis controls.',
     min_scene_gap_ms: describeMinSceneGap(runSettings.min_scene_gap_ms),
     reset: 'reset the current analysis parameters to this project or universal defaults.',
@@ -1277,6 +1283,7 @@ export function AnalysisScreen({
           />
 
           <AnalysisParametersPanel
+            analysisMetadata={analysisMetadata}
             bindHint={bindHint}
             closePopover={closePopover}
             createRunPending={createRunPending}
@@ -1330,6 +1337,7 @@ export function AnalysisScreen({
 
           <AnalysisTasksPanel
             analysisTaskItems={analysisTaskItems}
+            analysisMetadata={analysisMetadata}
             bulkDeletePending={bulkDeletePending}
             bulkExportPending={bulkExportPending}
             enableV1Engine={enableV1Engine}
@@ -1681,7 +1689,7 @@ export function AnalysisScreen({
                         <option value="">select another completed run</option>
                         {comparableRuns.map((run) => (
                           <option key={run.id} value={run.id}>
-                            {formatRunSettingsSummary(run)} · {new Date(run.created_at).toLocaleString().toLocaleLowerCase()}
+                            {formatRunSettingsSummary(run, analysisMetadata)} · {new Date(run.created_at).toLocaleString().toLocaleLowerCase()}
                           </option>
                         ))}
                       </select>

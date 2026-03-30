@@ -172,31 +172,28 @@ This makes it much better than v1 for:
 
 #### Under the Hood: Engine Modules and Calculations
 
-The Hybrid v2 engine relies strongly on **OpenCV (`cv2`)** for image processing, **NumPy** for matrix mathematics, and optionally **PaddleOCR** for text extraction. Instead of a single tolerance threshold, each sampled frame is scored against the previous frame using a combination of metrics:
+The Hybrid v2 engine relies strongly on **OpenCV (`cv2`)** for image processing, **NumPy** for matrix mathematics, and optionally **PaddleOCR** for text extraction. Instead of a single tolerance threshold, each sampled frame is scored against the previous frame using several signals:
 
 **1. Visual Score**
-A composite score reflecting overall visual change, aggregating:
-- **Structural Loss (45% weight):** A manual SSIM (Structural Similarity Index Measure) calculated using the mean, variance, and covariance of grayscale pixels.
-- **Tile Change Ratio (25% weight):** The frame is divided into a 4x4 grid. OpenCV's `absdiff` calculates how many of the 16 tiles experienced significant pixel shifts.
-- **Changed Regions (20% weight):** After dilating the thresholded difference, `cv2.findContours` maps localized bounding boxes of changed areas. The score is influenced by the intensity of the most drastically changed region.
-- **Edge Differences (10% weight):** Uses `cv2.Canny` to extract outlines and calculates the proportion of edges that moved.
+A composite score reflecting structural change, localized content change, changed regions, edge differences, and tile-level activity. It also penalizes changes that look mostly like stable chrome rather than real content movement.
 
 **2. Motion Score**
-A secondary score focused entirely on movement rather than structural difference, favoring Edge Differences (55% weight), Tile Ratio (25%), and Region Strength (20%).
+A secondary score focused on movement patterns such as scrolling, edge motion, content movement, region strength, and tile activity.
 
 **3. Text Score**
-If the Visual or Motion score trips an initial trigger threshold, the frame is passed into the local **PaddleOCR** neural network. Extracted text from the previous frame is compared to the current frame using a string-distance algorithm to calculate the Text Score.
+If the visual or motion signal is strong enough, Hybrid v2 can trigger selective **PaddleOCR** confirmation. Extracted text from the previous frame is compared with the current frame so text-led UI changes can still count even when the layout barely moves.
 
 **4. The Combined Score & Settle Mechanics**
-Every parsed frame yields a final **Combined Score** (`Visual*0.60 + Motion*0.25 + Text*0.15`). 
+Every parsed frame yields a final **Combined Score** that leans most heavily on visual change, then motion, then text and localized content change.
 When a frame exceeds the `proposal_threshold`, an **Event Window** is opened. Subsequent frames are evaluated and appended as active moving samples until the score dips below the `settle_threshold`. The engine then waits for the **Settle Window** to close without further motion. Finally, it drops the blurriest frames and records the specific frame with the lowest motion as the canonical representative screenshot.
+<!-- START generated:hybrid_v2_presets -->
 ### Hybrid v2 Presets
 
 Hybrid v2 has three presets.
 
 #### Subtle UI
 
-Use this when you want to catch small or brief interface changes.
+Use this when tiny, brief, or text-led UI states matter more than review volume.
 
 Good for:
 
@@ -216,10 +213,13 @@ Current preset baseline:
 - sample fps: 8
 - minimum dwell: 250 ms
 - settle window: 250 ms
+- proposal threshold: 0.19
+- settle threshold: 0.09
+- OCR trigger threshold: 0.13
 
 #### Balanced
 
-This is the default preset and the best starting point for most studies.
+Best starting point for most walkthrough recordings before any advanced tuning.
 
 Good for:
 
@@ -236,12 +236,15 @@ Tradeoff:
 Current preset baseline:
 
 - sample fps: 6
-- minimum dwell: 400 ms
-- settle window: 400 ms
+- minimum dwell: 350 ms
+- settle window: 350 ms
+- proposal threshold: 0.20
+- settle threshold: 0.10
+- OCR trigger threshold: 0.15
 
 #### Ignore Noise
 
-Use this when the recording contains a lot of motion or low-value change.
+Use this when motion, compression shimmer, or repeated micro-change is overwhelming the output.
 
 Good for:
 
@@ -260,6 +263,10 @@ Current preset baseline:
 - sample fps: 4
 - minimum dwell: 700 ms
 - settle window: 700 ms
+- proposal threshold: 0.31
+- settle threshold: 0.16
+- OCR trigger threshold: 0.22
+<!-- END generated:hybrid_v2_presets -->
 
 ### Hybrid v2 Advanced Controls
 
@@ -309,6 +316,54 @@ Raise it when:
 - screenshots are caught mid-animation
 - opening panels or sheets are still moving when captured
 
+#### Proposal Threshold
+
+Controls how much combined evidence is needed before Hybrid v2 opens a new event window.
+
+Lower it when:
+
+- valid UI states are being missed
+- subtle overlays or menus are not starting an event cleanly
+- brief but meaningful changes need more sensitivity
+
+Raise it when:
+
+- too many low-value event windows are opening
+- tiny visual shimmer keeps turning into candidates
+- the detector feels too eager
+
+#### Settle Threshold
+
+Controls how easily an active event window stays alive while motion is calming down.
+
+Lower it when:
+
+- meaningful events are ending too quickly
+- multi-frame transitions split apart too often
+- you want the detector to stay committed a bit longer once it has started an event
+
+Raise it when:
+
+- events linger longer than they should
+- a single interaction keeps stretching into too much nearby motion
+- the detector should settle faster after the main change has passed
+
+#### OCR Trigger Threshold
+
+Controls how strong the signal should be before Hybrid v2 escalates to OCR confirmation.
+
+Lower it when:
+
+- text changes matter a lot
+- wording or number changes are getting missed
+- visually subtle but text-heavy changes should get more OCR help
+
+Raise it when:
+
+- you want OCR to stay more selective
+- most useful changes are already obvious visually
+- you want to reduce OCR work on noisy recordings
+
 #### OCR Confirmation
 
 OCR confirmation helps validate text-heavy UI changes.
@@ -343,8 +398,11 @@ Leave it **on** when:
 
 Turn it **off** when:
 
+- speed is your priority
 - you want pure visual-diff behavior
 - OCR adds no value for the recording
+
+The app intentionally keeps deeper engine constants such as frame-edge resizing, tile-grid size, contour cutoffs, OCR cache limits, and transition classification heuristics internal for now. The exposed advanced controls are the supported tuning surface.
 
 ### Current v1
 

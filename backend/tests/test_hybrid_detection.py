@@ -81,6 +81,9 @@ def test_resolve_hybrid_config_uses_preset_defaults() -> None:
     assert config.min_scene_gap_ms == 900
     assert config.min_dwell_ms == 250
     assert config.settle_window_ms == 250
+    assert config.proposal_threshold == 0.19
+    assert config.settle_threshold == 0.09
+    assert config.ocr_trigger_threshold == 0.13
     assert config.enable_ocr is True
     assert config.ocr_backend == "paddleocr"
 
@@ -89,7 +92,15 @@ def test_resolve_hybrid_config_applies_overrides_and_clamps_to_source_fps() -> N
     settings = RunSettings(
         analysis_engine="hybrid_v2",
         analysis_preset="balanced",
-        advanced=HybridAdvancedSettings(sample_fps_override=120, min_dwell_ms=150, settle_window_ms=500, enable_ocr=False),
+        advanced=HybridAdvancedSettings(
+            sample_fps_override=120,
+            min_dwell_ms=150,
+            settle_window_ms=500,
+            proposal_threshold=0.18,
+            settle_threshold=0.08,
+            ocr_trigger_threshold=0.11,
+            enable_ocr=False,
+        ),
     )
 
     config = resolve_hybrid_config(settings, fps=24)
@@ -97,6 +108,9 @@ def test_resolve_hybrid_config_applies_overrides_and_clamps_to_source_fps() -> N
     assert config.sample_fps == 24
     assert config.min_dwell_ms == 150
     assert config.settle_window_ms == 500
+    assert config.proposal_threshold == 0.18
+    assert config.settle_threshold == 0.08
+    assert config.ocr_trigger_threshold == 0.11
     assert config.enable_ocr is False
     assert config.ocr_backend is None
 

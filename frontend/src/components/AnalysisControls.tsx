@@ -68,6 +68,7 @@ export interface AnalysisStepperInputProps {
   min?: number;
   onChange: (rawValue: string) => void;
   onStep: (direction: -1 | 1) => void;
+  step?: number | 'any';
   value: number | string;
 }
 
@@ -78,6 +79,7 @@ export function AnalysisStepperInput({
   min,
   onChange,
   onStep,
+  step,
   value,
 }: AnalysisStepperInputProps) {
   return (
@@ -106,6 +108,7 @@ export function AnalysisStepperInput({
         max={max}
         min={min}
         onChange={(event) => onChange(event.target.value)}
+        step={step}
         type="number"
         value={value}
       />
