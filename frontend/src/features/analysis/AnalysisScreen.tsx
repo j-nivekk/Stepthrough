@@ -41,6 +41,7 @@ import {
   formatAnalysisEngineLabel,
   formatAnalysisPresetLabel,
   formatRunSettingsSummary,
+  getHybridAdvancedDirtyState,
   getSampleFpsGuardrail,
   parseRunPresetText,
   sanitizeRunSettings,
@@ -348,14 +349,7 @@ export function AnalysisScreen({
   );
   const isEngineDirty = runSettings.analysis_engine !== projectDefaultSettings.analysis_engine;
   const isPresetDirty = runSettings.analysis_preset !== projectDefaultSettings.analysis_preset;
-  const isHybridAdvancedDirty =
-    (runSettings.advanced?.sample_fps_override ?? null) !==
-      (projectDefaultSettings.advanced?.sample_fps_override ?? null) ||
-    (runSettings.advanced?.min_dwell_ms ?? null) !==
-      (projectDefaultSettings.advanced?.min_dwell_ms ?? null) ||
-    (runSettings.advanced?.settle_window_ms ?? null) !==
-      (projectDefaultSettings.advanced?.settle_window_ms ?? null) ||
-    (runSettings.advanced?.enable_ocr ?? true) !== (projectDefaultSettings.advanced?.enable_ocr ?? true);
+  const hybridAdvancedDirtyState = getHybridAdvancedDirtyState(runSettings, projectDefaultSettings);
   const isToleranceDirty = runSettings.tolerance !== projectDefaultSettings.tolerance;
   const isMinSceneGapDirty =
     runSettings.min_scene_gap_ms !== projectDefaultSettings.min_scene_gap_ms;
@@ -1292,7 +1286,7 @@ export function AnalysisScreen({
             isEngineDirty={isEngineDirty}
             isExtractOffsetDirty={isExtractOffsetDirty}
             isHighFpsDirty={isHighFpsDirty}
-            isHybridAdvancedDirty={isHybridAdvancedDirty}
+            hybridAdvancedDirtyState={hybridAdvancedDirtyState}
             isMinSceneGapDirty={isMinSceneGapDirty}
             isPresetDirty={isPresetDirty}
             isSampleFpsDirty={isSampleFpsDirty}
