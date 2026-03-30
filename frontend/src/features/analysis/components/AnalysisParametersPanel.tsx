@@ -20,6 +20,7 @@ import {
   mapToleranceToDetectorThreshold,
   sanitizeRunSettings,
 } from '../../../lib/runSettings';
+import type { HybridAdvancedDirtyState } from '../../../lib/runSettings';
 import type { RecordingSummary, RunSettings } from '../../../types';
 
 type HintBindingProps = Pick<
@@ -39,7 +40,7 @@ export interface AnalysisParametersPanelProps {
   isEngineDirty: boolean;
   isExtractOffsetDirty: boolean;
   isHighFpsDirty: boolean;
-  isHybridAdvancedDirty: boolean;
+  hybridAdvancedDirtyState: HybridAdvancedDirtyState;
   isMinSceneGapDirty: boolean;
   isPresetDirty: boolean;
   isSampleFpsDirty: boolean;
@@ -89,7 +90,7 @@ export function AnalysisParametersPanel({
   isEngineDirty,
   isExtractOffsetDirty,
   isHighFpsDirty,
-  isHybridAdvancedDirty,
+  hybridAdvancedDirtyState,
   isMinSceneGapDirty,
   isPresetDirty,
   isSampleFpsDirty,
@@ -129,6 +130,7 @@ export function AnalysisParametersPanel({
   const hybridOcrAnnotation = ocrStatusMessage
     ? `${formatHybridOcrAnnotation(runSettings)} ${ocrStatusMessage}`
     : formatHybridOcrAnnotation(runSettings);
+  const projectHybridAdvancedDefaults = projectDefaultSettings.advanced ?? defaultHybridAdvancedSettings;
 
   return (
     <section className="analysis-column analysis-parameter-column" ref={parameterColumnRef}>
@@ -392,13 +394,13 @@ export function AnalysisParametersPanel({
               <summary className="analysis-tuning-summary" {...bindHint('hybrid_advanced')}>
                 <span>advanced hybrid tuning</span>
                 <span className="analysis-tuning-summary-actions">
-                  {isHybridAdvancedDirty ? (
+                  {hybridAdvancedDirtyState.any ? (
                     <AnalysisResetDiamondButton
                       label="advanced hybrid tuning"
                       onClick={() => {
                         setRunSettings((current) => ({
                           ...current,
-                          advanced: projectDefaultSettings.advanced ?? { ...defaultHybridAdvancedSettings },
+                          advanced: { ...projectHybridAdvancedDefaults },
                         }));
                       }}
                     />
@@ -453,6 +455,26 @@ export function AnalysisParametersPanel({
                         value={runSettings.advanced?.sample_fps_override ?? ''}
                       />
                     </div>
+                    {hybridAdvancedDirtyState.sampleFpsOverride ? (
+                      <AnalysisResetDiamondButton
+                        className="outside"
+                        label="hybrid sample fps override"
+                        onClick={() =>
+                          setRunSettings((current) =>
+                            clampRunSettingsForRecording(
+                              {
+                                ...current,
+                                advanced: {
+                                  ...(current.advanced ?? defaultHybridAdvancedSettings),
+                                  sample_fps_override: projectHybridAdvancedDefaults.sample_fps_override ?? null,
+                                },
+                              },
+                              selectedRecordingSummary?.fps ?? null,
+                            ),
+                          )
+                        }
+                      />
+                    ) : null}
                   </label>
                   <span className="analysis-parameter-annotation">
                     {formatHybridSampleFpsAnnotation(runSettings, selectedRecordingSummary?.fps)}
@@ -495,6 +517,21 @@ export function AnalysisParametersPanel({
                         <span className="analysis-parameter-suffix">ms</span>
                       </div>
                     </div>
+                    {hybridAdvancedDirtyState.minDwellMs ? (
+                      <AnalysisResetDiamondButton
+                        className="outside"
+                        label="hybrid minimum dwell"
+                        onClick={() =>
+                          setRunSettings((current) => ({
+                            ...current,
+                            advanced: {
+                              ...(current.advanced ?? defaultHybridAdvancedSettings),
+                              min_dwell_ms: projectHybridAdvancedDefaults.min_dwell_ms ?? null,
+                            },
+                          }))
+                        }
+                      />
+                    ) : null}
                   </label>
                   <span className="analysis-parameter-annotation">
                     {formatHybridMinDwellAnnotation(runSettings)}
@@ -537,6 +574,21 @@ export function AnalysisParametersPanel({
                         <span className="analysis-parameter-suffix">ms</span>
                       </div>
                     </div>
+                    {hybridAdvancedDirtyState.settleWindowMs ? (
+                      <AnalysisResetDiamondButton
+                        className="outside"
+                        label="hybrid settle window"
+                        onClick={() =>
+                          setRunSettings((current) => ({
+                            ...current,
+                            advanced: {
+                              ...(current.advanced ?? defaultHybridAdvancedSettings),
+                              settle_window_ms: projectHybridAdvancedDefaults.settle_window_ms ?? null,
+                            },
+                          }))
+                        }
+                      />
+                    ) : null}
                   </label>
                   <span className="analysis-parameter-annotation">
                     {formatHybridSettleWindowAnnotation(runSettings)}
@@ -584,6 +636,24 @@ export function AnalysisParametersPanel({
                         </button>
                       </div>
                     </div>
+                    {hybridAdvancedDirtyState.enableOcr ? (
+                      <AnalysisResetDiamondButton
+                        className="outside"
+                        label="hybrid ocr confirmation"
+                        onClick={() =>
+                          setRunSettings((current) => ({
+                            ...current,
+                            advanced: {
+                              ...(current.advanced ?? defaultHybridAdvancedSettings),
+                              enable_ocr: projectHybridAdvancedDefaults.enable_ocr,
+                              ocr_backend: projectHybridAdvancedDefaults.enable_ocr
+                                ? (projectHybridAdvancedDefaults.ocr_backend ?? 'paddleocr')
+                                : null,
+                            },
+                          }))
+                        }
+                      />
+                    ) : null}
                   </div>
                   <span className="analysis-parameter-annotation">{hybridOcrAnnotation}</span>
                 </div>

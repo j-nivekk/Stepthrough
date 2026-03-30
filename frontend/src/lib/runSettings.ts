@@ -33,6 +33,39 @@ export const analysisPresetDefaults = {
   noise_resistant: { minDwellMs: 700, sampleFps: 4, settleWindowMs: 700 },
 } as const;
 
+export interface HybridAdvancedDirtyState {
+  sampleFpsOverride: boolean;
+  minDwellMs: boolean;
+  settleWindowMs: boolean;
+  enableOcr: boolean;
+  any: boolean;
+}
+
+export function getHybridAdvancedDirtyState(
+  settings: Pick<RunSettings, 'advanced'>,
+  defaultSettings: Pick<RunSettings, 'advanced'>,
+): HybridAdvancedDirtyState {
+  const sampleFpsOverride =
+    (settings.advanced?.sample_fps_override ?? null) !==
+    (defaultSettings.advanced?.sample_fps_override ?? null);
+  const minDwellMs =
+    (settings.advanced?.min_dwell_ms ?? null) !==
+    (defaultSettings.advanced?.min_dwell_ms ?? null);
+  const settleWindowMs =
+    (settings.advanced?.settle_window_ms ?? null) !==
+    (defaultSettings.advanced?.settle_window_ms ?? null);
+  const enableOcr =
+    (settings.advanced?.enable_ocr ?? true) !== (defaultSettings.advanced?.enable_ocr ?? true);
+
+  return {
+    sampleFpsOverride,
+    minDwellMs,
+    settleWindowMs,
+    enableOcr,
+    any: sampleFpsOverride || minDwellMs || settleWindowMs || enableOcr,
+  };
+}
+
 export function sanitizeRunSettings(settings?: Partial<RunSettings> | null): RunSettings {
   const analysisEngine = settings?.analysis_engine === 'hybrid_v2' ? 'hybrid_v2' : 'scene_v1';
   const analysisPreset =
