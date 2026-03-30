@@ -1,5 +1,9 @@
 # First Tutorial
 
+<p align="center">
+  <img src="../../assets/walkthrough.webp" width="100%" alt="Stepthrough Complete Workflow Demo">
+</p>
+
 This tutorial is meant for a first guided session with new researchers. It assumes the app is already available and ready to use.
 
 ## Goal
@@ -65,6 +69,10 @@ Then run the analysis.
 ### 4. Check The Result
 
 When the run is completed, open the candidate review area.
+
+<p align="center">
+  <img src="../../assets/review-board.png" width="100%" alt="Review Board Example">
+</p>
 
 Look through the proposed steps and ask:
 
