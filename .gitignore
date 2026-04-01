@@ -11,3 +11,5 @@ backend/tests/eval/results/demos/
 website/node_modules/
 website/dist/
 TODO.md
+.vscode/
+.pytest_cache/
