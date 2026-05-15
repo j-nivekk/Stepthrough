@@ -6,11 +6,6 @@
 ![Python Backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20PySceneDetect-3776AB.svg)
 ![React Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB.svg)
 
-<br/>
-<p align="center">
-  <img src="assets/walkthrough.webp" width="100%" alt="Stepthrough UI Walkthrough">
-</p>
-<br/>
 
 ## 📌 Features
 
