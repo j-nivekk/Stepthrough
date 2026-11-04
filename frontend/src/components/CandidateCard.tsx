@@ -258,7 +258,13 @@ export function CandidateCard({
                   ) : null}
                   {hasFiniteNumber(candidate.score_breakdown.dwell_after_ms) ? (
                     <span>
-                      dwell after <strong className="info-text">{candidate.score_breakdown.dwell_after_ms}ms</strong>
+                      {candidate.score_breakdown.grouped_states != null ? 'on screen' : 'dwell after'}{' '}
+                      <strong className="info-text">{candidate.score_breakdown.dwell_after_ms}ms</strong>
+                    </span>
+                  ) : null}
+                  {hasFiniteNumber(candidate.score_breakdown.grouped_states) && candidate.score_breakdown.grouped_states > 1 ? (
+                    <span>
+                      grouped <strong className="info-text">{candidate.score_breakdown.grouped_states} states</strong>
                     </span>
                   ) : null}
                   <span>{candidate.score_breakdown.changed_regions.length} changed regions</span>

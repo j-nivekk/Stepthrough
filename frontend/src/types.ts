@@ -1,4 +1,6 @@
-export type AnalysisEngine = 'scene_v1' | 'hybrid_v2';
+export type AnalysisEngine = 'scene_v1' | 'hybrid_v2' | 'stable_v3';
+export type RecordingType = 'phone' | 'desktop';
+export type ScrollMode = 'each_stop' | 'merge';
 export type AnalysisPreset = 'subtle_ui' | 'balanced' | 'noise_resistant';
 export type OcrBackend = 'paddleocr';
 export type OcrStatus = 'checking' | 'available' | 'unavailable';
@@ -9,6 +11,8 @@ export type TransitionType =
   | 'modal'
   | 'content_update'
   | 'small_ui_change'
+  | 'text_entry'
+  | 'opening_screen'
   | 'unknown';
 export type DetectorMode = 'content' | 'adaptive';
 export type CandidateStatus = 'pending' | 'accepted' | 'rejected';
@@ -60,8 +64,18 @@ export interface AnalysisControlMetadata {
   note?: string | null;
 }
 
+export interface StableRecordingTypeMetadata {
+  label: string;
+  description: string;
+  min_dwell_ms: number;
+  min_change_percent: number;
+  ignore_status_bar: boolean;
+}
+
 export interface AnalysisMetadata {
   hybrid_presets: Record<AnalysisPreset, HybridPresetMetadata>;
+  stable_recording_types?: Partial<Record<RecordingType, StableRecordingTypeMetadata>>;
+  stable_engine_version?: string | null;
   controls_by_engine: Record<AnalysisEngine, Record<string, AnalysisControlMetadata>>;
 }
 
@@ -105,6 +119,29 @@ export interface HybridAdvancedSettings {
   ocr_backend?: OcrBackend | null;
 }
 
+/** A box the stable engine ignores, as shares (0 to 1) of the frame's width and height. */
+export interface IgnoreRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Settings of the stable-screen engine. `null` means "use the recording type's default". */
+export interface StableSettings {
+  recording_type: RecordingType;
+  min_dwell_ms: number | null;
+  min_change_percent: number | null;
+  ignore_regions: IgnoreRegion[];
+  ignore_status_bar: boolean | null;
+  scroll_mode: ScrollMode;
+  group_typing: boolean;
+  include_opening_screen: boolean;
+  enable_ocr: boolean;
+  sensitivity: number | null;
+  sample_fps: number | null;
+}
+
 export interface RunSummary {
   id: string;
   recording_id: string;
@@ -113,6 +150,9 @@ export interface RunSummary {
   analysis_engine: AnalysisEngine;
   analysis_preset: AnalysisPreset;
   advanced?: HybridAdvancedSettings | null;
+  stable?: StableSettings | null;
+  analysis_config?: Record<string, unknown> | null;
+  engine_version?: string | null;
   detector_mode: DetectorMode;
   tolerance: number;
   min_scene_gap_ms: number;
@@ -159,6 +199,7 @@ export interface CandidateScoreBreakdown {
   dwell_after_ms?: number | null;
   event_start_ms?: number | null;
   event_end_ms?: number | null;
+  grouped_states?: number | null;
 }
 
 export interface CandidateFrame {
@@ -233,6 +274,7 @@ export interface RunSettings {
   analysis_engine: AnalysisEngine;
   analysis_preset: AnalysisPreset;
   advanced?: HybridAdvancedSettings | null;
+  stable?: StableSettings | null;
   tolerance: number;
   min_scene_gap_ms: number;
   sample_fps: number | null;

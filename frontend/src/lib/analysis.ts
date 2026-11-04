@@ -24,6 +24,18 @@ export type AnalysisHintKey =
   | 'run'
   | 'sample_fps'
   | 'save'
+  | 'stable_advanced'
+  | 'stable_group_typing'
+  | 'stable_ignore_areas'
+  | 'stable_min_change'
+  | 'stable_min_dwell_ms'
+  | 'stable_ocr'
+  | 'stable_opening_screen'
+  | 'stable_recording_type'
+  | 'stable_sample_fps'
+  | 'stable_scroll_mode'
+  | 'stable_sensitivity'
+  | 'stable_status_bar'
   | 'tolerance';
 
 export interface AnalysisTaskItem {

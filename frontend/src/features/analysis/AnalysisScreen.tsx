@@ -72,6 +72,11 @@ import { AnalysisParametersPanel } from './components/AnalysisParametersPanel';
 import { AnalysisTasksPanel } from './components/AnalysisTasksPanel';
 import { AnalysisVideosPanel } from './components/AnalysisVideosPanel';
 import type { WorkflowStage } from '../../lib/workflow';
+import { defaultStableSettings, formatStableSummary } from '../../lib/stableSettings';
+
+function engineShortLabel(engine: RunSettings['analysis_engine']): string {
+  return engine === 'scene_v1' ? 'v1' : engine === 'hybrid_v2' ? 'v2' : 'v3';
+}
 
 export interface AnalysisScreenProps {
   acceptedStepSimilarityLinks: Map<string, SimilarLink>;
@@ -315,7 +320,7 @@ export function AnalysisScreen({
   );
   const hintCopy: Record<AnalysisHintKey, string> = {
     analysis_engine:
-      'choose the classic scene detector for continuity, or the hybrid detector to prioritize interface-level changes such as menus, buttons, and content shifts.',
+      'stable screens finds every screen that stays still and takes one screenshot of it. hybrid v2 is the previous engine, kept for comparison with earlier runs.',
     analysis_preset:
       runSettings.analysis_engine === 'hybrid_v2'
         ? describeAnalysisPreset(runSettings, analysisMetadata)
@@ -342,6 +347,29 @@ export function AnalysisScreen({
     run: 'start a new analysis task for the selected video using the current parameter set.',
     sample_fps: describeSampleFps(runSettings.sample_fps, selectedRecordingSummary?.fps ?? null),
     save: 'save the current analysis parameters for this project or as universal defaults.',
+    stable_advanced:
+      'expert settings. the defaults work for screen recordings; change them only when a specific recording needs it.',
+    stable_group_typing:
+      'on: a burst of typing with short pauses becomes one step showing the finished text. off: every pause longer than the minimum time on screen is its own step.',
+    stable_ignore_areas:
+      'draw boxes over parts of the screen that change without being a step, such as a live clock, an animated banner or an embedded video. changes inside them are ignored.',
+    stable_min_change:
+      'the smallest connected change, as a share of the screen, that counts. lower it to catch tiny badges or toggles; raise it if a moving pointer or small animation creates extra steps.',
+    stable_min_dwell_ms:
+      'how long the screen must stay still to count as a step. shorter catches brief screens; longer skips screens the user only passed through.',
+    stable_ocr:
+      'reads the text in each screenshot so it can be searched and exported. it is not needed to find steps and makes runs slower.',
+    stable_opening_screen: 'include the screen the recording starts on as step 0.',
+    stable_recording_type:
+      'sets sensible defaults: phone recordings ignore the status bar; computer recordings ignore small changes such as the moving mouse pointer.',
+    stable_sample_fps:
+      'how many frames per second are analysed. the default of 15 is enough for interfaces; lower is faster.',
+    stable_scroll_mode:
+      'each stop: every place the page comes to rest is a step. merge stops: a page scrolled in several stops becomes one step.',
+    stable_sensitivity:
+      'how much a pixel must change to count, in multiples of the compression noise measured on this recording (never below 10 grey levels). raise it for noisy recordings.',
+    stable_status_bar:
+      'the phone status bar (clock, battery, recording indicator) changes on its own. ignore it unless it matters for your analysis.',
     tolerance: describeTolerance(runSettings.tolerance, runSettings.detector_mode),
   };
   const activeHintKey = focusedHintKey ?? hoveredHintKey;
@@ -1605,8 +1633,17 @@ export function AnalysisScreen({
                   </div>
                 )}
                 <p className="analysis-detail-meta">
-                  {formatAnalysisEngineLabel(selectedRun.summary.analysis_engine)} ·{' '}
-                  {formatAnalysisPresetLabel(selectedRun.summary.analysis_preset)}
+                  {selectedRun.summary.analysis_engine === 'stable_v3'
+                    ? [
+                        formatAnalysisEngineLabel(selectedRun.summary.analysis_engine),
+                        ...formatStableSummary(selectedRun.summary.stable ?? defaultStableSettings, analysisMetadata),
+                        selectedRun.summary.engine_version,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')
+                    : `${formatAnalysisEngineLabel(selectedRun.summary.analysis_engine)} · ${formatAnalysisPresetLabel(
+                        selectedRun.summary.analysis_preset,
+                      )}`}
                 </p>
                 {!isCompletedReview && selectedRun.summary.message ? (
                   <p className="muted">{selectedRun.summary.message}</p>
@@ -1719,12 +1756,8 @@ export function AnalysisScreen({
                               : row.badge === 'timing_shifted'
                                 ? 'timing shifted'
                                 : row.badge === 'left_only'
-                                  ? selectedRun.summary.analysis_engine === 'scene_v1'
-                                    ? 'v1 only'
-                                    : 'v2 only'
-                                  : comparedRun.summary.analysis_engine === 'scene_v1'
-                                    ? 'v1 only'
-                                    : 'v2 only';
+                                  ? `${engineShortLabel(selectedRun.summary.analysis_engine)} only`
+                                  : `${engineShortLabel(comparedRun.summary.analysis_engine)} only`;
                           return (
                             <article
                               className="analysis-compare-card"
@@ -1842,6 +1875,7 @@ export function AnalysisScreen({
                   <div className="candidate-timeline-wrapper">
                     <div className="timeline-legend" aria-hidden="false">
                       {[
+                        { type: 'opening_screen', label: 'opening' },
                         { type: 'scroll', label: 'scroll' },
                         { type: 'dwell', label: 'dwell' },
                         { type: 'navigation', label: 'navigation' },
@@ -1849,6 +1883,7 @@ export function AnalysisScreen({
                         { type: 'feed_card_swap', label: 'feed swap' },
                         { type: 'content_update', label: 'update' },
                         { type: 'small_ui_change', label: 'ui change' },
+                        { type: 'text_entry', label: 'typing' },
                         { type: 'unknown', label: 'unknown' }
                       ]
                         .filter(({ type }) =>

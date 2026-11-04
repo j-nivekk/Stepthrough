@@ -1,11 +1,21 @@
 import type { AnalysisMetadata, GlobalRunPreset, HybridAdvancedSettings, ProjectRunPreset, RunSettings } from '../types';
 import { getHybridEffectiveSampleFps, getHybridPresetLabel, getHybridPresetRuntimeValues } from './analysisMetadata';
+import {
+  areStableSettingsEqual,
+  defaultStableSettings,
+  formatStableSummary,
+  parseStablePresetFields,
+  sanitizeStableSettings,
+  serializeStablePresetLines,
+  STABLE_PRESET_FIELDS,
+} from './stableSettings';
 import { clampInteger, describeFrameSkip } from './utils';
 
 export const defaultRunSettings: RunSettings = {
-  analysis_engine: 'hybrid_v2',
+  analysis_engine: 'stable_v3',
   analysis_preset: 'balanced',
   advanced: null,
+  stable: defaultStableSettings,
   tolerance: 50,
   min_scene_gap_ms: 900,
   sample_fps: 4,
@@ -128,7 +138,10 @@ export function getHybridAdvancedDirtyState(
 }
 
 export function sanitizeRunSettings(settings?: Partial<RunSettings> | null): RunSettings {
-  const analysisEngine = settings?.analysis_engine === 'hybrid_v2' ? 'hybrid_v2' : 'scene_v1';
+  const analysisEngine: RunSettings['analysis_engine'] =
+    settings?.analysis_engine === 'hybrid_v2' || settings?.analysis_engine === 'scene_v1'
+      ? settings.analysis_engine
+      : 'stable_v3';
   const analysisPreset =
     settings?.analysis_preset === 'subtle_ui' ||
     settings?.analysis_preset === 'noise_resistant' ||
@@ -181,6 +194,7 @@ export function sanitizeRunSettings(settings?: Partial<RunSettings> | null): Run
     analysis_engine: analysisEngine,
     analysis_preset: analysisPreset,
     advanced: analysisEngine === 'hybrid_v2' ? advanced ?? { ...defaultHybridAdvancedSettings } : null,
+    stable: analysisEngine === 'stable_v3' ? sanitizeStableSettings(settings?.stable) : null,
     tolerance,
     min_scene_gap_ms: minSceneGap,
     sample_fps: sampleFps,
@@ -194,7 +208,13 @@ export function enforceLocalOcrAvailability(
   settings: RunSettings,
   ocrAvailable: boolean | null | undefined,
 ): RunSettings {
-  if (ocrAvailable !== false || settings.analysis_engine !== 'hybrid_v2') {
+  if (ocrAvailable !== false) {
+    return settings;
+  }
+  if (settings.analysis_engine === 'stable_v3') {
+    return settings.stable?.enable_ocr ? { ...settings, stable: { ...settings.stable, enable_ocr: false } } : settings;
+  }
+  if (settings.analysis_engine !== 'hybrid_v2') {
     return settings;
   }
   const advanced = settings.advanced ?? { ...defaultHybridAdvancedSettings };
@@ -282,6 +302,7 @@ export function formatDetectorModeLabel(mode: RunSettings['detector_mode']): str
 }
 
 export function formatAnalysisEngineLabel(engine: RunSettings['analysis_engine']): string {
+  if (engine === 'stable_v3') return 'stable screens';
   return engine === 'hybrid_v2' ? 'hybrid v2' : 'current v1';
 }
 
@@ -578,6 +599,9 @@ export function clampRunSettingsForRecording(
   recordingFps: number | null | undefined,
 ): RunSettings {
   const sanitized = sanitizeRunSettings(settings);
+  if (sanitized.analysis_engine === 'stable_v3') {
+    return sanitized;
+  }
   if (sanitized.analysis_engine === 'hybrid_v2') {
     const sourceFps = Math.max(1, Math.ceil(recordingFps && Number.isFinite(recordingFps) ? recordingFps : 30));
     const override = sanitized.advanced?.sample_fps_override;
@@ -609,6 +633,7 @@ export function areRunSettingsEqual(left: RunSettings, right: RunSettings): bool
   return (
     left.analysis_engine === right.analysis_engine &&
     left.analysis_preset === right.analysis_preset &&
+    areStableSettingsEqual(left.stable, right.stable) &&
     (left.advanced?.sample_fps_override ?? null) === (right.advanced?.sample_fps_override ?? null) &&
     (left.advanced?.min_dwell_ms ?? null) === (right.advanced?.min_dwell_ms ?? null) &&
     (left.advanced?.settle_window_ms ?? null) === (right.advanced?.settle_window_ms ?? null) &&
@@ -630,6 +655,12 @@ export function formatRunSettingsSummary(
   settings: RunSettings,
   analysisMetadata?: AnalysisMetadata | null,
 ): string {
+  if (settings.analysis_engine === 'stable_v3') {
+    return [
+      formatAnalysisEngineLabel(settings.analysis_engine),
+      ...formatStableSummary(settings.stable ?? defaultStableSettings, analysisMetadata),
+    ].join(' · ');
+  }
   if (settings.analysis_engine === 'hybrid_v2') {
     return [
       formatAnalysisEngineLabel(settings.analysis_engine),
@@ -655,6 +686,13 @@ export function formatRunSettingsSummary(
 }
 
 export function serializeRunPresetText(settings: RunSettings): string {
+  if (settings.analysis_engine === 'stable_v3') {
+    return [
+      'stepthrough detection preset',
+      'engine: stable_v3',
+      ...serializeStablePresetLines(settings.stable ?? defaultStableSettings),
+    ].join('\n');
+  }
   const extractOffsetLine =
     settings.analysis_engine === 'hybrid_v2'
       ? `extract offset: ${settings.extract_offset_ms} ms (v1 only)`
@@ -699,6 +737,32 @@ export function parseRunPresetText(rawText: string): { error: string } | { setti
     normalizedLines[0]?.toLowerCase() === 'stepthrough detection preset'
       ? normalizedLines.slice(1)
       : normalizedLines;
+
+  const engineLine = lines.find((line) => /^engine\s*:/i.test(line));
+  if (engineLine && /:\s*stable_v3\s*$/i.test(engineLine)) {
+    const stableFields = new Map<string, string>();
+    const allowed = new Set<string>(['engine', ...STABLE_PRESET_FIELDS]);
+    for (const line of lines) {
+      const separatorIndex = line.indexOf(':');
+      if (separatorIndex === -1) {
+        return { error: `Couldn't parse "${line}". Use "Label: Value" lines.` };
+      }
+      const label = line.slice(0, separatorIndex).trim().toLowerCase();
+      const value = line.slice(separatorIndex + 1).trim();
+      if (!allowed.has(label)) {
+        return { error: `Couldn't parse "${line}".` };
+      }
+      if (!value) {
+        return { error: `Add a value for "${label}".` };
+      }
+      stableFields.set(label, value);
+    }
+    const parsed = parseStablePresetFields(stableFields);
+    if ('error' in parsed) {
+      return parsed;
+    }
+    return { settings: sanitizeRunSettings({ ...defaultRunSettings, analysis_engine: 'stable_v3', stable: parsed.stable }) };
+  }
 
   const fieldValues = new Map<string, string>();
   const supportedFields = new Set([
@@ -762,7 +826,7 @@ export function parseRunPresetText(rawText: string): { error: string } | { setti
 
   const engineValue = fieldValues.get('engine')!.toLowerCase();
   if (engineValue !== 'scene_v1' && engineValue !== 'hybrid_v2') {
-    return { error: 'Engine must be scene_v1 or hybrid_v2.' };
+    return { error: 'Engine must be stable_v3, hybrid_v2 or scene_v1.' };
   }
 
   const presetValue = fieldValues.get('preset')!.toLowerCase();
