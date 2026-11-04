@@ -449,7 +449,7 @@ function App() {
   useEffect(() => {
     if (!appPrefs.enableV1Engine && runSettings.analysis_engine === 'scene_v1') {
       setRunSettings((current) =>
-        sanitizeRunSettings({ ...current, analysis_engine: 'hybrid_v2', advanced: current.advanced ?? null }),
+        sanitizeRunSettings({ ...current, analysis_engine: 'stable_v3', stable: current.stable ?? null }),
       );
     }
   }, [appPrefs.enableV1Engine, runSettings.analysis_engine]);

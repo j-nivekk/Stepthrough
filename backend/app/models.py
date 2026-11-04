@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -9,11 +9,23 @@ CandidateOrigin = Literal["detected", "manual"]
 RunStatus = Literal["queued", "running", "awaiting_fallback", "completed", "failed", "cancelled"]
 DetectorMode = Literal["content", "adaptive"]
 ExportMode = Literal["accepted", "all"]
-AnalysisEngine = Literal["scene_v1", "hybrid_v2"]
+AnalysisEngine = Literal["scene_v1", "hybrid_v2", "stable_v3"]
+RecordingType = Literal["phone", "desktop"]
+ScrollMode = Literal["each_stop", "merge"]
 AnalysisPreset = Literal["subtle_ui", "balanced", "noise_resistant"]
 OcrBackend = Literal["paddleocr"]
 OcrStatus = Literal["checking", "available", "unavailable"]
-TransitionType = Literal["navigation", "scroll", "feed_card_swap", "modal", "content_update", "small_ui_change", "unknown"]
+TransitionType = Literal[
+    "navigation",
+    "scroll",
+    "feed_card_swap",
+    "modal",
+    "content_update",
+    "small_ui_change",
+    "text_entry",
+    "opening_screen",
+    "unknown",
+]
 RunPhase = Literal[
     "queued",
     "probing",
@@ -78,10 +90,43 @@ class HybridAdvancedSettings(BaseModel):
         return self
 
 
+class IgnoreRegion(BaseModel):
+    """A box the stable engine ignores, as shares (0 to 1) of the working copy's width and height."""
+
+    x: float = Field(ge=0.0, lt=1.0, allow_inf_nan=False)
+    y: float = Field(ge=0.0, lt=1.0, allow_inf_nan=False)
+    width: float = Field(gt=0.0, le=1.0, allow_inf_nan=False)
+    height: float = Field(gt=0.0, le=1.0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def clip(self) -> "IgnoreRegion":
+        self.width = round(min(self.width, 1.0 - self.x), 4)
+        self.height = round(min(self.height, 1.0 - self.y), 4)
+        self.x, self.y = round(self.x, 4), round(self.y, 4)
+        return self
+
+
+class StableSettings(BaseModel):
+    """Settings of the stable-screen engine. ``None`` means "use the recording type's default"."""
+
+    recording_type: RecordingType = "phone"
+    min_dwell_ms: int | None = Field(default=None, ge=100, le=10_000)
+    min_change_percent: float | None = Field(default=None, ge=0.01, le=25.0, allow_inf_nan=False)
+    ignore_regions: list[IgnoreRegion] = Field(default_factory=list, max_length=16)
+    ignore_status_bar: bool | None = None
+    scroll_mode: ScrollMode = "each_stop"
+    group_typing: bool = True
+    include_opening_screen: bool = True
+    enable_ocr: bool = False
+    sensitivity: float | None = Field(default=None, ge=1.0, le=20.0, allow_inf_nan=False)
+    sample_fps: float | None = Field(default=None, ge=2.0, le=30.0, allow_inf_nan=False)
+
+
 class RunSettings(BaseModel):
-    analysis_engine: AnalysisEngine = "hybrid_v2"
+    analysis_engine: AnalysisEngine = "stable_v3"
     analysis_preset: AnalysisPreset = "balanced"
     advanced: HybridAdvancedSettings | None = None
+    stable: StableSettings | None = None
     tolerance: float = Field(default=50, ge=1, le=100)
     min_scene_gap_ms: int = Field(default=900, ge=0, le=60_000)
     sample_fps: float | None = Field(default=4.0, gt=0)
@@ -91,6 +136,12 @@ class RunSettings(BaseModel):
 
     @model_validator(mode="after")
     def normalize(self) -> "RunSettings":
+        if self.analysis_engine == "stable_v3":
+            self.advanced = None
+            if self.stable is None:
+                self.stable = StableSettings()
+            return self
+        self.stable = None
         if self.analysis_engine == "scene_v1":
             self.advanced = None
         elif self.advanced is None:
@@ -128,6 +179,9 @@ class DetectionRunSummary(BaseModel):
     analysis_engine: AnalysisEngine = "scene_v1"
     analysis_preset: AnalysisPreset = "balanced"
     advanced: HybridAdvancedSettings | None = None
+    stable: StableSettings | None = None
+    analysis_config: dict[str, Any] | None = None
+    engine_version: str | None = None
     detector_mode: DetectorMode
     tolerance: float
     min_scene_gap_ms: int
@@ -170,6 +224,7 @@ class CandidateScoreBreakdown(BaseModel):
     dwell_after_ms: int | None = None
     event_start_ms: int | None = None
     event_end_ms: int | None = None
+    grouped_states: int | None = None
 
 
 class HybridPresetMetadataResponse(BaseModel):
@@ -192,8 +247,18 @@ class AnalysisControlMetadataResponse(BaseModel):
     note: str | None = None
 
 
+class StableRecordingTypeMetadataResponse(BaseModel):
+    label: str
+    description: str
+    min_dwell_ms: int
+    min_change_percent: float
+    ignore_status_bar: bool
+
+
 class AnalysisMetadataResponse(BaseModel):
     hybrid_presets: dict[AnalysisPreset, HybridPresetMetadataResponse]
+    stable_recording_types: dict[RecordingType, StableRecordingTypeMetadataResponse] = Field(default_factory=dict)
+    stable_engine_version: str | None = None
     controls_by_engine: dict[AnalysisEngine, dict[str, AnalysisControlMetadataResponse]]
 
 

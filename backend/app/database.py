@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS detection_runs (
     analysis_engine TEXT NOT NULL DEFAULT 'scene_v1',
     analysis_preset TEXT NOT NULL DEFAULT 'balanced',
     analysis_advanced TEXT,
+    analysis_stable TEXT,
     analysis_config TEXT,
     detector_mode TEXT NOT NULL,
     tolerance REAL NOT NULL,
@@ -175,6 +176,7 @@ def init_db() -> None:
         _ensure_column(conn, "detection_runs", "analysis_preset", "TEXT NOT NULL DEFAULT 'balanced'")
         _ensure_column(conn, "detection_runs", "analysis_advanced", "TEXT")
         _ensure_column(conn, "detection_runs", "analysis_config", "TEXT")
+        _ensure_column(conn, "detection_runs", "analysis_stable", "TEXT")
         _ensure_column(conn, "detection_runs", "allow_high_fps_sampling", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "candidate_frames", "candidate_origin", "TEXT NOT NULL DEFAULT 'detected'")
         _ensure_column(conn, "candidate_frames", "perceptual_hash", "TEXT")

@@ -712,7 +712,8 @@ def _scroll_displacement(previous_gray: np.ndarray, current_gray: np.ndarray) ->
     window = _hann_window(previous_crop.shape)
     previous_float = previous_crop.astype(np.float32)
     current_float = current_crop.astype(np.float32)
-    (dx, dy), response = cv2.phaseCorrelate(previous_float, current_float, window)
+    # phaseCorrelate applies the window to its inputs in place when no padding is needed: pass copies.
+    (dx, dy), response = cv2.phaseCorrelate(previous_float.copy(), current_float.copy(), window)
     baseline_diff = float(np.mean(cv2.absdiff(previous_crop, current_crop)))
     if baseline_diff <= 1e-3:
         return 0.0, 0.0, 0.0

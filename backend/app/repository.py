@@ -254,6 +254,7 @@ def create_run(recording_id: str, settings: RunSettings) -> dict[str, Any]:
         "analysis_engine": settings.analysis_engine,
         "analysis_preset": settings.analysis_preset,
         "analysis_advanced": settings.advanced.model_dump_json() if settings.advanced is not None else None,
+        "analysis_stable": settings.stable.model_dump_json() if settings.stable is not None else None,
         "analysis_config": None,
         "detector_mode": settings.detector_mode,
         "tolerance": settings.tolerance,
@@ -271,11 +272,13 @@ def create_run(recording_id: str, settings: RunSettings) -> dict[str, Any]:
         conn.execute(
             """
             INSERT INTO detection_runs (
-                id, recording_id, status, phase, analysis_engine, analysis_preset, analysis_advanced, analysis_config,
+                id, recording_id, status, phase, analysis_engine, analysis_preset, analysis_advanced, analysis_stable,
+                analysis_config,
                 detector_mode, tolerance, min_scene_gap_ms, sample_fps, allow_high_fps_sampling,
                 extract_offset_ms, progress, message, candidate_count, created_at, updated_at
             ) VALUES (
-                :id, :recording_id, :status, :phase, :analysis_engine, :analysis_preset, :analysis_advanced, :analysis_config,
+                :id, :recording_id, :status, :phase, :analysis_engine, :analysis_preset, :analysis_advanced, :analysis_stable,
+                :analysis_config,
                 :detector_mode, :tolerance, :min_scene_gap_ms, :sample_fps, :allow_high_fps_sampling,
                 :extract_offset_ms, :progress, :message, :candidate_count, :created_at, :updated_at
             )

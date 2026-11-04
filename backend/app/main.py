@@ -75,6 +75,7 @@ from .services.detection import (
 )
 from .services.export import build_accepted_steps, create_export_bundle
 from .services.hybrid_detection import detect_candidates_hybrid, probe_paddleocr_availability, resolve_hybrid_config
+from .services.stable_detection import detect_candidates_stable, resolve_stable_config
 from .services.ingest import ensure_working_copy, working_copy_path
 from .services.jobs import JobManager
 from .services.similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string
@@ -209,9 +210,13 @@ def _require_tools() -> None:
 
 
 def _lock_unavailable_ocr(settings: RunSettings) -> RunSettings:
-    if settings.analysis_engine != "hybrid_v2" or settings.advanced is None:
-        return settings
     if _get_ocr_state().available is not False:
+        return settings
+    if settings.analysis_engine == "stable_v3" and settings.stable is not None:
+        if not settings.stable.enable_ocr:
+            return settings
+        return settings.model_copy(update={"stable": settings.stable.model_copy(update={"enable_ocr": False})})
+    if settings.analysis_engine != "hybrid_v2" or settings.advanced is None:
         return settings
     if settings.advanced.enable_ocr is False and settings.advanced.ocr_backend is None:
         return settings
@@ -239,12 +244,19 @@ def _serialize_project(row: dict) -> ProjectResponse:
     return ProjectResponse(**row)
 
 
+def _json_column(row: dict, key: str) -> Any:
+    value = row.get(key)
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    return value or None
+
+
 def _serialize_run_summary(row: dict) -> DetectionRunSummary:
-    advanced = None
-    if isinstance(row.get("analysis_advanced"), str):
-        advanced = json.loads(row["analysis_advanced"])
-    elif row.get("analysis_advanced"):
-        advanced = row["analysis_advanced"]
+    advanced = _json_column(row, "analysis_advanced")
+    analysis_config = _json_column(row, "analysis_config")
     return DetectionRunSummary(
         id=row["id"],
         recording_id=row["recording_id"],
@@ -253,6 +265,9 @@ def _serialize_run_summary(row: dict) -> DetectionRunSummary:
         analysis_engine=row.get("analysis_engine") or "scene_v1",
         analysis_preset=row.get("analysis_preset") or "balanced",
         advanced=advanced,
+        stable=_json_column(row, "analysis_stable"),
+        analysis_config=analysis_config,
+        engine_version=(analysis_config or {}).get("engine_version") if isinstance(analysis_config, dict) else None,
         detector_mode=row["detector_mode"],
         tolerance=row["tolerance"],
         min_scene_gap_ms=row["min_scene_gap_ms"],
@@ -431,6 +446,9 @@ def _sample_fps_guardrail(recording_fps: float, allow_high_fps_sampling: bool) -
 
 
 def _validate_run_settings_for_recording(recording: dict[str, Any], settings: RunSettings) -> None:
+    if settings.analysis_engine == "stable_v3":
+        resolve_stable_config(settings, fps=recording["fps"], width=recording["width"], height=recording["height"])
+        return
     if settings.analysis_engine == "hybrid_v2":
         resolve_hybrid_config(settings, recording["fps"])
         return
@@ -550,6 +568,7 @@ def _run_detection_job(run_id: str) -> None:
             analysis_engine=run.get("analysis_engine") or "scene_v1",
             analysis_preset=run.get("analysis_preset") or "balanced",
             advanced=json.loads(run["analysis_advanced"]) if run.get("analysis_advanced") else None,
+            stable=json.loads(run["analysis_stable"]) if run.get("analysis_stable") else None,
             tolerance=run["tolerance"],
             min_scene_gap_ms=run["min_scene_gap_ms"],
             sample_fps=run["sample_fps"],
@@ -559,6 +578,8 @@ def _run_detection_job(run_id: str) -> None:
         )
         if settings.analysis_engine == "hybrid_v2":
             detect_fn = detect_candidates_hybrid
+        elif settings.analysis_engine == "stable_v3":
+            detect_fn = detect_candidates_stable
         current_run_dir, target_frames_dir = _run_artifact_paths(project, recording, run_id)
         current_run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -599,15 +620,26 @@ def _run_detection_job(run_id: str) -> None:
             cancellation_callback=lambda: manager.is_cancelled(run_id),
         )
 
+        # Store the fully resolved settings and the engine version with the run, so it can be reproduced.
+        resolved: dict[str, Any] | None = None
         if settings.analysis_engine == "hybrid_v2":
-            resolved_config = resolve_hybrid_config(settings, recording["fps"])
-            update_run(run_id, analysis_config=json.dumps(resolved_config.__dict__))
+            resolved = {"engine_version": "hybrid_v2", **resolve_hybrid_config(settings, recording["fps"]).__dict__}
+        elif settings.analysis_engine == "stable_v3":
+            resolved = resolve_stable_config(
+                settings, fps=recording["fps"], width=recording["width"], height=recording["height"]
+            ).as_dict()
+        if resolved is not None:
+            update_run(run_id, analysis_config=json.dumps(resolved))
 
         video_path = _recording_video_path(recording)
 
         def publish_progress(phase: str, message: str, progress: float, level: str) -> None:
             _set_run_state(run_id, status="running", phase=phase, progress=progress, message=message, level=level)
 
+        detect_kwargs: dict[str, Any] = {}
+        measured: dict[str, Any] = {}
+        if settings.analysis_engine == "stable_v3":
+            detect_kwargs = {"width": recording["width"], "height": recording["height"], "report": measured}
         candidates = detect_fn(
             video_path=video_path,
             frames_dir=frames_path,
@@ -616,7 +648,10 @@ def _run_detection_job(run_id: str) -> None:
             settings=settings,
             progress_callback=publish_progress,
             cancellation_callback=lambda: manager.is_cancelled(run_id),
+            **detect_kwargs,
         )
+        if measured and resolved is not None:
+            update_run(run_id, analysis_config=json.dumps({**resolved, "measured": measured}))
         if manager.is_cancelled(run_id):
             raise CancellationRequested("Run cancelled")
 
@@ -626,11 +661,10 @@ def _run_detection_job(run_id: str) -> None:
         clear_export_bundle_for_run(run_id)
 
         candidate_count = len(normalized_candidates)
-        completion_message = (
-            f"Prepared {candidate_count} screenshot candidates with hybrid ui-change detection"
-            if settings.analysis_engine == "hybrid_v2"
-            else f"Prepared {candidate_count} screenshot candidates"
-        )
+        completion_message = {
+            "hybrid_v2": f"Prepared {candidate_count} screenshot candidates with hybrid ui-change detection",
+            "stable_v3": f"Prepared {candidate_count} screenshot candidates, one per stable screen",
+        }.get(settings.analysis_engine, f"Prepared {candidate_count} screenshot candidates")
         
         _set_run_state(
             run_id,

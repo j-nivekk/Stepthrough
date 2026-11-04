@@ -24,7 +24,9 @@ import {
   sanitizeRunSettings,
 } from '../../../lib/runSettings';
 import type { HybridAdvancedDirtyState } from '../../../lib/runSettings';
+import { defaultStableSettings } from '../../../lib/stableSettings';
 import type { AnalysisMetadata, RecordingSummary, RunSettings } from '../../../types';
+import { StableParametersSection } from './StableParametersSection';
 
 type HintBindingProps = Pick<
   HTMLAttributes<HTMLElement>,
@@ -306,12 +308,42 @@ export function AnalysisParametersPanel({
       </div>
 
       <div className="analysis-parameter-box" id="analysis-parameters">
-        {enableV1Engine ? (
-          <div className="analysis-parameter-group">
-            <div className="analysis-mode-row" {...bindHint('analysis_engine')}>
-              <span>analysis engine</span>
-              <div className="analysis-parameter-control">
-                <div className="analysis-mode-toggle">
+        <div className="analysis-parameter-group">
+          <div className="analysis-mode-row" {...bindHint('analysis_engine')}>
+            <span>analysis engine</span>
+            <div className="analysis-parameter-control">
+              <div className="analysis-mode-toggle">
+                <button
+                  className={`analysis-mode-button ${runSettings.analysis_engine === 'stable_v3' ? 'active' : ''}`}
+                  onClick={() =>
+                    setRunSettings((current) =>
+                      sanitizeRunSettings({
+                        ...current,
+                        analysis_engine: 'stable_v3',
+                        stable: current.stable ?? projectDefaultSettings.stable ?? { ...defaultStableSettings },
+                      }),
+                    )
+                  }
+                  type="button"
+                >
+                  stable screens
+                </button>
+                <button
+                  className={`analysis-mode-button ${runSettings.analysis_engine === 'hybrid_v2' ? 'active' : ''}`}
+                  onClick={() =>
+                    setRunSettings((current) =>
+                      sanitizeRunSettings({
+                        ...current,
+                        analysis_engine: 'hybrid_v2',
+                        advanced: current.advanced ?? { ...defaultHybridAdvancedSettings },
+                      }),
+                    )
+                  }
+                  type="button"
+                >
+                  hybrid v2
+                </button>
+                {enableV1Engine ? (
                   <button
                     className={`analysis-mode-button ${runSettings.analysis_engine === 'scene_v1' ? 'active' : ''}`}
                     onClick={() =>
@@ -325,44 +357,48 @@ export function AnalysisParametersPanel({
                     }
                     type="button"
                   >
-                    current v1
+                    v1
                   </button>
-                  <button
-                    className={`analysis-mode-button ${runSettings.analysis_engine === 'hybrid_v2' ? 'active' : ''}`}
-                    onClick={() =>
-                      setRunSettings((current) =>
-                        sanitizeRunSettings({
-                          ...current,
-                          analysis_engine: 'hybrid_v2',
-                          advanced: current.advanced ?? { ...defaultHybridAdvancedSettings },
-                        }),
-                      )
-                    }
-                    type="button"
-                  >
-                    hybrid v2
-                  </button>
-                </div>
+                ) : null}
               </div>
-              {isEngineDirty && (
-                <AnalysisResetDiamondButton
-                  className="outside"
-                  label="analysis engine"
-                  onClick={() =>
-                    setRunSettings((current) => ({
+            </div>
+            {isEngineDirty && (
+              <AnalysisResetDiamondButton
+                className="outside"
+                label="analysis engine"
+                onClick={() =>
+                  setRunSettings((current) =>
+                    sanitizeRunSettings({
                       ...current,
                       analysis_engine: projectDefaultSettings.analysis_engine,
-                    }))
-                  }
-                />
-              )}
-            </div>
-            <span className="analysis-parameter-annotation">
-              {runSettings.analysis_engine === 'hybrid_v2'
-                ? 'visual diff + selective OCR for interface-level changes'
-                : 'classic scene boundary detector for continuity and fast reruns'}
-            </span>
+                      stable: current.stable ?? projectDefaultSettings.stable,
+                      advanced: current.advanced ?? projectDefaultSettings.advanced,
+                    }),
+                  )
+                }
+              />
+            )}
           </div>
+          <span className="analysis-parameter-annotation">
+            {runSettings.analysis_engine === 'stable_v3'
+              ? 'one step per screen that stays still; settings in milliseconds and screen share'
+              : runSettings.analysis_engine === 'hybrid_v2'
+                ? 'previous engine: visual diff + selective OCR, tuned with unitless thresholds'
+                : 'classic scene boundary detector for continuity and fast reruns'}
+          </span>
+        </div>
+
+        {runSettings.analysis_engine === 'stable_v3' ? (
+          <StableParametersSection
+            analysisMetadata={analysisMetadata}
+            bindHint={bindHint}
+            ocrAvailable={ocrAvailable}
+            ocrStatusMessage={ocrStatusMessage}
+            projectDefaultSettings={projectDefaultSettings}
+            runSettings={runSettings}
+            selectedRecordingSummary={selectedRecordingSummary}
+            setRunSettings={setRunSettings}
+          />
         ) : null}
 
         {runSettings.analysis_engine === 'hybrid_v2' ? (
@@ -856,7 +892,7 @@ export function AnalysisParametersPanel({
               </div>
             </details>
           </>
-        ) : (
+        ) : runSettings.analysis_engine === 'scene_v1' ? (
           <details className="analysis-tuning-section" open>
             <summary className="analysis-tuning-summary">
               <span>scene v1 tuning</span>
@@ -1163,11 +1199,16 @@ export function AnalysisParametersPanel({
               </div>
             </div>
           </details>
-        )}
+        ) : null}
       </div>
 
       <div className="analysis-guidance-block">
-        {runSettings.analysis_engine === 'hybrid_v2' ? (
+        {runSettings.analysis_engine === 'stable_v3' ? (
+          <p className="analysis-guidance-copy">
+            pick the recording type first. if a step is missing, lower the minimum time on screen or the smallest
+            change; if something that keeps moving creates extra steps, draw an ignore area over it.
+          </p>
+        ) : runSettings.analysis_engine === 'hybrid_v2' ? (
           <p className="analysis-guidance-copy">
             hybrid v2 is tuned for interface changes first. start with the preset that matches your tolerance for
             noise, then only use advanced controls if a specific recording still over- or under-fires.
@@ -1186,7 +1227,9 @@ export function AnalysisParametersPanel({
         ) : null}
         {showLowCandidateHint ? (
           <p className="analysis-guidance-copy warning">
-            {runSettings.analysis_engine === 'hybrid_v2'
+            {runSettings.analysis_engine === 'stable_v3'
+              ? 'this run found very few stable screens. if the screen keeps moving (video, animation), draw an ignore area over it, or lower the minimum time on screen.'
+              : runSettings.analysis_engine === 'hybrid_v2'
               ? 'this run found very few interface changes. try the subtle ui preset, then lower proposal threshold or hybrid dwell timing.'
               : 'this run found very few scenes. try higher sample fps first, then lower tolerance or minimum scene gaps.'}
           </p>

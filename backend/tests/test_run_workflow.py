@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from threading import Event
 
@@ -350,22 +351,55 @@ def test_hybrid_min_scene_gap_reduces_close_candidates(client: TestClient, video
     assert len(detail_without_gap['candidates']) > len(detail_with_gap['candidates'])
 
 
-def test_run_creation_defaults_to_hybrid_v2_engine(client: TestClient, video_factory, wait_for_run) -> None:
+def test_run_creation_defaults_to_stable_v3_engine(client: TestClient, video_factory, wait_for_run) -> None:
     project = _create_project(client)
-    video = video_factory('default-engine.mp4', ['red'])
+    video = video_factory('default-engine.mp4', ['red', 'blue'])
     recording = _import_video(client, project['id'], video)
 
-    response = client.post(
-        f"/recordings/{recording['id']}/runs",
-        json={'tolerance': 50, 'min_scene_gap_ms': 900, 'sample_fps': 4, 'detector_mode': 'content', 'extract_offset_ms': 200},
-    )
+    response = client.post(f"/recordings/{recording['id']}/runs", json={})
 
     assert response.status_code == 200
     run = response.json()
-    assert run['analysis_engine'] == 'hybrid_v2'
-    assert run['analysis_preset'] == 'balanced'
+    assert run['analysis_engine'] == 'stable_v3'
+    assert run['stable']['recording_type'] == 'phone'
+    assert run['advanced'] is None
     detail = wait_for_run(client, run['id'])
-    assert detail['summary']['analysis_engine'] == 'hybrid_v2'
+    summary = detail['summary']
+    assert summary['status'] == 'completed'
+    assert summary['engine_version'].startswith('stable_v3/')
+    # The resolved settings and what was measured are stored with the run, for reproducibility.
+    assert summary['analysis_config']['min_dwell_ms'] == 450
+    assert summary['analysis_config']['measured']['pixel_threshold'] >= 10
+    breakdowns = [candidate['score_breakdown'] for candidate in detail['candidates']]
+    assert [b['transition_type'] for b in breakdowns] == ['opening_screen', 'navigation']
+    assert breakdowns[0]['dwell_after_ms'] >= 900
+
+
+def test_stable_run_export_records_engine_and_timings(client: TestClient, video_factory, wait_for_run) -> None:
+    project = _create_project(client)
+    video = video_factory('export-engine.mp4', ['red', 'blue'])
+    recording = _import_video(client, project['id'], video)
+    run = client.post(
+        f"/recordings/{recording['id']}/runs",
+        json={'analysis_engine': 'stable_v3', 'stable': {'recording_type': 'desktop', 'min_dwell_ms': 500}},
+    ).json()
+    detail = wait_for_run(client, run['id'])
+    for candidate in detail['candidates']:
+        assert client.patch(f"/candidates/{candidate['id']}", json={'status': 'accepted'}).status_code == 200
+
+    export = client.post(f"/runs/{run['id']}/export", json={'mode': 'accepted'})
+    assert export.status_code == 200
+    import app.storage as storage
+
+    bundle = storage.DATA_ROOT / export.json()['output_dir']
+    manifest = json.loads((bundle / 'steps.json').read_text())
+    assert manifest['run']['analysis_engine'] == 'stable_v3'
+    assert manifest['run']['engine_version'].startswith('stable_v3/')
+    assert manifest['run']['settings']['stable']['min_dwell_ms'] == 500
+    assert manifest['run']['resolved_settings']['min_change_percent'] == 0.25
+    header = (bundle / 'steps.csv').read_text().splitlines()[0].split(',')
+    assert {'transition_type', 'change_started_ms', 'settled_ms', 'time_on_screen_ms'} <= set(header)
+    assert manifest['steps'][1]['transition_type'] == 'navigation'
 
 
 def test_delete_project_removes_it_and_its_recordings(client: TestClient, video_factory) -> None:

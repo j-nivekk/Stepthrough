@@ -3,6 +3,7 @@ import { getHybridEffectiveSampleFps } from '../../../lib/analysisMetadata';
 import { formatElapsedDuration } from '../../../lib/utils';
 import { formatAnalysisEngineLabel, formatAnalysisPresetLabel } from '../../../lib/runSettings';
 import { formatPercent, formatRunShortTimestamp } from '../../../lib/formatters';
+import { formatRecordingTypeLabel, getEffectiveStableValues } from '../../../lib/stableSettings';
 import type { AnalysisMetadata, RunSettings, RunSummary } from '../../../types';
 
 interface AnalysisTaskRowSetting {
@@ -84,8 +85,51 @@ export function AnalysisTasksPanel({
     const hasExported = Boolean(run.export_bundle_id);
     const runTimestampLabel = formatRunShortTimestamp(run.started_at ?? run.created_at);
     const actionButtons: Array<{ anchorId?: string; label: string }> = [];
+    const stableRun = run.stable ?? null;
+    const stableDefaults = projectDefaultSettings.stable ?? null;
     const taskSettings: AnalysisTaskRowSetting[] =
-      run.analysis_engine === 'hybrid_v2'
+      run.analysis_engine === 'stable_v3' && stableRun
+        ? [
+            {
+              key: 'engine',
+              label: 'engine',
+              value: formatAnalysisEngineLabel(run.analysis_engine),
+              valueClassName: 'mode',
+              isDirty: run.analysis_engine !== projectDefaultSettings.analysis_engine,
+            },
+            {
+              key: 'type',
+              label: 'type',
+              value: formatRecordingTypeLabel(stableRun.recording_type),
+              valueClassName: 'mode',
+              isDirty: stableRun.recording_type !== stableDefaults?.recording_type,
+            },
+            {
+              key: 'dwell',
+              label: 'on screen',
+              value: `${getEffectiveStableValues(stableRun, analysisMetadata).minDwellMs}ms`,
+              isDirty: (stableRun.min_dwell_ms ?? null) !== (stableDefaults?.min_dwell_ms ?? null),
+            },
+            {
+              key: 'change',
+              label: 'change',
+              value: `${getEffectiveStableValues(stableRun, analysisMetadata).minChangePercent.toFixed(2)}%`,
+              isDirty: (stableRun.min_change_percent ?? null) !== (stableDefaults?.min_change_percent ?? null),
+            },
+            ...(stableRun.ignore_regions.length
+              ? [{ key: 'ignore', label: 'ignored', value: String(stableRun.ignore_regions.length), isDirty: true }]
+              : []),
+            {
+              key: 'typing',
+              label: 'typing',
+              value: stableRun.group_typing ? 'grouped' : 'each pause',
+              isDirty: stableRun.group_typing !== (stableDefaults?.group_typing ?? true),
+            },
+            ...(stableRun.scroll_mode === 'merge'
+              ? [{ key: 'scroll', label: 'scroll', value: 'merged', isDirty: stableDefaults?.scroll_mode !== 'merge' }]
+              : []),
+          ]
+        : run.analysis_engine === 'hybrid_v2'
         ? [
             ...(enableV1Engine
               ? [
@@ -220,7 +264,7 @@ export function AnalysisTasksPanel({
             },
           ];
     const progressLabel = isDone
-      ? `${run.candidate_count} scenes`
+      ? `${run.candidate_count} ${run.analysis_engine === 'stable_v3' ? 'steps' : 'scenes'}`
       : isError
         ? 'error'
         : run.status === 'cancelled'

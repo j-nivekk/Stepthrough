@@ -21,6 +21,40 @@ def _normalized_score_breakdown(candidate: dict) -> dict | None:
     return value
 
 
+def _json_value(value: object) -> dict | None:
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def _run_settings(run: dict) -> dict:
+    """The settings the run was started with, as stored (engine-specific parts only when present)."""
+    settings: dict = {"analysis_engine": run.get("analysis_engine")}
+    if run.get("analysis_engine") == "hybrid_v2":
+        settings["analysis_preset"] = run.get("analysis_preset")
+        settings["advanced"] = _json_value(run.get("analysis_advanced"))
+        settings["min_scene_gap_ms"] = run.get("min_scene_gap_ms")
+    elif run.get("analysis_engine") == "stable_v3":
+        settings["stable"] = _json_value(run.get("analysis_stable"))
+    return settings
+
+
+def _timing_columns(row: dict) -> dict:
+    """Flat timing columns for spreadsheets: when the change began and settled, and how long it stayed."""
+    breakdown = row.get("score_breakdown") or {}
+    return {
+        "transition_type": breakdown.get("transition_type"),
+        "change_started_ms": breakdown.get("event_start_ms"),
+        "settled_ms": breakdown.get("event_end_ms"),
+        "time_on_screen_ms": breakdown.get("dwell_after_ms"),
+        "grouped_states": breakdown.get("grouped_states"),
+    }
+
+
 def build_accepted_steps(recording_slug: str, candidates: list[dict]) -> list[dict]:
     accepted = [candidate for candidate in candidates if candidate["status"] == "accepted"]
     accepted_steps: list[dict] = []
@@ -132,7 +166,7 @@ def create_export_bundle(
         source_path = absolute_data_path(row["image_path"])
         target_path = images_dir / row["export_filename"]
         shutil.copy2(source_path, target_path)
-        exported_manifest_rows.append({**row, "image_path": f"images/{row['export_filename']}"})
+        exported_manifest_rows.append({**row, "image_path": f"images/{row['export_filename']}", **_timing_columns(row)})
 
     manifest = {
         "bundle_id": bundle_id,
@@ -151,6 +185,10 @@ def create_export_bundle(
         },
         "run": {
             "id": run["id"],
+            "analysis_engine": run.get("analysis_engine"),
+            "engine_version": (_json_value(run.get("analysis_config")) or {}).get("engine_version"),
+            "settings": _run_settings(run),
+            "resolved_settings": _json_value(run.get("analysis_config")),
             "detector_mode": run["detector_mode"],
             "tolerance": run["tolerance"],
         },
@@ -173,6 +211,11 @@ def create_export_bundle(
                 "title",
                 "notes",
                 "scene_score",
+                "transition_type",
+                "change_started_ms",
+                "settled_ms",
+                "time_on_screen_ms",
+                "grouped_states",
                 "revisit_group_id",
                 "similar_to_step_id",
                 "similar_to_source_candidate_id",

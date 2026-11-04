@@ -22,6 +22,37 @@ The working copy is:
 
 Recording `fps`, `duration_ms`, `width` and `height` describe the working copy once it exists.
 
+## Detection engines
+
+New runs use **`stable_v3` ("stable screens")**, in `app/services/stable_detection.py`. A step is a screen
+that stays still for at least the minimum time on screen. The engine takes one screenshot from inside each
+such screen, 200 ms after it settles, so screenshots never catch an animation half-way. `hybrid_v2` (change
+scoring with unitless thresholds) stays available for comparison with earlier runs; `scene_v1` only when
+enabled in the app settings. The design, its evaluation and its limits are in
+`docs/robustness-review-2026-11.md`, section 1.
+
+Settings (`RunSettings.stable`; `null` means the recording type's default):
+
+| setting | meaning | phone / computer default |
+|---|---|---|
+| `recording_type` | `phone` (phone or tablet) or `desktop` (computer with a mouse pointer) | `phone` |
+| `min_dwell_ms` | how long a screen must stay still to be a step | 450 / 600 ms |
+| `min_change_percent` | smallest connected change that ends a stable screen, % of the frame | 0.10 / 0.25 % |
+| `ignore_regions` | boxes to ignore, as shares (0 to 1) of the frame: `{x, y, width, height}` | none |
+| `ignore_status_bar` | ignore the phone status bar (top 6 % of a portrait phone, 2.5 to 3.2 % on tablets) | on / off |
+| `scroll_mode` | `each_stop` (every scroll stop is a step) or `merge` (keep the first) | `each_stop` |
+| `group_typing` | a burst of typing with short pauses becomes one step with the finished text | on |
+| `include_opening_screen` | the first screen is step 0 | on |
+| `enable_ocr` | read the text of each screenshot (exports, revisit matching); not used to find steps | off |
+| `sensitivity` | pixel threshold in multiples of the noise measured on the recording (at least 10 grey levels) | 4 |
+| `sample_fps` | analysis rate, rounded to a whole share of the working copy's frame rate | 15 |
+
+Each run stores what it actually used in `analysis_config`: the resolved settings, `engine_version`, and
+`measured` (noise, pixel threshold, stable intervals found, typing groups). Exports carry the same in
+`steps.json` (`run.engine_version`, `run.settings`, `run.resolved_settings`), and `steps.csv` has
+per-step timing: `transition_type`, `change_started_ms`, `settled_ms`, `time_on_screen_ms` and
+`grouped_states`.
+
 ## Configuration
 
 | variable | default | meaning |
