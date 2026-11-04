@@ -168,8 +168,9 @@ Results are saved to `tests/eval/results/eval_YYYYMMDD_HHMMSS.json`.
 ## Stress matrix (`stress.py`)
 
 The baseline scenarios are clean MJPEG at constant frame rate, which real uploads never are. `stress.py`
-re-encodes every baseline scenario the way uploads arrive and adds interface noise, then runs each
-variant through the app's own pipeline (ingest working copy, ffprobe metadata, hybrid detection):
+re-encodes every scenario the way uploads arrive and adds interface noise, then runs each variant
+through the app's own pipeline (ingest working copy, ffprobe metadata, detection with `--engine
+hybrid_v2` or `stable_v3`):
 
 | variant | simulates |
 |---|---|
@@ -178,20 +179,33 @@ variant through the app's own pipeline (ingest working copy, ffprobe metadata, h
 | `h264_vfr` | a phone screen recording: a frame is written only when the screen changes (at least one per second) |
 | `+cursor` / `+spinner` / `+pointer` / `+clock` | blinking caret, looping activity indicator, moving mouse pointer, ticking status-bar clock |
 
-Besides P/R/F1 it reports **screenshot fidelity**: whether each matched candidate's PNG shows the settled
-post-event state rather than the pre-event one. The timing-window evaluator alone passes mid-animation
-screenshots and fails correct ones that land just outside the window.
+Besides P/R/F1 it reports:
+
+- **screenshot fidelity**: whether each matched candidate's PNG shows the settled post-event state rather
+  than the pre-event one, judged where those two frames differ (so a toggle is not lost in compression
+  noise). The timing-window evaluator alone passes mid-animation screenshots.
+- **opening** (stable engine): the opening-screen step is present and shows the first frame. Ground truth
+  lists changes only, so that step is left out of precision and recall.
+- **labels**: how often the matched candidate's `transition_type` describes the ground-truth event type.
+
+`--set steps` (or `all`) adds the scenarios in `step_scenarios.py`, which test what a step should be
+rather than whether a change is found: a message typed word by word with pauses (one step), two form
+fields filled in turn (one step each) and three toggles in a column (three steps, not a typing group).
+They are kept out of `BASELINE_SCENARIOS` so the hybrid v2 baseline suite stays comparable.
 
 ```bash
-python -m tests.eval.stress                      # full matrix, balanced preset (about 5 minutes)
+python -m tests.eval.stress --engine stable_v3 --set all   # the default engine, all 25 scenarios
+python -m tests.eval.stress                      # hybrid v2, full matrix, balanced preset (about 5 minutes)
 python -m tests.eval.stress --preset subtle_ui
 python -m tests.eval.stress --no-ingest          # detect on the upload itself, as before working copies
 python -m tests.eval.stress --only nav_basic --variants h264_vfr,h264_vfr+spinner
 ```
 
-`test_eval_stress.py` is the regression gate that runs in `pytest`: on a set of scenarios the engine
-handles well, a phone-style (VFR) upload must find at least as much as a constant-frame-rate upload of
-the same content, and every matched screenshot must show the settled screen.
+`test_eval_stress.py` holds the regression gates that run in `pytest`. For hybrid v2, on a set of
+scenarios it handles well, a phone-style (VFR) upload must find at least as much as a constant-frame-rate
+upload of the same content, with every matched screenshot settled. For stable v3, a phone-style upload of
+14 scenarios (including the typing and toggle ones) must find every event with a settled screenshot and
+the opening screen, and any extra step must be a return to an earlier screen.
 
 ## Adding a new scenario
 

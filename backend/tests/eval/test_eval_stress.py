@@ -1,4 +1,4 @@
-"""Regression gate for real-world uploads (see ``stress.py`` for the full matrix).
+"""Regression gates for real-world uploads (see ``stress.py`` for the full matrix).
 
 Phone and desktop screen recordings are variable frame rate. Through the ingest working copy, such an
 upload must give the same detections as a constant-frame-rate upload of the same content, and every
@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from .scenarios import BASELINE_SCENARIOS
+from .step_scenarios import STEP_SCENARIOS
 from .stress import read_frames, run_variant
 
 GATED_SCENARIOS = (
@@ -45,3 +46,35 @@ def test_vfr_upload_matches_cfr_upload(scenario_name: str, tmp_path: Path) -> No
         f"{vfr.screenshots_matched - vfr.screenshots_correct} of {vfr.screenshots_matched} screenshots "
         "show the wrong state"
     )
+
+
+STABLE_GATED = (
+    *GATED_SCENARIOS,
+    "nav_rapid",
+    "scroll_list",
+    "overlay_toast",
+    "content_typing",
+    "chat_typing_pauses",
+    "form_two_fields",
+    "settings_toggles",
+)
+
+
+@pytest.mark.parametrize("scenario_name", STABLE_GATED)
+def test_stable_engine_on_phone_style_upload(scenario_name: str, tmp_path: Path) -> None:
+    """stable_v3 on a variable-frame-rate upload: every event found, every screenshot settled, step 0 shown,
+    and typing bursts grouped (one step per typed message or field)."""
+    factory = dict([*BASELINE_SCENARIOS, *STEP_SCENARIOS])[scenario_name]
+    scenario = factory(tmp_path, 30)
+    frames, fps = read_frames(scenario.video_path)
+    result = run_variant(
+        scenario_name, tmp_path, (frames, fps, scenario.video_path), scenario.ground_truth, "h264_vfr", None,
+        engine="stable_v3",
+    )
+    assert result.metrics.missed_events == 0, f"missed {result.metrics.missed_events} event(s)"
+    assert result.screenshots_correct == result.screenshots_matched
+    assert result.opening_ok
+    # The only extra step allowed is a return to an earlier screen (a toast or dialog going away).
+    extras = result.metrics.false_positives
+    revisits = sum(1 for c in result.candidates if c.get("similar_to_candidate_id"))
+    assert extras <= revisits, f"{extras} extra step(s), {revisits} of them revisits"

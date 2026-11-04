@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .models import AnalysisEngine, AnalysisPreset
+from .models import AnalysisEngine, AnalysisPreset, RecordingType
 
 
 MANUAL_HYBRID_PRESETS_START = "<!-- START generated:hybrid_v2_presets -->"
@@ -24,6 +24,37 @@ class HybridPresetMetadata:
     proposal_threshold: float
     settle_threshold: float
     ocr_trigger_threshold: float
+
+
+@dataclass(frozen=True)
+class StableRecordingTypeMetadata:
+    label: str
+    description: str
+    min_dwell_ms: int
+    min_change_percent: float
+    ignore_status_bar: bool
+
+
+# Defaults of the stable-screen engine per kind of recording. Students can override each value.
+STABLE_RECORDING_TYPES: dict[RecordingType, StableRecordingTypeMetadata] = {
+    "phone": StableRecordingTypeMetadata(
+        label="phone or tablet",
+        description="Touch-screen recordings. The status bar (clock, battery, recording indicator) is ignored.",
+        min_dwell_ms=450,
+        min_change_percent=0.1,
+        ignore_status_bar=True,
+    ),
+    "desktop": StableRecordingTypeMetadata(
+        label="computer",
+        description=(
+            "Desktop or browser recordings with a visible mouse pointer. Small changes such as the moving "
+            "pointer are ignored, so tiny controls may need a lower smallest change."
+        ),
+        min_dwell_ms=600,
+        min_change_percent=0.25,
+        ignore_status_bar=False,
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -153,6 +184,50 @@ ANALYSIS_CONTROLS_BY_ENGINE: dict[AnalysisEngine, dict[str, AnalysisControlMetad
             note="Hybrid does not use the v1 tolerance mapping.",
         ),
     },
+    "stable_v3": {
+        "analysis_preset": AnalysisControlMetadata(
+            supported=False,
+            reason="hybrid_v2_only",
+            note="The stable-screen engine uses a recording type instead of presets.",
+        ),
+        "min_scene_gap_ms": AnalysisControlMetadata(
+            supported=False,
+            reason="replaced_by_min_dwell",
+            note="Use the minimum time on screen instead.",
+        ),
+        "extract_offset_ms": AnalysisControlMetadata(
+            supported=False,
+            reason="no_effect_in_stable_v3",
+            note="Screenshots are taken inside each stable screen, 200 ms after it settles.",
+        ),
+        "sample_fps": AnalysisControlMetadata(supported=False, reason="scene_v1_only"),
+        "allow_high_fps_sampling": AnalysisControlMetadata(supported=False, reason="scene_v1_only"),
+        "detector_mode": AnalysisControlMetadata(supported=False, reason="scene_v1_only"),
+        "tolerance": AnalysisControlMetadata(supported=False, reason="scene_v1_only"),
+        "stable.recording_type": AnalysisControlMetadata(supported=True),
+        "stable.min_dwell_ms": AnalysisControlMetadata(
+            supported=True,
+            note="How long a screen must stay still to count as a step.",
+        ),
+        "stable.min_change_percent": AnalysisControlMetadata(
+            supported=True,
+            note="Smallest connected change, as a percentage of the screen, that ends a stable screen.",
+        ),
+        "stable.ignore_regions": AnalysisControlMetadata(supported=True),
+        "stable.ignore_status_bar": AnalysisControlMetadata(supported=True),
+        "stable.scroll_mode": AnalysisControlMetadata(supported=True),
+        "stable.group_typing": AnalysisControlMetadata(supported=True),
+        "stable.include_opening_screen": AnalysisControlMetadata(supported=True),
+        "stable.enable_ocr": AnalysisControlMetadata(
+            supported=True,
+            note="Reads the text in each screenshot, for revisit matching and exports. Not needed to detect steps.",
+        ),
+        "stable.sensitivity": AnalysisControlMetadata(
+            supported=True,
+            note="Pixel threshold in multiples of the noise measured on the recording (minimum 10 grey levels).",
+        ),
+        "stable.sample_fps": AnalysisControlMetadata(supported=True),
+    },
     "scene_v1": {
         "analysis_preset": AnalysisControlMetadata(
             supported=False,
@@ -202,7 +277,20 @@ def get_hybrid_preset_metadata(preset: AnalysisPreset) -> HybridPresetMetadata:
 
 
 def serialize_analysis_metadata() -> dict[str, Any]:
+    from .services.stable_detection import ENGINE_VERSION
+
     return {
+        "stable_engine_version": ENGINE_VERSION,
+        "stable_recording_types": {
+            kind: {
+                "label": metadata.label,
+                "description": metadata.description,
+                "min_dwell_ms": metadata.min_dwell_ms,
+                "min_change_percent": metadata.min_change_percent,
+                "ignore_status_bar": metadata.ignore_status_bar,
+            }
+            for kind, metadata in STABLE_RECORDING_TYPES.items()
+        },
         "hybrid_presets": {
             preset: {
                 "label": metadata.label,

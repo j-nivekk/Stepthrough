@@ -8,13 +8,18 @@ into "uploads":
     overlays  : cursor (blinking caret), spinner (looping activity indicator), pointer (a desktop mouse
                 pointer that keeps moving), clock (a status-bar clock ticking every second)
 
-Uploads go through the same pipeline as the app (ingest working copy, ffprobe metadata, hybrid
-detection). Besides precision/recall it reports *screenshot fidelity*: for each matched event, whether
-the exported PNG shows the settled post-event state rather than the pre-event one.
+Uploads go through the same pipeline as the app (ingest working copy, ffprobe metadata, detection).
+Besides precision/recall it reports *screenshot fidelity*: for each matched event, whether the exported
+PNG shows the settled post-event state rather than the pre-event one.
+
+The stable-screen engine (``--engine stable_v3``) also returns the opening screen as step 0. Ground truth
+lists changes only, so that candidate is scored separately ("opening": present and showing frame 0) and
+left out of precision/recall. The ``step_scenarios`` (typing, toggles) run with ``--set all`` or ``steps``.
 
 Usage (from backend/)::
 
-    python -m tests.eval.stress                         # full matrix, balanced preset
+    python -m tests.eval.stress                         # full matrix, hybrid v2, balanced preset
+    python -m tests.eval.stress --engine stable_v3 --set all
     python -m tests.eval.stress --preset subtle_ui
     python -m tests.eval.stress --no-ingest             # detect on the upload directly (pre-ingest behaviour)
     python -m tests.eval.stress --only nav_basic --variants h264_vfr,h264_vfr+spinner
@@ -28,20 +33,29 @@ import math
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-from app.models import HybridAdvancedSettings, RunSettings
+from app.models import HybridAdvancedSettings, RunSettings, StableSettings
 from app.services.hybrid_detection import detect_candidates_hybrid
 from app.services.ingest import build_working_copy
+from app.services.stable_detection import detect_candidates_stable
 from app.services.video import probe_video
 
 from .evaluator import evaluate
 from .scenarios import BASELINE_SCENARIOS
+from .step_scenarios import STEP_SCENARIOS
 from .types import EvalMetrics, GroundTruthEvent
+
+SCENARIO_SETS = {
+    "baseline": BASELINE_SCENARIOS,
+    "steps": STEP_SCENARIOS,
+    "all": [*BASELINE_SCENARIOS, *STEP_SCENARIOS],
+}
 
 ENCODINGS = ("raw", "h264_cfr", "h264_vfr")
 OVERLAYS = ("cursor", "spinner", "pointer", "clock")
@@ -156,7 +170,10 @@ def screenshot_fidelity(
     reference_fps: float,
 ) -> tuple[int, int]:
     """(correct, matched): a matched screenshot is correct when it is at least twice as close to the
-    settled post-event frame as to the pre-event frame (or near-identical to the post-event frame)."""
+    settled post-event frame as to the pre-event frame (or near-identical to the post-event frame).
+
+    Distances are measured where the pre- and post-event frames differ, so a small change (a toggle, a
+    typed word) is judged on that change rather than drowned in compression noise across the frame."""
     ordered = sorted(ground_truth, key=lambda event: event.start_ms)
     count = len(reference_frames)
     correct = matched = 0
@@ -168,9 +185,13 @@ def screenshot_fidelity(
         post = reference_frames[min(count - 1, int(min(event.end_ms + 400, next_start - 60) / 1000 * reference_fps))]
         pre = reference_frames[min(count - 1, int(max(0, event.start_ms - 150) / 1000 * reference_fps))]
         shot = cv2.imread(candidates[result.matched_candidate_index]["image_path"])
-        shot = cv2.resize(shot, (post.shape[1], post.shape[0]))
-        d_pre = float(np.mean(np.abs(_small_gray(shot) - _small_gray(pre))))
-        d_post = float(np.mean(np.abs(_small_gray(shot) - _small_gray(post))))
+        shot = _small_gray(cv2.resize(shot, (post.shape[1], post.shape[0])))
+        pre_g, post_g = _small_gray(pre), _small_gray(post)
+        region = np.abs(pre_g - post_g) > 10.0
+        if region.sum() < 4:
+            region = np.ones_like(region)
+        d_pre = float(np.mean(np.abs(shot - pre_g)[region]))
+        d_post = float(np.mean(np.abs(shot - post_g)[region]))
         matched += 1
         correct += int(d_post <= d_pre * 0.5 or d_post < 1.0)
     return correct, matched
@@ -184,6 +205,36 @@ class VariantResult:
     screenshots_correct: int
     screenshots_matched: int
     candidates: list[dict] = field(repr=False, default_factory=list)
+    opening_ok: bool | None = None  # stable engine only: step 0 present and showing the first frame
+    seconds: float = 0.0
+    labels_agree: int = 0
+    labels_checked: int = 0
+
+
+# Ground-truth event types and the transition labels that describe them correctly.
+LABEL_MATCHES = {
+    "navigation": {"navigation"},
+    "scroll": {"scroll"},
+    "card_swap": {"feed_card_swap"},
+    "modal": {"modal"},
+    "content_update": {"content_update", "text_entry"},
+    "small_ui_change": {"small_ui_change", "content_update"},
+    "loading": {"content_update", "navigation"},
+}
+
+
+def label_agreement(candidates: list[dict], metrics: EvalMetrics) -> tuple[int, int]:
+    agree = checked = 0
+    for result in metrics.per_event_results:
+        if result.matched_candidate_index is None:
+            continue
+        wanted = LABEL_MATCHES.get(result.ground_truth.event_type)
+        if wanted is None:
+            continue
+        label = (candidates[result.matched_candidate_index].get("score_breakdown") or {}).get("transition_type")
+        checked += 1
+        agree += int(label in wanted)
+    return agree, checked
 
 
 def run_variant(
@@ -196,6 +247,8 @@ def run_variant(
     *,
     preset: str = "balanced",
     ingest: bool = True,
+    engine: str = "hybrid_v2",
+    stable: StableSettings | None = None,
 ) -> VariantResult:
     frames, fps, raw_path = reference
     label = variant_label(encoding, overlay)
@@ -216,22 +269,58 @@ def run_variant(
         video = work / "working" / "working.mp4"
         build_working_copy(upload, video)
     metadata = probe_video(video)
-    settings = RunSettings(
-        analysis_engine="hybrid_v2",
-        analysis_preset=preset,
-        advanced=HybridAdvancedSettings(enable_ocr=False),
-        min_scene_gap_ms=900,
-    )
-    candidates = detect_candidates_hybrid(
-        video_path=video,
-        frames_dir=work / "frames",
-        duration_ms=metadata.duration_ms,
-        fps=metadata.fps,
-        settings=settings,
-    )
+    started = time.perf_counter()
+    opening_ok = None
+    if engine == "stable_v3":
+        if stable is None:
+            # A wandering mouse pointer is what the "computer" recording type is for.
+            stable = StableSettings(recording_type="desktop" if overlay == "pointer" else "phone")
+        settings = RunSettings(analysis_engine="stable_v3", stable=stable)
+        candidates = detect_candidates_stable(
+            video_path=video,
+            frames_dir=work / "frames",
+            duration_ms=metadata.duration_ms,
+            fps=metadata.fps,
+            settings=settings,
+            width=metadata.width,
+            height=metadata.height,
+        )
+        opening = [c for c in candidates if (c.get("score_breakdown") or {}).get("transition_type") == "opening_screen"]
+        if stable.include_opening_screen:
+            opening_ok = len(opening) == 1 and _shows_frame(opening[0], frames[0], frames)
+        candidates = [c for c in candidates if c not in opening]
+    else:
+        settings = RunSettings(
+            analysis_engine="hybrid_v2",
+            analysis_preset=preset,
+            advanced=HybridAdvancedSettings(enable_ocr=False),
+            min_scene_gap_ms=900,
+        )
+        candidates = detect_candidates_hybrid(
+            video_path=video,
+            frames_dir=work / "frames",
+            duration_ms=metadata.duration_ms,
+            fps=metadata.fps,
+            settings=settings,
+        )
+    seconds = time.perf_counter() - started
     metrics = evaluate(candidates, ground_truth)
     correct, matched = screenshot_fidelity(candidates, ground_truth, metrics, frames, fps)
-    return VariantResult(scenario_name, label, metrics, correct, matched, candidates)
+    agree, checked = label_agreement(candidates, metrics)
+    return VariantResult(scenario_name, label, metrics, correct, matched, candidates, opening_ok, seconds, agree, checked)
+
+
+def _shows_frame(candidate: dict, expected: np.ndarray, frames: list[np.ndarray]) -> bool:
+    """The screenshot is closer to ``expected`` than to any visibly different frame of the clip."""
+    shot = cv2.imread(candidate["image_path"])
+    if shot is None:
+        return False
+    shot = _small_gray(cv2.resize(shot, (expected.shape[1], expected.shape[0])))
+    target = _small_gray(expected)
+    d_target = float(np.mean(np.abs(shot - target)))
+    others = [float(np.mean(np.abs(shot - _small_gray(f)))) for f in frames[:: max(1, len(frames) // 60)]
+              if float(np.mean(np.abs(_small_gray(f) - target))) > 4.0]
+    return d_target < 2.0 or all(d_target * 2 <= d for d in others)
 
 
 def run_matrix(
@@ -242,9 +331,12 @@ def run_matrix(
     variants: set[str] | None = None,
     work_dir: Path,
     echo: bool = False,
+    engine: str = "hybrid_v2",
+    scenario_set: str = "baseline",
+    stable: StableSettings | None = None,
 ) -> list[VariantResult]:
     results = []
-    for name, factory in BASELINE_SCENARIOS:
+    for name, factory in SCENARIO_SETS[scenario_set]:
         if scenarios and name not in scenarios:
             continue
         scenario_dir = work_dir / name
@@ -256,7 +348,7 @@ def run_matrix(
                 continue
             result = run_variant(
                 name, scenario_dir, (frames, fps, scenario.video_path), scenario.ground_truth,
-                encoding, overlay, preset=preset, ingest=ingest,
+                encoding, overlay, preset=preset, ingest=ingest, engine=engine, stable=stable,
             )
             results.append(result)
             if echo:
@@ -264,7 +356,9 @@ def run_matrix(
                 print(
                     f"  {name:28s} {result.variant:18s} cand={m.total_candidates:2d} "
                     f"TP={m.total_ground_truth - m.missed_events} FP={m.false_positives} miss={m.missed_events} "
-                    f"shots={result.screenshots_correct}/{result.screenshots_matched}",
+                    f"shots={result.screenshots_correct}/{result.screenshots_matched}"
+                    + ("" if result.opening_ok is None else f" opening={'ok' if result.opening_ok else 'WRONG'}")
+                    + f" labels={result.labels_agree}/{result.labels_checked} {result.seconds:.1f}s",
                     flush=True,
                 )
     return results
@@ -273,13 +367,23 @@ def run_matrix(
 def summarise(results: list[VariantResult]) -> dict[str, dict[str, float | int]]:
     summary: dict[str, dict[str, float | int]] = {}
     for result in results:
-        row = summary.setdefault(result.variant, {"tp": 0, "fp": 0, "gt": 0, "shots_correct": 0, "shots_matched": 0})
+        row = summary.setdefault(
+            result.variant,
+            {"tp": 0, "fp": 0, "gt": 0, "shots_correct": 0, "shots_matched": 0, "opening_ok": 0, "opening_checked": 0,
+             "seconds": 0.0, "labels_agree": 0, "labels_checked": 0},
+        )
+        row["labels_agree"] += result.labels_agree
+        row["labels_checked"] += result.labels_checked
         m = result.metrics
         row["tp"] += m.total_ground_truth - m.missed_events
         row["fp"] += m.false_positives
         row["gt"] += m.total_ground_truth
         row["shots_correct"] += result.screenshots_correct
         row["shots_matched"] += result.screenshots_matched
+        row["seconds"] = round(row["seconds"] + result.seconds, 2)
+        if result.opening_ok is not None:
+            row["opening_checked"] += 1
+            row["opening_ok"] += int(result.opening_ok)
     for row in summary.values():
         precision = row["tp"] / max(1, row["tp"] + row["fp"])
         recall = row["tp"] / max(1, row["gt"])
@@ -291,6 +395,8 @@ def summarise(results: list[VariantResult]) -> dict[str, dict[str, float | int]]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--engine", default="hybrid_v2", choices=("hybrid_v2", "stable_v3"))
+    parser.add_argument("--set", default="baseline", choices=tuple(SCENARIO_SETS), help="scenario set")
     parser.add_argument("--preset", default="balanced", choices=("subtle_ui", "balanced", "noise_resistant"))
     parser.add_argument("--no-ingest", action="store_true", help="detect on the upload itself (pre-ingest behaviour)")
     parser.add_argument("--only", default="", help="comma-separated scenario names")
@@ -305,15 +411,20 @@ def main() -> None:
             variants={name for name in args.variants.split(",") if name} or None,
             work_dir=Path(tmp),
             echo=True,
+            engine=args.engine,
+            scenario_set=args.set,
         )
     summary = summarise(results)
     pipeline = "upload only" if args.no_ingest else "working copy"
-    print(f"\n{'variant':18s}  P     R     F1    screenshots   (preset={args.preset}, {pipeline})")
+    setting = f"preset={args.preset}" if args.engine == "hybrid_v2" else "recording type by variant"
+    print(f"\n{'variant':18s}  P     R     F1    screenshots   opening  labels  time   ({args.engine}, {setting}, {pipeline})")
     for variant, row in summary.items():
         share = row["shots_correct"] / max(1, row["shots_matched"])
+        opening = f"{row['opening_ok']}/{row['opening_checked']}" if row["opening_checked"] else "-"
         print(
             f"{variant:18s} {row['precision']:.2f}  {row['recall']:.2f}  {row['f1']:.2f}   "
-            f"{row['shots_correct']}/{row['shots_matched']} ({share:.0%})"
+            f"{row['shots_correct']}/{row['shots_matched']} ({share:.0%})   {opening:7s}  "
+            f"{row['labels_agree'] / max(1, row['labels_checked']):.0%}    {row['seconds']:.0f}s"
         )
     if args.json:
         Path(args.json).write_text(json.dumps(summary, indent=2))
