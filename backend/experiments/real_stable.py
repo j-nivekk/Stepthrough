@@ -1,6 +1,6 @@
-"""Run the stable-screen engine (and hybrid v2 for comparison) on real recordings, through working copies.
+"""Run the stable-screen engine on real recordings, through working copies.
 
-    uv run python experiments/real_stable.py OUT_DIR CACHE_DIR VIDEO [VIDEO ...] [--hybrid] [--type desktop]
+    uv run python experiments/real_stable.py OUT_DIR CACHE_DIR VIDEO [VIDEO ...] [--type desktop]
 
 Contact sheets go to OUT_DIR (keep it out of git: real recordings show real people). Working copies are
 cached in CACHE_DIR so reruns only time the detection.
@@ -19,8 +19,7 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, ".")
-from app.models import HybridAdvancedSettings, RunSettings, StableSettings  # noqa: E402
-from app.services.hybrid_detection import detect_candidates_hybrid  # noqa: E402
+from app.models import RunSettings, StableSettings  # noqa: E402
 from app.services.ingest import build_working_copy  # noqa: E402
 from app.services.stable_detection import detect_candidates_stable  # noqa: E402
 from app.services.video import probe_video  # noqa: E402
@@ -65,7 +64,6 @@ def main() -> None:
     parser.add_argument("out", type=Path)
     parser.add_argument("cache", type=Path)
     parser.add_argument("videos", nargs="+", type=Path)
-    parser.add_argument("--hybrid", action="store_true", help="also run hybrid v2 (balanced, OCR off)")
     parser.add_argument("--type", default="phone", choices=("phone", "desktop"))
     parser.add_argument("--no-typing", action="store_true")
     args = parser.parse_args()
@@ -96,16 +94,6 @@ def main() -> None:
             print(f"{name}: {meta.duration_ms / 1000:.0f}s {meta.width}x{meta.height} | stable {len(stable)} steps in "
                   f"{seconds:.1f}s | {report} | peak RSS {rss:.0f} MB", flush=True)
             sheet(stable, f"stable_v3 ({args.type}): {len(stable)} steps, {seconds:.1f}s", args.out / f"{name}__stable.jpg")
-            if args.hybrid:
-                hybrid_settings = RunSettings(analysis_engine="hybrid_v2", analysis_preset="balanced",
-                                              advanced=HybridAdvancedSettings(enable_ocr=False))
-                started = time.perf_counter()
-                hybrid = detect_candidates_hybrid(video_path=working, frames_dir=tmp / "h", duration_ms=meta.duration_ms,
-                                                  fps=meta.fps, settings=hybrid_settings)
-                seconds = time.perf_counter() - started
-                print(f"{name}: hybrid {len(hybrid)} candidates in {seconds:.1f}s", flush=True)
-                sheet(hybrid, f"hybrid v2 (balanced): {len(hybrid)} candidates, {seconds:.1f}s",
-                      args.out / f"{name}__hybrid_working.jpg")
 
 
 if __name__ == "__main__":

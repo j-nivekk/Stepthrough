@@ -3,15 +3,15 @@
 **Stepthrough** is a local-first research tool designed to automatically turn video screen recordings into clean, chronological walkthrough screenshots. It is built to help researchers, designers, and developers quickly extract key navigational steps from app runs or usability tests.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Python Backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20PySceneDetect-3776AB.svg)
+![Python Backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20OpenCV-3776AB.svg)
 ![React Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB.svg)
 
 
 ## 📌 Features
 
-- **Automated Scene Detection**: Define tunable tolerance, sampling rates, and minimum scene gaps to intelligently find UI shifts.
+- **Stable-Screen Detection**: Every screen that stays still for a moment becomes a step, with one settled screenshot each. Settings are in milliseconds and screen share, so they can be reported in a methods section.
 - **Local-First & Private**: Everything stays on your machine. Data, recordings, and extracted frames process and save directly to your local `./data` folder.
-- **Hybrid UI-Change Detection**: Optional advanced engine utilizing local OCR (PaddleOCR) and structural similarity comparisons. 
+- **Optional OCR**: Reads the text of each screenshot into exports with local PaddleOCR.
 - **Chronological Review Board**: An intuitive GUI to accept, reject, rename, and add notes to candidate screenshots while preserving original chronology.
 - **Rich Exports**: Bundle your accepted walkthrough steps seamlessly into `PNG`s + `CSV` + `JSON` manifests.
 
@@ -60,7 +60,7 @@ To run Stepthrough locally, you must have the following installed on your system
    chmod +x setup.sh start.sh
    ./setup.sh
    ```
-   *(To install manually instead: `cd backend && uv sync`, then `cd frontend && npm install`)*
+   *(To install manually instead: `cd backend && uv sync`, then `cd frontend && npm install`. For OCR, also run `cd backend && uv sync --group ocr`.)*
 
 ---
 
@@ -81,7 +81,7 @@ By default, the backend runs at `http://127.0.0.1:8000` and the frontend at `htt
 
 ## 🛠 Project Structure
 
-- `/backend`: The FastAPI application. Handles SQLite database operations, PySceneDetect execution, manual screenshot extraction, FFmpeg bindings, and the export pipeline.
+- `/backend`: The FastAPI application. Handles SQLite database operations, step detection, manual screenshot extraction, FFmpeg bindings, and the export pipeline.
 - `/frontend`: The Vite + React user interface. Handles video importing, review boards, step annotation, and configuration forms.
 - `/data`: Auto-generated on launch. Contains the `stepthrough.sqlite3` manifest alongside imported MP4 videos and extracted screenshots.
 

@@ -37,12 +37,6 @@ export function clampInteger(value: number, min?: number, max?: number): number 
   return nextValue;
 }
 
-function ordinal(n: number): string {
-  const suffixes = ['th', 'st', 'nd', 'rd'];
-  const v = n % 100;
-  return n + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
-}
-
 function triggerDownload(url: string): void {
   if (typeof document === 'undefined') {
     return;
@@ -171,12 +165,3 @@ export function formatElapsedDuration(elapsedMs: number): string {
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
-export function describeFrameSkip(sampleFps: number | null, sourceFps: number | null): string | null {
-  if (!sampleFps || !sourceFps) {
-    return sourceFps ? `every frame (~${Math.round(sourceFps)} fps source)` : null;
-  }
-  const skip = Math.max(1, Math.round(sourceFps / sampleFps));
-  return skip > 1
-    ? `~every ${ordinal(skip)} frame (~${Math.round(sourceFps)} fps source)`
-    : `every frame (~${Math.round(sourceFps)} fps source)`;
-}

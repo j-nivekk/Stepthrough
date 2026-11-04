@@ -1,5 +1,8 @@
 # Hybrid v2 Engine in Stepthrough (Graduate Draft)
 
+> **Retired (November 2026).** Hybrid v2 no longer starts new runs; Stepthrough uses the stable-screen engine (`stable_v3`, see `docs/robustness-review-2026-11.md`). Runs made with hybrid v2 still open and export. The code this document describes is at the git tag `last-with-hybrid-v2`.
+
+
 ## Who this is for
 
 This draft is for readers who know basic Python and data processing, but are newer to scene detection, UI-video analysis, and Stepthrough's custom heuristics.

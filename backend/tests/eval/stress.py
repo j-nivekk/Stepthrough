@@ -12,15 +12,16 @@ Uploads go through the same pipeline as the app (ingest working copy, ffprobe me
 Besides precision/recall it reports *screenshot fidelity*: for each matched event, whether the exported
 PNG shows the settled post-event state rather than the pre-event one.
 
-The stable-screen engine (``--engine stable_v3``) also returns the opening screen as step 0. Ground truth
-lists changes only, so that candidate is scored separately ("opening": present and showing frame 0) and
-left out of precision/recall. The ``step_scenarios`` (typing, toggles) run with ``--set all`` or ``steps``.
+The stable-screen engine also returns the opening screen as step 0. Ground truth lists changes only, so
+that candidate is scored separately ("opening": present and showing frame 0) and left out of
+precision/recall. The ``step_scenarios`` (typing, toggles) run with ``--set all`` or ``steps``.
+
+The retired hybrid_v2 engine scored 0.79 F1 on this matrix (0.98 for stable_v3); its runner is at the git tag
+``last-with-hybrid-v2``.
 
 Usage (from backend/)::
 
-    python -m tests.eval.stress                         # full matrix, hybrid v2, balanced preset
-    python -m tests.eval.stress --engine stable_v3 --set all
-    python -m tests.eval.stress --preset subtle_ui
+    python -m tests.eval.stress --set all               # full matrix
     python -m tests.eval.stress --no-ingest             # detect on the upload directly (pre-ingest behaviour)
     python -m tests.eval.stress --only nav_basic --variants h264_vfr,h264_vfr+spinner
 """
@@ -40,8 +41,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app.models import HybridAdvancedSettings, RunSettings, StableSettings
-from app.services.hybrid_detection import detect_candidates_hybrid
+from app.models import RunSettings, StableSettings
 from app.services.ingest import build_working_copy
 from app.services.stable_detection import detect_candidates_stable
 from app.services.video import probe_video
@@ -245,9 +245,7 @@ def run_variant(
     encoding: str,
     overlay: str | None,
     *,
-    preset: str = "balanced",
     ingest: bool = True,
-    engine: str = "hybrid_v2",
     stable: StableSettings | None = None,
 ) -> VariantResult:
     frames, fps, raw_path = reference
@@ -271,38 +269,23 @@ def run_variant(
     metadata = probe_video(video)
     started = time.perf_counter()
     opening_ok = None
-    if engine == "stable_v3":
-        if stable is None:
-            # A wandering mouse pointer is what the "computer" recording type is for.
-            stable = StableSettings(recording_type="desktop" if overlay == "pointer" else "phone")
-        settings = RunSettings(analysis_engine="stable_v3", stable=stable)
-        candidates = detect_candidates_stable(
-            video_path=video,
-            frames_dir=work / "frames",
-            duration_ms=metadata.duration_ms,
-            fps=metadata.fps,
-            settings=settings,
-            width=metadata.width,
-            height=metadata.height,
-        )
-        opening = [c for c in candidates if (c.get("score_breakdown") or {}).get("transition_type") == "opening_screen"]
-        if stable.include_opening_screen:
-            opening_ok = len(opening) == 1 and _shows_frame(opening[0], frames[0], frames)
-        candidates = [c for c in candidates if c not in opening]
-    else:
-        settings = RunSettings(
-            analysis_engine="hybrid_v2",
-            analysis_preset=preset,
-            advanced=HybridAdvancedSettings(enable_ocr=False),
-            min_scene_gap_ms=900,
-        )
-        candidates = detect_candidates_hybrid(
-            video_path=video,
-            frames_dir=work / "frames",
-            duration_ms=metadata.duration_ms,
-            fps=metadata.fps,
-            settings=settings,
-        )
+    if stable is None:
+        # A wandering mouse pointer is what the "computer" recording type is for.
+        stable = StableSettings(recording_type="desktop" if overlay == "pointer" else "phone")
+    settings = RunSettings(analysis_engine="stable_v3", stable=stable)
+    candidates = detect_candidates_stable(
+        video_path=video,
+        frames_dir=work / "frames",
+        duration_ms=metadata.duration_ms,
+        fps=metadata.fps,
+        settings=settings,
+        width=metadata.width,
+        height=metadata.height,
+    )
+    opening = [c for c in candidates if (c.get("score_breakdown") or {}).get("transition_type") == "opening_screen"]
+    if stable.include_opening_screen:
+        opening_ok = len(opening) == 1 and _shows_frame(opening[0], frames[0], frames)
+    candidates = [c for c in candidates if c not in opening]
     seconds = time.perf_counter() - started
     metrics = evaluate(candidates, ground_truth)
     correct, matched = screenshot_fidelity(candidates, ground_truth, metrics, frames, fps)
@@ -325,13 +308,11 @@ def _shows_frame(candidate: dict, expected: np.ndarray, frames: list[np.ndarray]
 
 def run_matrix(
     *,
-    preset: str = "balanced",
     ingest: bool = True,
     scenarios: set[str] | None = None,
     variants: set[str] | None = None,
     work_dir: Path,
     echo: bool = False,
-    engine: str = "hybrid_v2",
     scenario_set: str = "baseline",
     stable: StableSettings | None = None,
 ) -> list[VariantResult]:
@@ -348,7 +329,7 @@ def run_matrix(
                 continue
             result = run_variant(
                 name, scenario_dir, (frames, fps, scenario.video_path), scenario.ground_truth,
-                encoding, overlay, preset=preset, ingest=ingest, engine=engine, stable=stable,
+                encoding, overlay, ingest=ingest, stable=stable,
             )
             results.append(result)
             if echo:
@@ -395,9 +376,7 @@ def summarise(results: list[VariantResult]) -> dict[str, dict[str, float | int]]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--engine", default="hybrid_v2", choices=("hybrid_v2", "stable_v3"))
     parser.add_argument("--set", default="baseline", choices=tuple(SCENARIO_SETS), help="scenario set")
-    parser.add_argument("--preset", default="balanced", choices=("subtle_ui", "balanced", "noise_resistant"))
     parser.add_argument("--no-ingest", action="store_true", help="detect on the upload itself (pre-ingest behaviour)")
     parser.add_argument("--only", default="", help="comma-separated scenario names")
     parser.add_argument("--variants", default="", help="comma-separated variant labels, e.g. h264_vfr,h264_vfr+clock")
@@ -405,19 +384,16 @@ def main() -> None:
     args = parser.parse_args()
     with tempfile.TemporaryDirectory() as tmp:
         results = run_matrix(
-            preset=args.preset,
             ingest=not args.no_ingest,
             scenarios={name for name in args.only.split(",") if name} or None,
             variants={name for name in args.variants.split(",") if name} or None,
             work_dir=Path(tmp),
             echo=True,
-            engine=args.engine,
             scenario_set=args.set,
         )
     summary = summarise(results)
     pipeline = "upload only" if args.no_ingest else "working copy"
-    setting = f"preset={args.preset}" if args.engine == "hybrid_v2" else "recording type by variant"
-    print(f"\n{'variant':18s}  P     R     F1    screenshots   opening  labels  time   ({args.engine}, {setting}, {pipeline})")
+    print(f"\n{'variant':18s}  P     R     F1    screenshots   opening  labels  time   (stable_v3, {pipeline})")
     for variant, row in summary.items():
         share = row["shots_correct"] / max(1, row["shots_matched"])
         opening = f"{row['opening_ok']}/{row['opening_checked']}" if row["opening_checked"] else "-"

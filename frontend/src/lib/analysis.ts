@@ -5,24 +5,9 @@ export type AnalysisTaskFilter = 'all' | 'active' | 'completed' | 'failed';
 export type AnalysisPopoverKey = 'export' | 'load' | 'preset' | 'reset' | 'save';
 export type CandidateFilter = CandidateStatus | 'all';
 export type AnalysisHintKey =
-  | 'analysis_engine'
-  | 'analysis_preset'
-  | 'allow_high_fps_sampling'
-  | 'hybrid_advanced'
-  | 'hybrid_min_dwell_ms'
-  | 'hybrid_ocr_confirmation'
-  | 'hybrid_ocr_trigger_threshold'
-  | 'hybrid_proposal_threshold'
-  | 'hybrid_sample_fps_override'
-  | 'hybrid_settle_threshold'
-  | 'hybrid_settle_window_ms'
-  | 'detector_mode'
-  | 'extract_offset_ms'
   | 'load'
-  | 'min_scene_gap_ms'
   | 'reset'
   | 'run'
-  | 'sample_fps'
   | 'save'
   | 'stable_advanced'
   | 'stable_group_typing'
@@ -35,8 +20,7 @@ export type AnalysisHintKey =
   | 'stable_sample_fps'
   | 'stable_scroll_mode'
   | 'stable_sensitivity'
-  | 'stable_status_bar'
-  | 'tolerance';
+  | 'stable_status_bar';
 
 export interface AnalysisTaskItem {
   recording: RecordingSummary;

@@ -1,4 +1,4 @@
-"""Synthetic UI video scenarios for evaluating the hybrid v2 detection engine.
+"""Synthetic UI video scenarios with ground truth, for evaluating the detection engine.
 
 Each scenario generates a video with known, controlled UI changes and returns
 a ``ScenarioResult`` containing the video path and ground truth events.

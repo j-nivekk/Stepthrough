@@ -23,7 +23,7 @@ from typing import Callable
 
 import numpy as np
 
-from .detection import CancellationRequested
+from .run_control import CancellationRequested
 from .video import VideoToolError, _parse_fraction, run_command
 
 WORKING_COPY_DIRNAME = "working"

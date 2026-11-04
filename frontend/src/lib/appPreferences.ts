@@ -2,12 +2,10 @@ const PREFS_KEY = 'stepthrough.app-prefs.v1';
 const PREFS_VERSION = 1;
 
 export interface AppPreferences {
-  enableV1Engine: boolean;
   showPerfMonitor: boolean;
 }
 
 export const defaultAppPreferences: AppPreferences = {
-  enableV1Engine: true,
   showPerfMonitor: false,
 };
 
@@ -20,7 +18,6 @@ export function loadAppPreferences(): AppPreferences {
       return { ...defaultAppPreferences };
     }
     return {
-      enableV1Engine: parsed['enableV1Engine'] !== false,
       showPerfMonitor: parsed['showPerfMonitor'] === true,
     };
   } catch {

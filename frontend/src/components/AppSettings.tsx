@@ -89,21 +89,6 @@ export function AppSettings({
       </div>
 
       <div className="app-settings-section">
-        <p className="app-settings-section-label">analysis</p>
-        <label className="app-settings-toggle-row">
-          <span>enable v1 engine</span>
-          <input
-            checked={prefs.enableV1Engine}
-            onChange={(e) => onChangePref('enableV1Engine', e.target.checked)}
-            type="checkbox"
-          />
-        </label>
-        <p className="app-settings-hint">
-          when off, analysis always uses hybrid v2 and the engine selector is hidden throughout.
-        </p>
-      </div>
-
-      <div className="app-settings-section">
         <p className="app-settings-section-label">display</p>
         <label className="app-settings-toggle-row">
           <span>performance monitor</span>

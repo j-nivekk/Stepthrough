@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pytest
 
-from app.services.hybrid_detection import (
+from app.services.ocr import (
     PADDLEOCR_SUPPORTED_VERSION,
     PADDLEPADDLE_SUPPORTED_VERSION,
     PaddleOcrEngine,

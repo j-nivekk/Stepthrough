@@ -1,5 +1,8 @@
 # Hybrid v2 Engine in Stepthrough (Developer Draft)
 
+> **Retired (November 2026).** Hybrid v2 no longer starts new runs; Stepthrough uses the stable-screen engine (`stable_v3`, see `docs/robustness-review-2026-11.md`). Runs made with hybrid v2 still open and export. The code this document describes is at the git tag `last-with-hybrid-v2`.
+
+
 ## Scope
 
 This draft documents the hybrid v2 engine as it is currently implemented in the app, not as older manuals describe it and not as future work plans propose it.

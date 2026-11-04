@@ -7,8 +7,7 @@ import cv2
 import numpy as np
 import pytest
 
-from app.services.detection import CancellationRequested
-from app.services.hybrid_detection import _SequentialReader
+from app.models import RunSettings
 from app.services.ingest import (
     LUT_FILENAME,
     _pq_to_nits,
@@ -16,6 +15,8 @@ from app.services.ingest import (
     hdr_signal_to_sdr,
     inspect_source,
 )
+from app.services.run_control import CancellationRequested
+from app.services.stable_detection import _analysis_size, _decode, resolve_stable_config
 from app.services.video import extract_frame, probe_video
 
 
@@ -112,24 +113,20 @@ def test_analysed_frame_is_the_exported_frame(tmp_path: Path) -> None:
     working = tmp_path / 'working.mp4'
     build_working_copy(source, working)
 
-    # Every frame of the working copy, in order (OpenCV and ffmpeg use different YUV matrices, so compare luma).
-    capture = cv2.VideoCapture(str(working))
-    all_frames = []
-    while (frame := capture.read()[1]) is not None:
-        all_frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(int))
-    capture.release()
-
-    capture = cv2.VideoCapture(str(working))
-    reader = _SequentialReader(capture, probe_video(working).fps)
-    for sample_ms in (0, 333, 1000, 1500, 2600):
-        reader.next(sample_ms)
-        timestamp_ms = reader.frame_timestamp_ms()
-        exported_path = tmp_path / f'shot-{sample_ms}.png'
-        extract_frame(working, exported_path, timestamp_ms)
-        exported = cv2.cvtColor(cv2.imread(str(exported_path)), cv2.COLOR_BGR2GRAY).astype(int)
-        distances = [float(np.mean(np.abs(frame - exported))) for frame in all_frames]
-        assert int(np.argmin(distances)) == reader.last_frame_index, sample_ms
-    capture.release()
+    # The stable-screen engine analyses frame k at k / sample_fps seconds and exports its screenshot with
+    # extract_frame at that same time; both must show the same frame of the working copy.
+    meta = probe_video(working)
+    config = resolve_stable_config(RunSettings(), fps=meta.fps, width=meta.width, height=meta.height)
+    size = _analysis_size(meta.width, meta.height)
+    analysed = [frame.astype(int) for frame in _decode(working, config.sample_fps, size, lambda: False)]
+    frame_ms = 1000 / config.sample_fps
+    for index in (0, 5, 15, 22, len(analysed) - 2):
+        exported_path = tmp_path / f'shot-{index}.png'
+        extract_frame(working, exported_path, int(index * frame_ms))
+        exported = cv2.cvtColor(cv2.imread(str(exported_path)), cv2.COLOR_BGR2GRAY)
+        exported = cv2.resize(exported, size, interpolation=cv2.INTER_AREA).astype(int)
+        distances = [float(np.mean(np.abs(frame - exported))) for frame in analysed]
+        assert int(np.argmin(distances)) == index, index
 
 
 def test_cancelled_working_copy_leaves_no_partial_file(tmp_path: Path) -> None:

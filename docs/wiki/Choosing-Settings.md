@@ -4,58 +4,40 @@ This page gives new researchers a simple way to choose settings without getting 
 
 ## Start Here
 
-For most first-time use, start with:
+Stepthrough finds every screen that stays still for a moment and takes one screenshot of it. For most first-time use:
 
-- **Engine:** Hybrid v2
-- **Preset:** Balanced
-
-This is the safest default for general walkthrough work.
+- pick the **recording type**: **phone or tablet**, or **computer** (a desktop or browser recording with a mouse)
+- keep every other setting at its default
 
 ## Simple Decision Guide
 
 Use this rule set:
 
-- If the app misses subtle but important interface changes, switch to **Subtle UI**.
-- If the app finds too many noisy or repetitive moments, switch to **Ignore Noise**.
-- If the recording mainly consists of hard cuts between clearly different screens, try **Current v1**.
+- If a brief screen is missing (a menu, a popover), lower the **minimum time on screen**.
+- If a small change is missing (a toggle, a badge), lower the **smallest change**.
+- If something that keeps moving creates extra steps (a clock, a banner, a playing video), draw an **ignore area** over it.
+- If a moving mouse pointer creates extra steps, use the **computer** recording type.
 - If one important moment is missing, add a manual step before changing many settings.
 
-## When Each Preset Helps
+## What The Main Settings Mean
 
-### Balanced
+### Minimum Time On Screen
 
-Best starting point for:
+How long a screen must stay still to count as a step: 450 ms for phones, 600 ms for computers.
 
-- general app walkthroughs
-- prototypes
-- usability test recordings
-- most class exercises
+- lower: catches brief screens, but also screens the user only passed through
+- higher: calmer output, but very short states are skipped
 
-### Subtle UI
+### Smallest Change
 
-Best when:
+The smallest connected change, as a share of the screen, that counts: 0.10 % for phones, 0.25 % for computers.
 
-- text changes are small
-- menus appear briefly
-- overlays or interface states are easy to miss
+- lower: catches tiny changes, but small animations may add steps
+- higher: ignores small movement, but tiny real changes may be missed
 
-Tradeoff:
+### Group Typing
 
-- catches more subtle changes
-- may also produce more noise
-
-### Ignore Noise
-
-Best when:
-
-- there is lots of scrolling
-- compression artifacts create visual shimmer
-- the detector is overfiring
-
-Tradeoff:
-
-- calmer output
-- more likely to miss very short states
+On by default: a burst of typing with short pauses becomes one step showing the finished text. Turn it off if every pause matters for your analysis.
 
 ## Beginner Advice
 
@@ -64,13 +46,13 @@ For new users:
 - change one thing at a time
 - keep notes about which run worked better
 - compare two runs if you are unsure
-- do not tune many advanced controls at once
+- leave the settings under **advanced** alone
 
 ## When To Ask For Help
 
 Ask an instructor or advanced user when:
 
-- all presets perform poorly on the same recording
-- OCR-related behavior is unclear
+- the defaults perform poorly on several recordings of the same kind
+- OCR-related behaviour is unclear
 - the exported steps look consistently late or early
 - the recording contains unusual motion-heavy content
