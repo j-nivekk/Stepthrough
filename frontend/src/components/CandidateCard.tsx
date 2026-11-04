@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { absoluteApiUrl } from '../api';
-import type { SimilarLink } from '../lib/analysis';
+import { candidateLabelType, transitionLabelText, type SimilarLink } from '../lib/analysis';
 import type { CandidateFrame, CandidateStatus } from '../types';
 
 function hasFiniteNumber(value: number | null | undefined): value is number {
@@ -9,6 +9,47 @@ function hasFiniteNumber(value: number | null | undefined): value is number {
 
 function formatSigned(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}`;
+}
+
+function formatSeconds(ms: number): string {
+  return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
+}
+
+/** The step's label with its legend colour, plus how many screens a typing step grouped. */
+function CandidateLabel({ candidate }: { candidate: CandidateFrame }) {
+  const type = candidateLabelType(candidate);
+  if (!type) {
+    return null;
+  }
+  const grouped = candidate.score_breakdown?.grouped_states;
+  return (
+    <span className="candidate-label-copy">
+      <span aria-hidden="true" className={`timeline-legend-color ${type}`} />
+      {transitionLabelText(type)}
+      {hasFiniteNumber(grouped) && grouped > 1 ? <span className="candidate-label-count">×{grouped}</span> : null}
+    </span>
+  );
+}
+
+function useAnnotationDrafts(candidate: CandidateFrame, onUpdate: CandidateCardProps['onUpdate']) {
+  const [title, setTitle] = useState(candidate.title ?? '');
+  const [notes, setNotes] = useState(candidate.notes ?? '');
+
+  useEffect(() => {
+    setTitle(candidate.title ?? '');
+    setNotes(candidate.notes ?? '');
+  }, [candidate.id, candidate.title, candidate.notes]);
+
+  function commit(field: 'title' | 'notes', value: string) {
+    const trimmed = value.trim();
+    const currentValue = field === 'title' ? candidate.title ?? '' : candidate.notes ?? '';
+    if (trimmed === currentValue.trim()) {
+      return;
+    }
+    onUpdate({ [field]: trimmed } as Partial<Pick<CandidateFrame, 'title' | 'notes'>>);
+  }
+
+  return { title, setTitle, notes, setNotes, commit };
 }
 
 export function ComparisonMetrics({ candidate }: { candidate: CandidateFrame }) {
@@ -83,6 +124,37 @@ function CandidateDecisionButton({
   );
 }
 
+function CandidateDecisionButtons({
+  candidate,
+  onSetStatus,
+}: {
+  candidate: CandidateFrame;
+  onSetStatus: (status: CandidateStatus) => void;
+}) {
+  return (
+    <>
+      <CandidateDecisionButton
+        intent="accepted"
+        isActive={candidate.status === 'accepted'}
+        label="accept candidate (a)"
+        onClick={() => onSetStatus('accepted')}
+      />
+      <CandidateDecisionButton
+        intent="rejected"
+        isActive={candidate.status === 'rejected'}
+        label="reject candidate (r)"
+        onClick={() => onSetStatus('rejected')}
+      />
+      <CandidateDecisionButton
+        intent="pending"
+        isActive={candidate.status === 'pending'}
+        label="reset candidate to pending (u)"
+        onClick={() => onSetStatus('pending')}
+      />
+    </>
+  );
+}
+
 export interface CandidateCardProps {
   candidate: CandidateFrame;
   isActive: boolean;
@@ -98,6 +170,8 @@ export interface CandidateCardProps {
   recordingWidth?: number | null;
   similarLink?: SimilarLink | undefined;
   onUpdate: (payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>>) => void;
+  /** Narrow card: scores and the notes toggle move out of the way until the card is active. */
+  compact?: boolean;
 }
 
 export function CandidateCard({
@@ -115,37 +189,21 @@ export function CandidateCard({
   recordingWidth,
   similarLink,
   onUpdate,
+  compact = false,
 }: CandidateCardProps) {
-  const [title, setTitle] = useState(candidate.title ?? '');
-  const [notes, setNotes] = useState(candidate.notes ?? '');
-  const showAnnotation = isAnnotationExpanded || isActive || Boolean(candidate.title || candidate.notes);
-  const annotationToggleLabel = showAnnotation ? 'hide notes' : 'annotate';
+  const { title, setTitle, notes, setNotes, commit: commitTextField } = useAnnotationDrafts(candidate, onUpdate);
+  // The title and notes fields open only on request, so a selected card can still be just a screenshot.
+  // Saved text stays visible as plain text while the fields are closed.
+  const hasAnnotation = Boolean(candidate.title || candidate.notes);
+  const showAnnotation = isAnnotationExpanded;
+  const annotationToggleLabel = showAnnotation ? 'hide notes' : hasAnnotation ? 'edit notes' : 'annotate';
 
-  const imageAspectRatio = (() => {
-    if (recordingWidth && recordingHeight && recordingWidth > 0 && recordingHeight > 0) {
-      const naturalRatio = recordingWidth / recordingHeight;
-      return Math.max(naturalRatio, 9 / 16);
-    }
-    return 16 / 10;
-  })();
-
-  useEffect(() => {
-    setTitle(candidate.title ?? '');
-    setNotes(candidate.notes ?? '');
-  }, [candidate.id, candidate.title, candidate.notes]);
-
-  function commitTextField(field: 'title' | 'notes', value: string) {
-    const trimmed = value.trim();
-    const currentValue = field === 'title' ? candidate.title ?? '' : candidate.notes ?? '';
-    if (trimmed === currentValue.trim()) {
-      return;
-    }
-    onUpdate({ [field]: trimmed } as Partial<Pick<CandidateFrame, 'title' | 'notes'>>);
-  }
+  const imageAspectRatio =
+    recordingWidth && recordingHeight && recordingWidth > 0 && recordingHeight > 0 ? recordingWidth / recordingHeight : 16 / 10;
 
   return (
     <article
-      className={`candidate-card ${candidate.status} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}`}
+      className={`candidate-card ${candidate.status} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${compact ? 'compact' : ''} ${showAnnotation ? 'annotating' : ''}`}
       id={`candidate-${candidate.id}`}
       onClick={onActivate}
       onFocus={onActivate}
@@ -175,24 +233,7 @@ export function CandidateCard({
           onClick={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <CandidateDecisionButton
-            intent="accepted"
-            isActive={candidate.status === 'accepted'}
-            label="accept candidate (a)"
-            onClick={() => onSetStatus('accepted')}
-          />
-          <CandidateDecisionButton
-            intent="rejected"
-            isActive={candidate.status === 'rejected'}
-            label="reject candidate (r)"
-            onClick={() => onSetStatus('rejected')}
-          />
-          <CandidateDecisionButton
-            intent="pending"
-            isActive={candidate.status === 'pending'}
-            label="reset candidate to pending (u)"
-            onClick={() => onSetStatus('pending')}
-          />
+          <CandidateDecisionButtons candidate={candidate} onSetStatus={onSetStatus} />
         </div>
       </div>
       <div className="candidate-body">
@@ -204,6 +245,7 @@ export function CandidateCard({
             <div className="candidate-heading-meta">
               <span className={`candidate-status-copy ${candidate.status}`}>{candidate.status}</span>
               {candidate.candidate_origin === 'manual' ? <span className="candidate-origin-copy">manual</span> : null}
+              <CandidateLabel candidate={candidate} />
             </div>
           </div>
         </div>
@@ -277,31 +319,25 @@ export function CandidateCard({
               )}
             </div>
           </details>
-          {!showAnnotation && (
-            <button
-              className="candidate-annotation-toggle"
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggleAnnotation();
-              }}
-              type="button"
-            >
-              {annotationToggleLabel}
-            </button>
-          )}
-          {showAnnotation && (candidate.title || candidate.notes) && (
-            <button
-              className="candidate-annotation-toggle"
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggleAnnotation();
-              }}
-              type="button"
-            >
-              hide notes
-            </button>
-          )}
+          <button
+            aria-expanded={showAnnotation}
+            className="candidate-annotation-toggle"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleAnnotation();
+            }}
+            type="button"
+          >
+            {annotationToggleLabel}
+          </button>
         </div>
+
+        {hasAnnotation && !showAnnotation ? (
+          <div className="candidate-annotation-summary">
+            {candidate.title ? <span className="candidate-annotation-summary-title">{candidate.title}</span> : null}
+            {candidate.notes ? <span className="candidate-annotation-summary-notes">{candidate.notes}</span> : null}
+          </div>
+        ) : null}
 
         {similarLink && onJumpToSimilar && (
           <div className="candidate-secondary-row">
@@ -345,5 +381,122 @@ export function CandidateCard({
         )}
       </div>
     </article>
+  );
+}
+
+export interface CandidateRowProps {
+  candidate: CandidateFrame;
+  isActive: boolean;
+  isSelected: boolean;
+  isSelectable: boolean;
+  onActivate: () => void;
+  onJumpToSimilar?: (() => void) | undefined;
+  onSetStatus: (status: CandidateStatus) => void;
+  onToggleSelection: () => void;
+  onUpdate: CandidateCardProps['onUpdate'];
+  similarLink?: SimilarLink | undefined;
+  thumbHeight: number;
+  thumbWidth: number;
+}
+
+/** One step as a table row: for runs with many steps, and for writing titles and notes in one pass. */
+export function CandidateRow({
+  candidate,
+  isActive,
+  isSelected,
+  isSelectable,
+  onActivate,
+  onJumpToSimilar,
+  onSetStatus,
+  onToggleSelection,
+  onUpdate,
+  similarLink,
+  thumbHeight,
+  thumbWidth,
+}: CandidateRowProps) {
+  const { title, setTitle, notes, setNotes, commit } = useAnnotationDrafts(candidate, onUpdate);
+  const onScreenMs = candidate.score_breakdown?.dwell_after_ms;
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
+
+  return (
+    <div
+      className={`candidate-row ${candidate.status} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}`}
+      id={`candidate-${candidate.id}`}
+      onClick={onActivate}
+      onFocus={onActivate}
+      role="row"
+      tabIndex={-1}
+    >
+      <div className="candidate-row-select" role="cell">
+        {isSelectable ? (
+          <input
+            aria-label={`Select candidate ${candidate.detector_index}`}
+            checked={isSelected}
+            onChange={onToggleSelection}
+            onClick={stop}
+            type="checkbox"
+          />
+        ) : null}
+      </div>
+      <div className="candidate-row-thumb" role="cell" style={{ width: thumbWidth, height: thumbHeight }}>
+        <img
+          alt={`candidate screenshot at ${candidate.timestamp_tc}`}
+          loading="lazy"
+          src={absoluteApiUrl(candidate.image_url)}
+        />
+      </div>
+      <div className="candidate-row-step" role="cell">
+        <strong>
+          {candidate.candidate_origin === 'manual' ? 'manual ' : ''}
+          {candidate.detector_index}
+        </strong>
+        <span>{candidate.timestamp_tc}</span>
+      </div>
+      <div className="candidate-row-label" role="cell">
+        <CandidateLabel candidate={candidate} />
+        {similarLink && onJumpToSimilar ? (
+          <button
+            className="inline-link-button candidate-similarity-link"
+            onClick={(event) => {
+              stop(event);
+              onJumpToSimilar();
+            }}
+            title="jump to the earlier matching scene."
+            type="button"
+          >
+            {similarLink.label}
+          </button>
+        ) : null}
+      </div>
+      <div className="candidate-row-duration" role="cell">
+        {hasFiniteNumber(onScreenMs) ? formatSeconds(onScreenMs) : '–'}
+      </div>
+      <div className="candidate-row-title" role="cell">
+        <input
+          aria-label={`title of step ${candidate.detector_index}`}
+          className="candidate-field"
+          onBlur={(event) => commit('title', event.target.value)}
+          onChange={(event) => setTitle(event.target.value)}
+          onClick={stop}
+          placeholder="step title"
+          value={title}
+        />
+      </div>
+      <div className="candidate-row-notes" role="cell">
+        <input
+          aria-label={`notes on step ${candidate.detector_index}`}
+          className="candidate-field"
+          onBlur={(event) => commit('notes', event.target.value)}
+          onChange={(event) => setNotes(event.target.value)}
+          onClick={stop}
+          placeholder="notes"
+          title={notes || undefined}
+          value={notes}
+        />
+      </div>
+      <div className="candidate-row-actions" onClick={stop} onPointerDown={stop} role="cell">
+        <CandidateDecisionButtons candidate={candidate} onSetStatus={onSetStatus} />
+      </div>
+    </div>
   );
 }

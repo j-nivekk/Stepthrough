@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
+import { rangeFillStyle } from '../../../lib/rangeFill';
 import { sanitizeIgnoreRegion, STABLE_MAX_IGNORE_REGIONS } from '../../../lib/stableSettings';
 import type { IgnoreRegion } from '../../../types';
 
@@ -139,6 +140,7 @@ export function IgnoreAreaEditor({
           min={0}
           onChange={(event) => setFrameMs(Number(event.target.value))}
           step={100}
+          style={rangeFillStyle(frameMs, 0, Math.max(0, durationMs - 1))}
           type="range"
           value={frameMs}
         />

@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { absoluteApiUrl, getRun } from '../../api';
-import { ComparisonMetrics, CandidateCard } from '../../components/CandidateCard';
+import { ComparisonMetrics, CandidateCard, CandidateRow } from '../../components/CandidateCard';
 import { EditableName } from '../../components/EditableName';
 import {
   activeRunStatuses,
   buildCandidateComparison,
   candidateFilters,
   candidateMatchesFilter,
+  candidateMatchesLabels,
+  candidateLabelType,
   getNextCandidateFocusId,
+  transitionLabels,
   type AnalysisHintKey,
   type AnalysisPopoverKey,
   type AnalysisTaskFilter,
@@ -73,6 +76,17 @@ import { AnalysisTasksPanel } from './components/AnalysisTasksPanel';
 import { AnalysisVideosPanel } from './components/AnalysisVideosPanel';
 import type { WorkflowStage } from '../../lib/workflow';
 import { defaultStableSettings, formatStableSummary } from '../../lib/stableSettings';
+import {
+  loadStepLayout,
+  recordingAspect,
+  saveStepLayout,
+  STEP_SIZE_MAX,
+  STEP_SIZE_MIN,
+  stepImageBox,
+  stepThumbBox,
+  type StepLayout,
+} from '../../lib/stepLayout';
+import { rangeFillStyle } from '../../lib/rangeFill';
 
 function engineShortLabel(engine: RunSettings['analysis_engine']): string {
   return engine === 'scene_v1' ? 'v1' : engine === 'hybrid_v2' ? 'v2' : 'v3';
@@ -297,6 +311,7 @@ export function AnalysisScreen({
   const [hintCardPosition, setHintCardPosition] = useState<{ left: number; top: number } | null>(null);
   const [hoveredLegendType, setHoveredLegendType] = useState<string | null>(null);
   const [hiddenSegmentTypes, setHiddenSegmentTypes] = useState<Set<string>>(new Set());
+  const [stepLayout, setStepLayout] = useState<StepLayout>(() => loadStepLayout());
   const parameterColumnRef = useRef<HTMLElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const saveMenuRef = useRef<HTMLDivElement | null>(null);
@@ -484,23 +499,33 @@ export function AnalysisScreen({
         return rightTimestamp - leftTimestamp;
       });
   }, [filteredAnalysisTaskItems]);
+  // Labels switched off in the timeline legend hide those steps too; the status tabs count what is left.
+  const labelVisibleCandidates = useMemo(
+    () => (selectedRun?.candidates ?? []).filter((candidate) => candidateMatchesLabels(candidate, hiddenSegmentTypes)),
+    [hiddenSegmentTypes, selectedRun],
+  );
+  const labelHiddenCount = (selectedRun?.candidates.length ?? 0) - labelVisibleCandidates.length;
   const candidateCounts = useMemo(() => {
-    const candidates = selectedRun?.candidates ?? [];
+    const candidates = labelVisibleCandidates;
     return {
       pending: candidates.filter((candidate) => candidate.status === 'pending').length,
       accepted: candidates.filter((candidate) => candidate.status === 'accepted').length,
       rejected: candidates.filter((candidate) => candidate.status === 'rejected').length,
       all: candidates.length,
     };
-  }, [selectedRun]);
+  }, [labelVisibleCandidates]);
   const filteredCandidates = useMemo(() => {
     if (!selectedRun || !canReviewCandidates) {
       return [];
     }
-    return selectedRun.candidates.filter((candidate) =>
-      candidateMatchesFilter(candidate, activeCandidateFilter),
-    );
-  }, [activeCandidateFilter, canReviewCandidates, selectedRun]);
+    return labelVisibleCandidates.filter((candidate) => candidateMatchesFilter(candidate, activeCandidateFilter));
+  }, [activeCandidateFilter, canReviewCandidates, labelVisibleCandidates, selectedRun]);
+  const stepAspect = recordingAspect(selectedRecordingSummary?.width, selectedRecordingSummary?.height);
+  const stepCardBox = stepImageBox(stepLayout.size, stepAspect);
+  const stepThumb = stepThumbBox(stepLayout.size, stepAspect);
+  useEffect(() => {
+    saveStepLayout(stepLayout);
+  }, [stepLayout]);
   const scrubDurationMs = previewRecording?.duration_ms ?? selectedRecordingSummary?.duration_ms ?? 0;
   const timelineCandidates = useMemo(() => {
     if (!selectedRun) {
@@ -1161,6 +1186,14 @@ export function AnalysisScreen({
     if (options?.reveal && !candidateMatchesFilter(candidate, activeCandidateFilter)) {
       setActiveCandidateFilter('all');
     }
+    const labelType = candidateLabelType(candidate);
+    if (options?.reveal && labelType && hiddenSegmentTypes.has(labelType)) {
+      setHiddenSegmentTypes((current) => {
+        const next = new Set(current);
+        next.delete(labelType);
+        return next;
+      });
+    }
     setActiveCandidateId(candidate.id);
 
     if (options?.seekPreview && previewMatchesSelectedRun && previewVideoRef.current) {
@@ -1184,6 +1217,7 @@ export function AnalysisScreen({
       selectedRun?.candidates ?? [],
       candidate.id,
       activeCandidateFilter,
+      hiddenSegmentTypes,
     );
     if (!nextCandidateId) {
       return;
@@ -1256,6 +1290,9 @@ export function AnalysisScreen({
               value={activeProject.name}
             />
           )}
+          <span aria-live="polite" className="analysis-live-status" role="status" title={liveMessage || undefined}>
+            {liveMessage}
+          </span>
           {ocrWarnings.length > 0 && (
             <div className="nav-ocr-inline">
               <button
@@ -1273,7 +1310,7 @@ export function AnalysisScreen({
           )}
         </div>
 
-        {(healthMessage || (ocrStatus !== 'available' && ocrStatusMessage) || (ocrWarnings.length > 0 && ocrWarningsExpanded) || appError || liveMessage || settingsFeedback || analysisActionMessage) && (
+        {(healthMessage || (ocrStatus !== 'available' && ocrStatusMessage) || (ocrWarnings.length > 0 && ocrWarningsExpanded) || appError || settingsFeedback || analysisActionMessage) && (
           <div aria-atomic="true" aria-live="polite" className="analysis-notices" role="status">
             {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
             {ocrStatus !== 'available' && ocrStatusMessage && (
@@ -1288,7 +1325,6 @@ export function AnalysisScreen({
                 </p>
               ))}
             {appError && <p className="entry-notice error">{appError}</p>}
-            {liveMessage && <p className="entry-notice">{liveMessage}</p>}
             {settingsFeedback && <p className="entry-notice">{settingsFeedback}</p>}
             {analysisActionMessage && <p className="entry-notice">{analysisActionMessage}</p>}
           </div>
@@ -1404,6 +1440,21 @@ export function AnalysisScreen({
 
         {previewVideoUrl && (
           <div className="analysis-preview-wrap" data-bg={previewBg}>
+            <div className="analysis-preview-close-rail">
+              <button
+                aria-label="close preview"
+                className="preview-control-btn analysis-preview-close"
+                onClick={() => {
+                  if (previewRecording) onPreviewRecording(previewRecording.id);
+                }}
+                title="close preview"
+                type="button"
+              >
+                <svg aria-hidden="true" fill="none" height="14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" viewBox="0 0 14 14" width="14">
+                  <path d="M3.5 3.5l7 7M10.5 3.5l-7 7" />
+                </svg>
+              </button>
+            </div>
             <section className="analysis-panel analysis-preview-panel" data-size={previewSizeKey} id="analysis-video-preview">
                   <span className="analysis-preview-filename">{previewRecording?.filename}</span>
                   <video
@@ -1687,7 +1738,7 @@ export function AnalysisScreen({
               {selectedRun.summary.is_abortable ? (
                 <div className="action-row">
                   <button
-                    className="analysis-pill danger"
+                    className="analysis-task-link danger"
                     disabled={abortRunPending}
                     onClick={() => onAbortRun(selectedRun.summary.id)}
                     type="button"
@@ -1874,18 +1925,7 @@ export function AnalysisScreen({
                 {canShowTimeline ? (
                   <div className="candidate-timeline-wrapper">
                     <div className="timeline-legend" aria-hidden="false">
-                      {[
-                        { type: 'opening_screen', label: 'opening' },
-                        { type: 'scroll', label: 'scroll' },
-                        { type: 'dwell', label: 'dwell' },
-                        { type: 'navigation', label: 'navigation' },
-                        { type: 'modal', label: 'modal' },
-                        { type: 'feed_card_swap', label: 'feed swap' },
-                        { type: 'content_update', label: 'update' },
-                        { type: 'small_ui_change', label: 'ui change' },
-                        { type: 'text_entry', label: 'typing' },
-                        { type: 'unknown', label: 'unknown' }
-                      ]
+                      {transitionLabels
                         .filter(({ type }) =>
                           candidateTimelineSegments.some((s) => s.type === type) ||
                           previewTimelineSegments.some((s) => s.type === type)
@@ -1893,7 +1933,13 @@ export function AnalysisScreen({
                         .map(({ type, label }) => (
                           <button
                             key={type}
+                            aria-pressed={!hiddenSegmentTypes.has(type)}
                             className={`timeline-legend-item ${hiddenSegmentTypes.has(type) ? 'hidden' : ''}`}
+                            title={
+                              type === 'dwell'
+                                ? `${hiddenSegmentTypes.has(type) ? 'show' : 'hide'} dwell on the timeline`
+                                : `${hiddenSegmentTypes.has(type) ? 'show' : 'hide'} ${label} steps`
+                            }
                             onMouseEnter={() => setHoveredLegendType(type)}
                             onMouseLeave={() => setHoveredLegendType(null)}
                             onClick={() => {
@@ -2135,13 +2181,115 @@ export function AnalysisScreen({
                   ) : null}
                 </div>
 
-                {filteredCandidates.length ? (
-                  <div className={`candidate-grid ${filteredCandidates.length < 3 ? 'sparse' : ''}`} id="analysis-candidate-review">
+                <div className="candidate-view-bar">
+                  <span className="candidate-view-note">
+                    {labelHiddenCount > 0 ? (
+                      <>
+                        {labelHiddenCount} {labelHiddenCount === 1 ? 'step' : 'steps'} hidden by label{' · '}
+                        <button
+                          className="analysis-task-link subtle"
+                          onClick={() => setHiddenSegmentTypes(new Set())}
+                          type="button"
+                        >
+                          show all
+                        </button>
+                      </>
+                    ) : canShowTimeline ? (
+                      'click a label above the timeline to hide its steps'
+                    ) : null}
+                  </span>
+                  <div className="candidate-view-controls">
+                    <div aria-label="step layout" className="candidate-view-switch" role="group">
+                      {(['grid', 'list'] as const).map((view) => (
+                        <button
+                          aria-pressed={stepLayout.view === view}
+                          className={`candidate-filter-tab ${stepLayout.view === view ? 'active' : ''}`}
+                          key={view}
+                          onClick={() => setStepLayout((current) => ({ ...current, view }))}
+                          type="button"
+                        >
+                          {view}
+                        </button>
+                      ))}
+                    </div>
+                    <label className="candidate-size-control" title="image size">
+                      <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
+                        <rect height="6" rx="1" width="6" x="4" y="4" />
+                      </svg>
+                      <input
+                        aria-label="step image size"
+                        max={STEP_SIZE_MAX}
+                        min={STEP_SIZE_MIN}
+                        onChange={(event) => setStepLayout((current) => ({ ...current, size: Number(event.target.value) }))}
+                        step={10}
+                        style={rangeFillStyle(stepLayout.size, STEP_SIZE_MIN, STEP_SIZE_MAX)}
+                        type="range"
+                        value={stepLayout.size}
+                      />
+                      <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
+                        <rect height="12" rx="1" width="12" x="1" y="1" />
+                      </svg>
+                    </label>
+                  </div>
+                </div>
+
+                {filteredCandidates.length && stepLayout.view === 'list' ? (
+                  <div
+                    aria-label="steps"
+                    className="candidate-list"
+                    id="analysis-candidate-review"
+                    role="table"
+                    style={{ '--candidate-thumb-width': `${stepThumb.width}px` } as CSSProperties}
+                  >
+                    <div className="candidate-row candidate-row-head" role="row">
+                      <span className="candidate-row-select" role="columnheader">
+                        <span className="sr-only">select</span>
+                      </span>
+                      <span className="candidate-row-thumb" role="columnheader">
+                        <span className="sr-only">screenshot</span>
+                      </span>
+                      <span className="candidate-row-step" role="columnheader">step</span>
+                      <span className="candidate-row-label" role="columnheader">label</span>
+                      <span className="candidate-row-duration" role="columnheader">on screen</span>
+                      <span className="candidate-row-title" role="columnheader">title</span>
+                      <span className="candidate-row-notes" role="columnheader">notes</span>
+                      <span className="candidate-row-actions" role="columnheader">
+                        <span className="sr-only">decision</span>
+                      </span>
+                    </div>
+                    {filteredCandidates.map((candidate) => {
+                      const similarityLink = candidateSimilarityLinks.get(candidate.id);
+                      return (
+                        <CandidateRow
+                          candidate={candidate}
+                          isActive={activeCandidateId === candidate.id}
+                          isSelectable={candidate.status === 'pending'}
+                          isSelected={selectedPendingCandidateIds.includes(candidate.id)}
+                          key={candidate.id}
+                          onActivate={() => setActiveCandidateId(candidate.id)}
+                          onJumpToSimilar={similarityLink ? () => jumpToAnchor(similarityLink.targetId) : undefined}
+                          onSetStatus={(status) => handleCandidateStatusChange(candidate, status)}
+                          onToggleSelection={() => toggleCandidateSelection(candidate.id)}
+                          onUpdate={(payload) => onUpdateCandidate(candidate.id, payload)}
+                          similarLink={similarityLink}
+                          thumbHeight={stepThumb.height}
+                          thumbWidth={stepThumb.width}
+                        />
+                      );
+                    })}
+                  </div>
+                ) : filteredCandidates.length ? (
+                  <div
+                    className={`candidate-grid sized ${filteredCandidates.length < 3 ? 'sparse' : ''}`}
+                    id="analysis-candidate-review"
+                    style={{ '--candidate-card-width': `${stepCardBox.width}px` } as CSSProperties}
+                  >
                     {filteredCandidates.map((candidate) => {
                       const similarityLink = candidateSimilarityLinks.get(candidate.id);
                       return (
                         <CandidateCard
                           candidate={candidate}
+                          compact={stepCardBox.width < 190}
                           isActive={activeCandidateId === candidate.id}
                           isAnnotationExpanded={expandedAnnotationCandidateId === candidate.id}
                           isSelected={selectedPendingCandidateIds.includes(candidate.id)}
@@ -2162,7 +2310,9 @@ export function AnalysisScreen({
                   </div>
                 ) : (
                   <p className="entry-empty-copy candidate-empty-copy">
-                    {activeCandidateFilter === 'all'
+                    {labelHiddenCount > 0 && labelVisibleCandidates.length === 0
+                      ? 'every step in this run has a hidden label.'
+                      : activeCandidateFilter === 'all'
                       ? 'no scenes in this run.'
                       : activeCandidateFilter === 'pending'
                         ? 'no pending scenes left in this run.'

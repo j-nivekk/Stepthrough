@@ -57,7 +57,7 @@ export function AnalysisVideosPanel({
     >
       <div className="analysis-column-head">
         <p>videos</p>
-        <button className="analysis-pill analysis-pill-accent" onClick={onJumpToSelection} type="button">
+        <button className="analysis-task-link subtle" onClick={onJumpToSelection} type="button">
           jump to selection
         </button>
       </div>

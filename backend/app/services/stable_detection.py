@@ -72,6 +72,7 @@ MOTION_FLOOR = 0.05
 REVISIT_LOOKBACK = 60  # steps compared when looking for an earlier visit of the same screen
 FRAME_MEMORY_BUDGET_BYTES = 512 * 1024 * 1024
 SCAN_RANGE = (0.10, 0.46)
+PROGRESS_STEP_PERCENT = 5
 EXTRACT_RANGE = (0.48, 0.92)
 
 _KERNEL = np.ones((3, 3), np.uint8)
@@ -623,6 +624,7 @@ def detect_candidates_stable(
     motion: list[tuple[float, float, float]] = []
     previous: np.ndarray | None = None
     count = 0
+    reported_percent = 0  # progress is reported in steps of PROGRESS_STEP_PERCENT, not every 30 frames
     for frame in _decode(video_path, config.sample_fps, size, cancelled):
         if keep_frames:
             frames.append(frame)
@@ -640,8 +642,11 @@ def detect_candidates_stable(
         count += 1
         if count % 30 == 0:
             ratio = min(1.0, count / expected_frames)
-            progress("primary_scan", f"Scanning video for stable screens ({round(ratio * 50)}%)",
-                     SCAN_RANGE[0] + (SCAN_RANGE[1] - SCAN_RANGE[0]) * ratio * 0.5, "info")
+            percent = round(ratio * 50)
+            if percent >= reported_percent + PROGRESS_STEP_PERCENT:
+                reported_percent = percent
+                progress("primary_scan", f"Scanning video for stable screens ({percent}%)",
+                         SCAN_RANGE[0] + (SCAN_RANGE[1] - SCAN_RANGE[0]) * ratio * 0.5, "info")
     if first_frame is None:
         raise RuntimeError("The recording contains no decodable video frames.")
 
@@ -701,8 +706,11 @@ def detect_candidates_stable(
             if cancelled():
                 raise CancellationRequested("Run cancelled while scanning the video.")
             ratio = index / n
-            progress("primary_scan", f"Scanning video for stable screens ({50 + round(ratio * 50)}%)",
-                     SCAN_RANGE[0] + (SCAN_RANGE[1] - SCAN_RANGE[0]) * (0.5 + ratio * 0.5), "info")
+            percent = 50 + round(ratio * 50)
+            if percent >= reported_percent + PROGRESS_STEP_PERCENT:
+                reported_percent = percent
+                progress("primary_scan", f"Scanning video for stable screens ({percent}%)",
+                         SCAN_RANGE[0] + (SCAN_RANGE[1] - SCAN_RANGE[0]) * (0.5 + ratio * 0.5), "info")
     if accept(anchor_index, n - 1, final=True):
         intervals.append(_Step(anchor_index, n - 1, anchor))
     frames.clear()
