@@ -9,3 +9,6 @@ Scripts behind `docs/robustness-review-2026-11.md`. Run them from `backend/` wit
 | `stress.py` | superseded by `tests/eval/stress.py` (which runs uploads through the working copy); kept to reproduce the review's numbers. Re-encodes every synthetic eval scenario (H.264 CFR, phone-style VFR) and adds overlays (caret, spinner, pointer, clock); scores P/R/F1 plus whether each screenshot shows the settled post-event state. `--engine hybrid|plateau`, `--preset`, `--only`, `--variants`, `--min-area` |
 | `plateau.py` | prototype stable-interval detector (timestamp-accurate decode, measured noise floor, dynamic-region masking, one screenshot per settled interval) |
 | `real_compare.py` | runs both engines on real recordings, times them and writes contact sheets: `real_compare.py <out_dir> <videos...>` |
+| `real_stable.py` | phase 1: runs `stable_v3` (and with `--hybrid`, hybrid v2) on real recordings through cached working copies, prints the measured values and writes labelled contact sheets: `real_stable.py <out_dir> <cache_dir> <videos...> [--hybrid] [--type desktop] [--no-typing]` |
+
+`out/` is ignored by git: contact sheets of real recordings show real people.

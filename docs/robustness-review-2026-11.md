@@ -15,9 +15,96 @@ Everything below was measured on this machine (M-series Mac, ffmpeg 9.0.2, OpenC
 - A ground-up alternative, detecting **stable intervals** (screens that stay still for at least *n* ms) with real timestamps, measured noise and automatic masking of animations, scored **F1 0.91** on the phone-style variant in a 150-line prototype. Every screenshot is a settled frame by construction, it ran 7 to 10 times faster on the real recordings, and it needs fewer, physically meaningful settings. It still over-segments typing, which needs one more merge rule.
 - As a shared server it is currently unsafe: the database and all recordings are downloadable from `/assets`, anyone can wipe all data through `/admin/reset-db`, and there are no users. Section 6 sets out a conventional container setup with SURFconext login, a job queue and private file serving.
 
+### Update: phase 1 implemented (stable-screen engine)
+
+Phase 1 of section 7 is in place as a third engine, `stable_v3` ("stable screens"), now the default for new runs. Hybrid v2 stays selectable for comparison with earlier runs. Code: `backend/app/services/stable_detection.py`.
+
+**How it works.** A step is a screen that stays still for at least the minimum time on screen. The working copy is decoded small and grey on a fixed real-time grid. Two passes then run:
+
+1. Frame-to-frame differences give a noise floor measured on the recording itself, a map of regions that keep moving (busy in most frames of most seconds, such as a spinner or embedded video, but not typing or a blinking caret), and the content's vertical motion.
+2. A stable screen is a run of frames that all match its *first* frame. That catches slow, accumulating change such as slow typing, which a frame-to-frame test misses. "Match" means no connected change larger than the smallest change, outside ignored regions. A thin vertical mark on its own (a caret) does not count.
+
+Afterwards:
+- Neighbouring stable screens that show the same state are merged.
+- The change into each step is labelled.
+- Typing bursts are grouped into one step.
+- Optionally, scroll stops are merged.
+- One screenshot is extracted per step, 200 ms after it settles.
+- A revisit means the same state by that same test, not by image-hash similarity. Hash similarity had marked typing states as revisits of each other.
+
+**Typing groups.** A burst is a run of small changes, each pause under 6 s, where every part of each change connects to the edit so far:
+- the same place redrawn, or the input field growing a line;
+- text further along the same line, with the gap scaled to the line height;
+- the start of the next line.
+
+On phones, a change confined to the keyboard (switching to numbers or symbols) continues a burst once text has been typed. A burst only counts if text grew somewhere, from earlier text that the change leaves alone, and it never ends on the screen from before it. The synthetic stress tests (section 8) check that these two conditions keep a column of toggles, tab titles switching, and a toast coming and going from being grouped as typing.
+
+**Student-facing settings (section 4), all stored with the run.**
+- Recording type: phone or tablet, or computer.
+- Minimum time on screen (ms).
+- Smallest change (% of screen, also shown as a patch size in pixels on the selected recording).
+- Ignore areas, drawn on a frame of the recording.
+- Phone status bar.
+- Scrolling: each stop, or merge stops.
+- Group typing.
+- Opening screen.
+- Read text (OCR).
+- Advanced: pixel threshold in multiples of the measured noise, and analysis rate.
+
+Each run stores its resolved settings, the engine version and what was measured (noise, pixel threshold, intervals found, typing groups). These appear in the run header and in exports: `steps.json` gains `engine_version`, `settings` and `resolved_settings`, and `steps.csv` gains `transition_type`, `change_started_ms`, `settled_ms`, `time_on_screen_ms` and `grouped_states`.
+
+**Stress matrix, 25 scenarios.** The 22 baseline scenarios plus three new ones in `backend/tests/eval/step_scenarios.py`:
+- a chat message typed word by word with reading pauses, then sent;
+- two form fields filled in turn;
+- three toggles switched in a column, which must stay three steps.
+
+Precision and recall leave the opening screen out, because ground truth lists changes only. It is checked separately ("opening": present and showing the first frame). Hybrid v2 uses the balanced preset with OCR off. Both engines run on the working copy.
+
+| variant | hybrid v2 F1 | **stable v3 F1** | hybrid v2 right screenshot | stable v3 right screenshot | stable v3 opening |
+|---|---|---|---|---|---|
+| `raw` | 0.79 | **0.98** | 35/35 | 49/49 | 25/25 |
+| `h264_cfr` | 0.79 | **0.98** | 35/35 | 49/49 | 25/25 |
+| `h264_vfr` | 0.77 | **0.98** | 34/34 | 49/49 | 25/25 |
+| `h264_vfr+cursor` | 0.58 | **0.98** | 26/27 | 49/49 | 25/25 |
+| `h264_vfr+spinner` | 0.46 | **0.97** | 15/19 | 48/48 | 25/25 |
+| `h264_vfr+pointer` | 0.40 | **0.85** | 11/15 | 40/42 | 25/25 |
+| `h264_vfr+clock` | 0.77 | **0.98** | 33/34 | 49/49 | 25/25 |
+
+Notes on the table:
+- **Why hybrid v2 scores lower than in phase 0:** the set now includes the typing scenarios.
+- **Stable v3 false positives (precision 0.96):** these are all returns to an earlier screen, such as a toast going away or a dialog closing. They are real states, the ground truth does not list them, and the engine marks them as revisits.
+- **Pointer row:** it uses the "computer" recording type. The remaining misses are in the "rapid" scenarios, whose screens last 0.5 to 0.6 s, shorter than that type's 600 ms minimum.
+- **Labels:** the transition label agrees with the ground-truth event type for 63 % of matched events, against 47 to 51 % for hybrid v2.
+- **Speed:** the whole matrix takes 5 to 6 s of detection per variant, against 7 to 9 s for hybrid v2.
+
+**Real recordings** (phone type, defaults):
+
+| recording | length | hybrid v2 (phase 0) | stable v3 | stable v3 time (hybrid v2) |
+|---|---|---|---|---|
+| 03-24 10:48 | 23 s | 4 candidates | 7 steps | 1.8 s (3.6 s) |
+| 03-25 18:28 (HDR) | 25 s | 6 | 8 | 2.7 s (4.1 s) |
+| 03-24 11:34 | 46 s | 5 | 8 | 2.6 s (6.8 s) |
+| 03-24 09:34 | 68 s | 3 | 8 | 3.2 s (9.5 s) |
+
+On the 68 s recording, a prompt typed over 38 s with 16 pauses is now one step showing the finished prompt; the prototype had made 19 steps of it. The steps match the states identifiable by eye: Control Centre at the start, the app with the keyboard up, the typed prompt, the sent prompt, the streamed answer and the scroll stops. Peak memory was about 300 MB.
+
+**Found along the way:**
+- **OpenCV `phaseCorrelate` bug.** It multiplies its inputs by the window *in place* when no padding is needed. Hybrid v2 then measured scroll confidence on corrupted images, so its confidence was usually near zero. This is fixed in both engines, which is where hybrid v2's label agreement gain (from 38 % to about 50 %) comes from.
+- **Frontend type check.** The root `frontend/tsconfig.json` lists no files, so `tsc --noEmit` there checks nothing. The real check is `tsc --project tsconfig.app.json`, which `npm run build` runs. The phase 0 note that the frontend "passes `tsc --noEmit`" was therefore vacuous. The app project does type-check now.
+- **Screenshot check.** The stress harness's check compared whole frames, so a correct screenshot of a small change (a toggle) failed against compression noise. It now compares the region where the pre- and post-event frames differ.
+
+**Limits that remain:**
+- The typing rules were tuned on one real typing recording (iOS keyboard) and synthetic scenarios. Android keyboards, desktop typing and right-to-left scripts are untested on real data, which is what the phase 3 benchmark is for.
+- Labels are descriptions only.
+  - Full-screen video swipes are mostly labelled "navigation".
+  - Sheets that do not dim the screen are labelled "content update".
+  - Nothing tells a feed card swap from a long scroll unless the swipe covers about one full screen.
+- Hybrid v2's self-normalising tile threshold (finding 3.3) is not fixed. Hybrid v2 is kept only for comparison.
+- iPhone recordings started from Control Centre begin with one or two Control Centre steps. There is no trim setting yet, so students reject those steps.
+
 ### Update: phase 0 implemented
 
-The must-do items from section 7 are in place (uncommitted at the time of writing):
+The must-do items from section 7 are in place (merged into `main` on 4 November 2026):
 
 - **Working copy at ingest** (`backend/app/services/ingest.py`). Every upload is converted once into a constant-frame-rate, SDR, upright H.264 file, using ffmpeg's `fps` filter. Analysis, the browser preview, detected screenshots and manual steps all use it, so the frame the detector analysed is the frame that gets exported. HDR10 and HLG are tone-mapped with a generated 3D LUT through ffmpeg's built-in `lut3d`, so no special ffmpeg build is needed. It is built in the background after upload, or by the first run, and took 2.7 to 9.7 s for the four real recordings.
 - **Frame-exact reader.** Samples carry their frame's exact time. Sequential reads replace a keyframe seek per sample, and when settled samples tie within compression noise the earliest is taken.
@@ -270,7 +357,7 @@ For a cohort of 40 students each submitting a few 2 to 5 minute recordings close
 3. **Close the server holes in section 6.** Authentication, private file serving, no public admin endpoints, restricted CORS, upload limits.
 4. **Make the evaluation suite honest.** Add compressed and variable-frame-rate encodings, phone resolutions, persistent animation overlays and the screenshot-correctness check to CI (the harness in `backend/experiments/stress.py` is a starting point).
 
-### Phase 1: detection core (weeks, not months)
+### Phase 1: detection core (done as engine `stable_v3`, see the update in section 1; hybrid v2's tile threshold in item 6 left as is)
 
 5. Rebuild the core as stable-interval detection (section 5), keeping the current scroll, modal and navigation logic as *labels* on intervals rather than as gates.
 6. Collapse edit bursts (typing) into one step; fix the self-normalising tile threshold and measure noise on unchanged content.
@@ -302,6 +389,12 @@ From `backend/`:
 .venv/bin/python experiments/stress.py --engine plateau
 # both engines on real recordings, with contact sheets
 .venv/bin/python experiments/real_compare.py experiments/out ../data/projects/*/recordings/*/source/*.mp4
+
+# phase 1: stable_v3 and hybrid v2 through the real pipeline (working copy), 25 scenarios
+uv run python -m tests.eval.stress --engine stable_v3 --set all
+uv run python -m tests.eval.stress --engine hybrid_v2 --set all
+# stable_v3 (and hybrid v2) on real recordings, with labelled contact sheets; CACHE keeps the working copies
+uv run python experiments/real_stable.py experiments/out CACHE ../data/projects/*/recordings/*/source/*.mp4 --hybrid
 ```
 
 ## References
