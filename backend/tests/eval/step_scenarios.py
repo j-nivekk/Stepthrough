@@ -9,8 +9,8 @@ The baseline scenarios check whether a change is found. These check what a walkt
     settings_toggles    three toggles in a column switched one after the other. Small, close together and
                         quick, like typing, but each is a step of its own and must not be grouped.
 
-They are kept out of ``BASELINE_SCENARIOS`` so the hybrid v2 baseline suite and its stored results stay
-comparable.
+They are kept out of ``BASELINE_SCENARIOS`` so the baseline set, and the hybrid v2 comparison recorded
+with it, stays comparable.
 """
 
 from __future__ import annotations

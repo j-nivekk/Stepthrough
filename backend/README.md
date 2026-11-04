@@ -22,14 +22,19 @@ The working copy is:
 
 Recording `fps`, `duration_ms`, `width` and `height` describe the working copy once it exists.
 
-## Detection engines
+## Detection engine
 
-New runs use **`stable_v3` ("stable screens")**, in `app/services/stable_detection.py`. A step is a screen
-that stays still for at least the minimum time on screen. The engine takes one screenshot from inside each
-such screen, 200 ms after it settles, so screenshots never catch an animation half-way. `hybrid_v2` (change
-scoring with unitless thresholds) stays available for comparison with earlier runs; `scene_v1` only when
-enabled in the app settings. The design, its evaluation and its limits are in
-`docs/robustness-review-2026-11.md`, section 1.
+Runs use **`stable_v3` ("stable screens")**, in `app/services/stable_detection.py`. A step is a screen that
+stays still for at least the minimum time on screen. The engine takes one screenshot from inside each such
+screen, 200 ms after it settles, so screenshots never catch an animation half-way. The design, its
+evaluation and its limits are in `docs/robustness-review-2026-11.md`, section 1.
+
+The earlier engines, `hybrid_v2` and `scene_v1`, are retired. Their runs still load, review, compare and
+export (their stored settings and field notes are kept), but `POST /recordings/{id}/runs` refuses them with
+422. Their code is at the git tag `last-with-hybrid-v2`.
+
+OCR (`enable_ocr`) needs the optional PaddleOCR packages: `uv sync --group ocr`. Note that a plain `uv sync`,
+`uv add` or `uv remove` uninstalls them again unless `--group ocr` is passed.
 
 Settings (`RunSettings.stable`; `null` means the recording type's default):
 

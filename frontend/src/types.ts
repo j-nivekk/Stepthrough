@@ -44,20 +44,6 @@ export interface HealthResponse {
   ocr_warnings: string[];
 }
 
-export interface HybridPresetMetadata {
-  label: string;
-  short_description: string;
-  intended_use: string;
-  good_for: string[];
-  tradeoffs: string[];
-  sample_fps: number;
-  min_dwell_ms: number;
-  settle_window_ms: number;
-  proposal_threshold: number;
-  settle_threshold: number;
-  ocr_trigger_threshold: number;
-}
-
 export interface AnalysisControlMetadata {
   supported: boolean;
   reason?: string | null;
@@ -73,10 +59,9 @@ export interface StableRecordingTypeMetadata {
 }
 
 export interface AnalysisMetadata {
-  hybrid_presets: Record<AnalysisPreset, HybridPresetMetadata>;
   stable_recording_types?: Partial<Record<RecordingType, StableRecordingTypeMetadata>>;
   stable_engine_version?: string | null;
-  controls_by_engine: Record<AnalysisEngine, Record<string, AnalysisControlMetadata>>;
+  controls_by_engine: Partial<Record<AnalysisEngine, Record<string, AnalysisControlMetadata>>>;
 }
 
 export interface Project {
@@ -270,17 +255,11 @@ export interface RunDetail {
   export_bundle?: ExportBundle | null;
 }
 
+/** Settings for a new run. Only the stable-screen engine starts runs; RunSummary still describes runs of
+ * the retired engines. */
 export interface RunSettings {
-  analysis_engine: AnalysisEngine;
-  analysis_preset: AnalysisPreset;
-  advanced?: HybridAdvancedSettings | null;
-  stable?: StableSettings | null;
-  tolerance: number;
-  min_scene_gap_ms: number;
-  sample_fps: number | null;
-  allow_high_fps_sampling: boolean;
-  detector_mode: DetectorMode;
-  extract_offset_ms: number;
+  analysis_engine: 'stable_v3';
+  stable: StableSettings;
 }
 
 export interface GlobalRunPreset {

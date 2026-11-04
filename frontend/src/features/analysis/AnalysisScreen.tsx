@@ -28,27 +28,7 @@ import {
   formatRunTiming,
 } from '../../lib/formatters';
 import { StageNavigator } from '../../components/StageNavigator';
-import {
-  describeAnalysisPreset,
-  describeDetectorMode,
-  describeExtractOffset,
-  describeHybridMinDwellHint,
-  describeHybridOcrTriggerThresholdHint,
-  describeHybridOcrConfirmationHint,
-  describeHybridProposalThresholdHint,
-  describeHybridSampleFpsOverrideHint,
-  describeHybridSettleThresholdHint,
-  describeHybridSettleWindowHint,
-  describeMinSceneGap,
-  describeSampleFps,
-  describeTolerance,
-  formatAnalysisEngineLabel,
-  formatAnalysisPresetLabel,
-  formatRunSettingsSummary,
-  getHybridAdvancedDirtyState,
-  getSampleFpsGuardrail,
-  parseRunPresetText,
-} from '../../lib/runSettings';
+import { formatRunSummaryLabel, parseRunPresetText } from '../../lib/runSettings';
 import {
   buildReviewExportName,
   createLocalId,
@@ -58,6 +38,7 @@ import {
   normalizeZipFilename,
   clampInteger,
 } from '../../lib/utils';
+import type { AnalysisEngine } from '../../types';
 import type {
   AnalysisMetadata,
   CandidateFrame,
@@ -88,7 +69,7 @@ import {
 } from '../../lib/stepLayout';
 import { rangeFillStyle } from '../../lib/rangeFill';
 
-function engineShortLabel(engine: RunSettings['analysis_engine']): string {
+function engineShortLabel(engine: AnalysisEngine): string {
   return engine === 'scene_v1' ? 'v1' : engine === 'hybrid_v2' ? 'v2' : 'v3';
 }
 
@@ -97,7 +78,6 @@ export interface AnalysisScreenProps {
   analysisMetadata: AnalysisMetadata | null;
   abortRunPending: boolean;
   activeProject: Project | null;
-  enableV1Engine: boolean;
   analysisActionMessage: string;
   analysisTaskItems: AnalysisTaskItem[];
   appError: string;
@@ -223,7 +203,6 @@ export function AnalysisScreen({
   abortRunPending,
   activeProject,
   analysisActionMessage,
-  enableV1Engine,
   analysisTaskItems,
   appError,
   bulkDeletePending,
@@ -329,38 +308,10 @@ export function AnalysisScreen({
 
   const previewVideoUrl = previewRecording ? absoluteApiUrl(previewRecording.source_url) : null;
   const comparedRun = compareRunDetailQuery.data ?? null;
-  const sampleFpsGuardrail = getSampleFpsGuardrail(
-    selectedRecordingSummary?.fps ?? null,
-    runSettings.allow_high_fps_sampling,
-  );
   const hintCopy: Record<AnalysisHintKey, string> = {
-    analysis_engine:
-      'stable screens finds every screen that stays still and takes one screenshot of it. hybrid v2 is the previous engine, kept for comparison with earlier runs.',
-    analysis_preset:
-      runSettings.analysis_engine === 'hybrid_v2'
-        ? describeAnalysisPreset(runSettings, analysisMetadata)
-        : 'hybrid presets only affect the v2 detector. switch engines to use the ui-change pipeline.',
-    allow_high_fps_sampling: sampleFpsGuardrail.isHighFpsRecording
-      ? `turn this on to sample above 30 fps or use source fps for this ~${sampleFpsGuardrail.sourceFpsCeiling} fps recording.`
-      : 'use this only when you need denser sampling on recordings above 30 fps.',
-    detector_mode: describeDetectorMode(runSettings.detector_mode),
-    extract_offset_ms: describeExtractOffset(runSettings.extract_offset_ms),
-    hybrid_advanced:
-      runSettings.analysis_engine === 'hybrid_v2'
-        ? 'start with the preset. use overrides only when a specific recording still misses or overfires on interface changes.'
-        : 'hybrid advanced controls are only used by the v2 detector.',
-    hybrid_min_dwell_ms: describeHybridMinDwellHint(runSettings, analysisMetadata),
-    hybrid_ocr_confirmation: describeHybridOcrConfirmationHint(),
-    hybrid_ocr_trigger_threshold: describeHybridOcrTriggerThresholdHint(runSettings, analysisMetadata),
-    hybrid_proposal_threshold: describeHybridProposalThresholdHint(runSettings, analysisMetadata),
-    hybrid_sample_fps_override: describeHybridSampleFpsOverrideHint(runSettings, analysisMetadata),
-    hybrid_settle_threshold: describeHybridSettleThresholdHint(runSettings, analysisMetadata),
-    hybrid_settle_window_ms: describeHybridSettleWindowHint(runSettings, analysisMetadata),
     load: 'paste stepthrough preset text to load a saved parameter set into the active analysis controls.',
-    min_scene_gap_ms: describeMinSceneGap(runSettings.min_scene_gap_ms),
     reset: 'reset the current analysis parameters to this project or universal defaults.',
     run: 'start a new analysis task for the selected video using the current parameter set.',
-    sample_fps: describeSampleFps(runSettings.sample_fps, selectedRecordingSummary?.fps ?? null),
     save: 'save the current analysis parameters for this project or as universal defaults.',
     stable_advanced:
       'expert settings. the defaults work for screen recordings; change them only when a specific recording needs it.',
@@ -385,7 +336,6 @@ export function AnalysisScreen({
       'how much a pixel must change to count, in multiples of the compression noise measured on this recording (never below 10 grey levels). raise it for noisy recordings.',
     stable_status_bar:
       'the phone status bar (clock, battery, recording indicator) changes on its own. ignore it unless it matters for your analysis.',
-    tolerance: describeTolerance(runSettings.tolerance, runSettings.detector_mode),
   };
   const activeHintKey = focusedHintKey ?? hoveredHintKey;
   const hintText = showHints && activeHintKey ? hintCopy[activeHintKey] : null;
@@ -398,28 +348,10 @@ export function AnalysisScreen({
   const previewMatchesSelectedRun = Boolean(
     previewRecording && selectedRun && previewRecording.id === selectedRun.summary.recording_id,
   );
-  const isEngineDirty = runSettings.analysis_engine !== projectDefaultSettings.analysis_engine;
-  const isPresetDirty = runSettings.analysis_preset !== projectDefaultSettings.analysis_preset;
-  const hybridAdvancedDirtyState = getHybridAdvancedDirtyState(runSettings, projectDefaultSettings);
-  const isToleranceDirty = runSettings.tolerance !== projectDefaultSettings.tolerance;
-  const isMinSceneGapDirty =
-    runSettings.min_scene_gap_ms !== projectDefaultSettings.min_scene_gap_ms;
-  const isSampleFpsDirty = runSettings.sample_fps !== projectDefaultSettings.sample_fps;
-  const isHighFpsDirty =
-    runSettings.allow_high_fps_sampling !== projectDefaultSettings.allow_high_fps_sampling;
-  const isExtractOffsetDirty =
-    runSettings.extract_offset_ms !== projectDefaultSettings.extract_offset_ms;
-  const isDetectorModeDirty = runSettings.detector_mode !== projectDefaultSettings.detector_mode;
   const canAddManualCandidate = Boolean(
     previewMatchesSelectedRun &&
       selectedRun &&
       ['completed', 'failed', 'cancelled'].includes(selectedRun.summary.status),
-  );
-  const showHighFpsWarning = Boolean(
-    runSettings.analysis_engine === 'scene_v1' &&
-      selectedRecordingSummary &&
-      sampleFpsGuardrail.isHighFpsRecording &&
-      !runSettings.allow_high_fps_sampling,
   );
   const showLowCandidateHint = Boolean(
     selectedRun &&
@@ -1351,19 +1283,9 @@ export function AnalysisScreen({
             bindHint={bindHint}
             closePopover={closePopover}
             createRunPending={createRunPending}
-            enableV1Engine={enableV1Engine}
             healthWarning={healthWarning}
             hintCardPosition={hintCardPosition}
             hintText={hintText}
-            isDetectorModeDirty={isDetectorModeDirty}
-            isEngineDirty={isEngineDirty}
-            isExtractOffsetDirty={isExtractOffsetDirty}
-            isHighFpsDirty={isHighFpsDirty}
-            hybridAdvancedDirtyState={hybridAdvancedDirtyState}
-            isMinSceneGapDirty={isMinSceneGapDirty}
-            isPresetDirty={isPresetDirty}
-            isSampleFpsDirty={isSampleFpsDirty}
-            isToleranceDirty={isToleranceDirty}
             loadMenuRef={loadMenuRef}
             onApplyImportedPreset={handleApplyImportedPreset}
             onCopyPresetText={() => {
@@ -1386,13 +1308,11 @@ export function AnalysisScreen({
             projectDefaultSettings={projectDefaultSettings}
             resetMenuRef={resetMenuRef}
             runSettings={runSettings}
-            sampleFpsGuardrail={sampleFpsGuardrail}
             saveMenuRef={saveMenuRef}
             selectedRecordingId={selectedRecordingId}
             selectedRecordingSummary={selectedRecordingSummary}
             setPresetImportDraftChange={handlePresetImportDraftChange}
             setRunSettings={setRunSettings}
-            showHighFpsWarning={showHighFpsWarning}
             showHints={showHints}
             showLowCandidateHint={showLowCandidateHint}
             showPresetText={showPresetText}
@@ -1404,7 +1324,6 @@ export function AnalysisScreen({
             analysisMetadata={analysisMetadata}
             bulkDeletePending={bulkDeletePending}
             bulkExportPending={bulkExportPending}
-            enableV1Engine={enableV1Engine}
             expandedTaskRunId={expandedTaskRunId}
             groupedTaskItems={groupedTaskItems}
             onAbortRun={onAbortRun}
@@ -1684,17 +1603,7 @@ export function AnalysisScreen({
                   </div>
                 )}
                 <p className="analysis-detail-meta">
-                  {selectedRun.summary.analysis_engine === 'stable_v3'
-                    ? [
-                        formatAnalysisEngineLabel(selectedRun.summary.analysis_engine),
-                        ...formatStableSummary(selectedRun.summary.stable ?? defaultStableSettings, analysisMetadata),
-                        selectedRun.summary.engine_version,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')
-                    : `${formatAnalysisEngineLabel(selectedRun.summary.analysis_engine)} · ${formatAnalysisPresetLabel(
-                        selectedRun.summary.analysis_preset,
-                      )}`}
+                  {formatRunSummaryLabel(selectedRun.summary, analysisMetadata, { withVersion: true })}
                 </p>
                 {!isCompletedReview && selectedRun.summary.message ? (
                   <p className="muted">{selectedRun.summary.message}</p>
@@ -1777,7 +1686,7 @@ export function AnalysisScreen({
                         <option value="">select another completed run</option>
                         {comparableRuns.map((run) => (
                           <option key={run.id} value={run.id}>
-                            {formatRunSettingsSummary(run, analysisMetadata)} · {new Date(run.created_at).toLocaleString().toLocaleLowerCase()}
+                            {formatRunSummaryLabel(run, analysisMetadata)} · {new Date(run.created_at).toLocaleString().toLocaleLowerCase()}
                           </option>
                         ))}
                       </select>

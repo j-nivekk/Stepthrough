@@ -32,7 +32,6 @@ from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Iterator
 from uuid import uuid4
 
@@ -42,7 +41,8 @@ import numpy as np
 from ..analysis_metadata import STABLE_RECORDING_TYPES
 from ..models import RunSettings, StableSettings
 from ..utils import timecode_from_ms, utc_now
-from .detection import CancellationCallback, CancellationRequested, ProgressCallback
+from .ocr import OcrCache, OcrUsageStats, extract_text_from_image, load_ocr_engine
+from .run_control import CancellationCallback, CancellationRequested, ProgressCallback
 from .similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string, text_distance
 from .video import extract_frame
 
@@ -831,13 +831,11 @@ def detect_candidates_stable(
 def _load_ocr(config: StableDetectorConfig, progress: ProgressCallback) -> tuple[Any, Any, Any] | None:
     if not config.enable_ocr:
         return None
-    from .hybrid_detection import _OcrCache, _OcrUsageStats, _maybe_load_ocr_engine
-
-    engine, warning = _maybe_load_ocr_engine(SimpleNamespace(enable_ocr=True, ocr_backend="paddleocr"))  # type: ignore[arg-type]
+    engine, warning = load_ocr_engine()
     if warning or engine is None:
         progress("primary_scan", f"OCR disabled: {warning or 'PaddleOCR is not available.'}", SCAN_RANGE[1], "warning")
         return None
-    return engine, _OcrCache(), _OcrUsageStats()
+    return engine, OcrCache(), OcrUsageStats()
 
 
 def _extract_candidates(
@@ -879,11 +877,9 @@ def _extract_candidates(
 
         ocr_text = None
         if ocr is not None:
-            from .hybrid_detection import _extract_text_from_image
-
             screenshot = cv2.imread(str(image_path))
             if screenshot is not None:
-                ocr_text = _extract_text_from_image(screenshot, *ocr)
+                ocr_text = extract_text_from_image(screenshot, *ocr)
 
         t = step.transition
         breakdown = {

@@ -79,12 +79,7 @@ Each imported recording keeps its own:
 
 In the **analysis** stage, select a recording and choose the settings you want to use before pressing **run analysis**.
 
-Stepthrough currently supports two analysis engines:
-
-- **Hybrid v2**: optimized for interface-level changes
-- **Current v1**: the older scene-boundary detector
-
-Hybrid v2 is the default and should usually be your starting point.
+Start by picking the **recording type**: phone or tablet, or computer. It sets sensible defaults for everything else. The settings are explained in [How Stepthrough Finds Steps](#how-stepthrough-finds-steps); press **show hints** above them for a short explanation of each.
 
 ### 4. Run Analysis
 
@@ -150,375 +145,63 @@ The export bundle includes:
 
 If a task has been reviewed and contains accepted items, Stepthrough treats accepted steps as the canonical export set. If a task has not been reviewed yet, it can export all candidates.
 
-## Understanding the Analysis Engines
+## How Stepthrough Finds Steps
 
-### Hybrid v2
+Stepthrough has one analysis engine, **stable screens** (`stable_v3`). Its idea is simple enough to state in a methods section: **a step is a screen that stays still for at least the minimum time on screen.** For every such screen, Stepthrough takes one screenshot from inside it, 200 ms after it settles, so a screenshot never catches an animation half-way.
 
-**Best for:** app walkthroughs, usability tests, prototypes, interface studies, and recordings where meaningful changes happen inside the UI rather than as hard cuts.
+A few details make this work on real recordings:
 
-Hybrid v2 combines:
+- **Every frame is compared with the first frame of the current screen**, not only with the frame before it. A page that loads slowly over a few seconds therefore still counts as a change.
+- **The pixel threshold comes from the recording itself.** Stepthrough measures the compression noise of each recording and only counts a pixel as changed when it differs by several times that noise (and never by less than 10 grey levels).
+- **Small moving things do not break a stable screen**: a blinking text cursor, a spinner, or anything inside an area you told it to ignore.
+- **Recordings are analysed at 15 frames per second**, from a constant-frame-rate working copy made when the video is imported. Phone recordings, which have a variable frame rate, give the same result as any other upload.
 
-- visual difference signals
-- timing rules
-- optional OCR confirmation
+### Labels
 
-This makes it much better than v1 for:
+Each step gets a label that describes the change that led to it. Labels are descriptive only: they never decide whether something is a step. You can hide steps by label by clicking the label legend above the timeline.
 
-- menus opening and closing
-- button or tab changes
-- sheet and modal transitions
-- content updates inside the same screen
-- text-heavy interfaces
+| label | meaning |
+| --- | --- |
+| opening | the screen the recording starts on (step 0) |
+| navigation | most of the screen changed: a new page or view |
+| scroll | the content moved up or down and came to rest |
+| modal | a dialog or sheet appeared over a dimmed screen |
+| feed swap | a full-screen vertical swipe to the next item, as in short-video feeds |
+| update | part of the screen changed, such as content loading in |
+| ui change | a small change, such as a toggle, badge or button state |
+| typing | a burst of typing, grouped into one step that shows the finished text |
 
-#### Under the Hood: Engine Modules and Calculations
+A step that returns to a screen seen earlier is marked as a **revisit**, with a link back to the earlier step.
 
-The Hybrid v2 engine relies strongly on **OpenCV (`cv2`)** for image processing, **NumPy** for matrix mathematics, and optionally **PaddleOCR** for text extraction. Instead of a single tolerance threshold, each sampled frame is scored against the previous frame using several signals:
+### Settings
 
-**1. Visual Score**
-A composite score reflecting structural change, localized content change, changed regions, edge differences, and tile-level activity. It also penalizes changes that look mostly like stable chrome rather than real content movement.
+Settings left empty follow the recording type: 450 ms and 0.10 % for a phone or tablet, 600 ms and 0.25 % for a computer.
 
-**2. Motion Score**
-A secondary score focused on movement patterns such as scrolling, edge motion, content movement, region strength, and tile activity.
+| setting | what it does | when to change it |
+| --- | --- | --- |
+| recording type | phone or tablet ignores the status bar; computer ignores small changes such as a moving mouse pointer | pick the one that matches the device |
+| minimum time on screen | how long a screen must stay still to count as a step | lower it to catch brief menus and popovers; raise it to skip screens the user only passed through |
+| smallest change | the smallest connected change, as a share of the screen, that ends a stable screen | lower it for tiny badges or toggles; raise it if small animations create extra steps |
+| ignore areas | boxes, drawn on a frame of the recording, in which changes are ignored | a live clock, an animated banner, an embedded video |
+| phone status bar | include or ignore the clock, battery and recording indicator | include it only if it matters for your analysis |
+| scrolling | each stop: every place the page comes to rest is a step; merge stops: keep only the first | merge stops when only the end of a long scroll matters |
+| group typing | a burst of typing with short pauses becomes one step | turn it off if every pause matters |
+| opening screen | include the screen the recording starts on as step 0 | turn it off if the first screen is not part of the task |
+| read text (OCR) | reads the text of each screenshot into exports (`ocr_text`) | when you need the words for coding; it does not help find steps and makes runs slower |
+| sensitivity (advanced) | the pixel threshold, in multiples of the measured noise | raise it for very noisy recordings |
+| analysis rate (advanced) | frames per second analysed | rarely; lower is faster |
 
-**3. Text Score**
-If the visual or motion signal is strong enough, Hybrid v2 can trigger selective **PaddleOCR** confirmation. Extracted text from the previous frame is compared with the current frame so text-led UI changes can still count even when the layout barely moves.
+Every run stores the settings it actually used, the engine version and what it measured (noise, pixel threshold, number of stable screens). Exports include all of this, so a run can be described and repeated exactly.
 
-**4. The Combined Score & Settle Mechanics**
-Every parsed frame yields a final **Combined Score** that leans most heavily on visual change, then motion, then text and localized content change.
-When a frame exceeds the `proposal_threshold`, an **Event Window** is opened. Subsequent frames are evaluated and appended as active moving samples until the score dips below the `settle_threshold`. The engine then waits for the **Settle Window** to close without further motion. Finally, it drops the blurriest frames and records the specific frame with the lowest motion as the canonical representative screenshot.
-<!-- START generated:hybrid_v2_presets -->
-### Hybrid v2 Presets
+### What It Cannot Do
 
-Hybrid v2 has three presets.
+- **Content that never stops moving never becomes a step.** A playing video or a looping animation keeps the screen from being still. Draw an ignore area over it.
+- **Screens shorter than the minimum time on screen are skipped.** Lower the minimum, or mark the moment by hand.
+- **Changes smaller than the smallest change are ignored.** Lower it, or mark the moment by hand.
 
-#### Subtle UI
+### Earlier Engines
 
-Use this when tiny, brief, or text-led UI states matter more than review volume.
-
-Good for:
-
-- tiny badges or state indicators
-- hover-like changes in prototypes
-- overlays and short menus
-- subtle text changes
-
-Tradeoff:
-
-- more sensitive
-- usually produces more candidates
-- may require more review cleanup
-
-Current preset baseline:
-
-- sample fps: 8
-- minimum dwell: 250 ms
-- settle window: 250 ms
-- proposal threshold: 0.19
-- settle threshold: 0.09
-- OCR trigger threshold: 0.13
-
-#### Balanced
-
-Best starting point for most walkthrough recordings before any advanced tuning.
-
-Good for:
-
-- general app walkthroughs
-- mobile task flows
-- desktop product tours
-- most prototype review sessions
-
-Tradeoff:
-
-- moderate sensitivity
-- moderate noise resistance
-
-Current preset baseline:
-
-- sample fps: 6
-- minimum dwell: 350 ms
-- settle window: 350 ms
-- proposal threshold: 0.20
-- settle threshold: 0.10
-- OCR trigger threshold: 0.15
-
-#### Ignore Noise
-
-Use this when motion, compression shimmer, or repeated micro-change is overwhelming the output.
-
-Good for:
-
-- noisy compression artifacts
-- scrolling-heavy recordings
-- recordings with frequent micro-motion
-- dynamic content that should not become a step every few frames
-
-Tradeoff:
-
-- calmer output
-- more likely to miss short, subtle steps
-
-Current preset baseline:
-
-- sample fps: 4
-- minimum dwell: 700 ms
-- settle window: 700 ms
-- proposal threshold: 0.31
-- settle threshold: 0.16
-- OCR trigger threshold: 0.22
-<!-- END generated:hybrid_v2_presets -->
-
-### Hybrid v2 Advanced Controls
-
-You usually do not need to touch these until a preset gets close but not quite right.
-
-#### Sample FPS Override
-
-Controls how densely the recording is sampled.
-
-Raise it when:
-
-- a step is very brief
-- menus appear and disappear quickly
-- short overlays are getting missed
-
-Lower it when:
-
-- you are getting too many small changes
-- the recording is noisy
-- you want a calmer result
-
-#### Minimum Dwell
-
-Controls how long a change must persist before Stepthrough treats it as a candidate.
-
-Lower it when:
-
-- a valid state appears only briefly
-- transitions are fast and meaningful
-
-Raise it when:
-
-- flicker is being detected as a step
-- transient motion keeps producing false positives
-
-#### Settle Window
-
-Controls how long Stepthrough waits for motion to settle before capturing the representative frame.
-
-Lower it when:
-
-- screenshots feel late
-- the captured frame lands after the key state
-
-Raise it when:
-
-- screenshots are caught mid-animation
-- opening panels or sheets are still moving when captured
-
-#### Proposal Threshold
-
-Controls how much combined evidence is needed before Hybrid v2 opens a new event window.
-
-Lower it when:
-
-- valid UI states are being missed
-- subtle overlays or menus are not starting an event cleanly
-- brief but meaningful changes need more sensitivity
-
-Raise it when:
-
-- too many low-value event windows are opening
-- tiny visual shimmer keeps turning into candidates
-- the detector feels too eager
-
-#### Settle Threshold
-
-Controls how easily an active event window stays alive while motion is calming down.
-
-Lower it when:
-
-- meaningful events are ending too quickly
-- multi-frame transitions split apart too often
-- you want the detector to stay committed a bit longer once it has started an event
-
-Raise it when:
-
-- events linger longer than they should
-- a single interaction keeps stretching into too much nearby motion
-- the detector should settle faster after the main change has passed
-
-#### OCR Trigger Threshold
-
-Controls how strong the signal should be before Hybrid v2 escalates to OCR confirmation.
-
-Lower it when:
-
-- text changes matter a lot
-- wording or number changes are getting missed
-- visually subtle but text-heavy changes should get more OCR help
-
-Raise it when:
-
-- you want OCR to stay more selective
-- most useful changes are already obvious visually
-- you want to reduce OCR work on noisy recordings
-
-#### OCR Confirmation
-
-OCR confirmation helps validate text-heavy UI changes.
-When OCR is enabled, Hybrid v2 still leans on stronger visual change first, but it can also probe localized changed regions to catch small text-led updates without scanning the whole frame every time.
-
-OCR availability is controlled by the backend environment, not by the run payload itself.
-`ocr_available` means the backend can attempt PaddleOCR with its current install and config; it does not mean the full OCR engine has already been initialized.
-
-Stepthrough currently targets this Paddle stack for Hybrid OCR:
-
-- `paddlepaddle==3.3.0`
-- `paddleocr==3.3.0`
-
-The backend OCR environment is controlled with:
-
-- `STEPTHROUGH_OCR_MODEL_SOURCE=auto|huggingface|bos|local`
-- `STEPTHROUGH_OCR_DET_MODEL_DIR`
-- `STEPTHROUGH_OCR_REC_MODEL_DIR`
-- `STEPTHROUGH_OCR_CACHE_DIR`
-
-Behavior notes:
-
-- `auto`, `huggingface`, and `bos` allow the backend to initialize or download models on first use into the configured cache directory
-- `local` requires backend-provided detection and recognition model directories
-- if OCR initialization fails during a run, Hybrid v2 logs a warning and continues with visual-only detection instead of failing the entire run
-
-Leave it **on** when:
-
-- labels, menu items, and text changes matter
-- you are studying information architecture or wording changes
-- the interface is visually similar but text differs
-
-Turn it **off** when:
-
-- speed is your priority
-- you want pure visual-diff behavior
-- OCR adds no value for the recording
-
-The app intentionally keeps deeper engine constants such as frame-edge resizing, tile-grid size, contour cutoffs, OCR cache limits, and transition classification heuristics internal for now. The exposed advanced controls are the supported tuning surface.
-
-### Current v1
-
-**Best for:** older scene-style workflows, hard cuts, obvious screen swaps, or situations where you want a simpler detector with direct manual tuning.
-
-Current v1 is useful when:
-
-- the recording changes mainly through hard screen boundaries
-- you want tight control over tolerance and sampling
-- Hybrid v2 feels unnecessarily complex for the source material
-
-It is less specialized than v2 for subtle in-screen UI changes.
-
-### Current v1 Controls
-
-#### Tolerance
-
-Controls how sensitive the detector is to visual change.
-
-Lower tolerance:
-
-- catches subtler changes
-- is more likely to detect noise
-
-Higher tolerance:
-
-- ignores smaller differences
-- is more likely to miss subtle but real steps
-
-Use lower tolerance when:
-
-- keyboard states are being missed
-- small banners or small UI differences matter
-
-Use higher tolerance when:
-
-- scrolling, compression shimmer, or tiny motion keep creating too many candidates
-
-#### Minimum Scene Gap
-
-Sets the minimum time spacing between candidates.
-
-Raise it when:
-
-- you want fewer near-duplicate steps
-- the recording includes bursts of rapid changes
-
-Lower it when:
-
-- true steps happen close together
-- rapid flows are collapsing into one candidate
-
-#### Sample FPS
-
-Controls how often the video is sampled.
-
-Raise it when:
-
-- you are missing very brief steps
-- UI states flash by quickly
-
-Lower it when:
-
-- the detector is overfiring
-- the recording contains lots of low-value movement
-
-#### Extract Offset
-
-Controls how far after the detected change Stepthrough captures the screenshot.
-
-Raise it when:
-
-- screenshots are landing mid-animation
-- the captured frame is too early
-
-Lower it when:
-
-- screenshots are arriving after the important state
-
-#### High-FPS Sampling
-
-Use this for recordings above 30 fps when you want to sample more densely or use the source frame rate.
-
-Turn it on when:
-
-- the recording is very high frame rate
-- you need maximum temporal sensitivity
-
-Leave it off when:
-
-- standard sampling is enough
-- you want to reduce noise and keep the run lighter
-
-#### Detector Mode
-
-Current v1 offers two detector modes.
-
-##### Content
-
-Compares each sampled frame to the previous sampled frame.
-
-Best for:
-
-- hard cuts
-- screen swaps
-- more abrupt UI changes
-
-##### Adaptive
-
-Compares against a rolling average of recent frames.
-
-Best for:
-
-- softer transitions
-- fades
-- menus that emerge gradually
+Runs made before November 2026 with the earlier engines, **hybrid v2** and **v1**, still open, review, compare and export as before; they are marked *(retired)*. New runs always use stable screens. To repeat an old run exactly, the earlier engines are kept at the git tag `last-with-hybrid-v2`.
 
 ## Which Settings Should I Use?
 
@@ -526,14 +209,14 @@ Best for:
 
 | Research situation | Recommended starting point |
 | --- | --- |
-| Standard app walkthrough | Hybrid v2 + Balanced |
-| Prototype with subtle state changes | Hybrid v2 + Subtle UI |
-| Noisy remote recording or compression artifacts | Hybrid v2 + Ignore noise |
-| Text-heavy interface where wording changes matter | Hybrid v2 + Balanced with OCR on |
-| Hard cuts between distinct screens | Current v1 + Content mode |
-| Fade-heavy transitions or softer screen changes | Current v1 + Adaptive mode |
-| Very brief menus, popovers, or sheets | Hybrid v2 + Subtle UI, then raise sample fps if needed |
-| Too many duplicate or noisy steps | Hybrid v2 + Ignore noise, or Current v1 with higher tolerance and larger scene gap |
+| Phone or tablet app walkthrough | phone or tablet (the default) |
+| Desktop or browser recording with a mouse | computer |
+| App with a live clock, ticker or animated banner | draw an ignore area over it |
+| Feed or video app where content keeps playing | draw an ignore area over the video |
+| Chat, search or forms | keep group typing on, so each typed message is one step |
+| Long scrolls where only the end matters | scrolling: merge stops |
+| You need the visible text for coding | turn on read text (OCR) |
+| Very brief menus, popovers or sheets | lower the minimum time on screen, for example to 250 ms |
 
 ## Troubleshooting by Symptom
 
@@ -541,55 +224,32 @@ Best for:
 
 Try this order:
 
-1. If you are on Hybrid v2, switch to **Subtle UI**.
-2. Raise sampling density.
-3. Lower dwell if the missing state is brief.
-4. Lower settle window if capture timing is lagging.
-5. Add a manual step for critical moments.
-
-If you are on Current v1:
-
-1. Raise sample fps first.
-2. Lower tolerance.
-3. Lower minimum scene gap.
+1. Check the recording type.
+2. Lower the minimum time on screen if the missing screen was brief.
+3. Lower the smallest change if the missing change was small.
+4. Mark critical moments by hand.
 
 ### "It found too many steps"
 
 Try this order:
 
-1. If you are on Hybrid v2, switch to **Ignore noise**.
-2. Raise dwell.
-3. Raise settle window if motion-heavy transitions are being captured too early.
-4. Turn off high-fps behavior if it is not needed.
+1. If something on screen keeps moving, draw an ignore area over it.
+2. If a mouse pointer causes the extra steps, use the computer recording type.
+3. Raise the minimum time on screen to skip screens the user only passed through.
+4. Raise the smallest change.
+5. For very noisy recordings, raise the sensitivity under advanced.
 
-In Hybrid v2, minimum scene gap is enforced between emitted candidates after event windows finalize. It reduces close repeats without freezing the detector during the scan.
+### "A page that keeps loading gives two steps"
 
-If you are on Current v1:
-
-1. Raise tolerance.
-2. Raise minimum scene gap.
-3. Lower sample fps.
-
-### "The screenshots are correct moments, but the captured frame is ugly"
-
-Use timing controls:
-
-- Hybrid v2: raise or lower **settle window**
-- Current v1: raise or lower **extract offset**
+When a page settles, then loads more content, the loaded state is a step of its own, labelled *update*. Reject the earlier one, or raise the minimum time on screen so the first state is skipped.
 
 ### "The recording has lots of scrolling"
 
-Recommended:
-
-- Hybrid v2 + Ignore noise
-- or Current v1 with higher tolerance and a larger minimum scene gap
+By default, every place the page comes to rest is a step. Use **scrolling: merge stops** to keep only the first.
 
 ### "The change is mostly text, not layout"
 
-Recommended:
-
-- Hybrid v2
-- keep OCR confirmation on
+Text changes are visual changes, so they are found without OCR. Turn on **read text (OCR)** only if you need the words themselves in the export.
 
 ## Review Workspace Features
 
@@ -607,9 +267,9 @@ From the task area you can:
 
 Use multiple runs when you want to answer questions such as:
 
-- Which preset is best for this recording?
-- Does higher sensitivity add useful detail or just noise?
-- Is v2 actually better than v1 for this material?
+- Which recording type fits this material?
+- Does a shorter minimum time on screen add useful detail or just noise?
+- Does an ignore area remove the extra steps without hiding real ones?
 
 ### Candidate Review
 
@@ -618,6 +278,7 @@ Each candidate includes:
 - screenshot
 - timestamp
 - origin (`detected` or `manual`)
+- label, and how long the screen stayed on screen
 - status
 - notes and title fields
 - score information
@@ -659,7 +320,7 @@ Recommended approach:
 
 - create one project per study
 - import all participant recordings
-- start with Hybrid v2 + Balanced
+- start with the recording type that matches the device
 - review accepted steps into a final walkthrough for each participant
 - compare runs only when a recording behaves unusually
 
@@ -667,8 +328,8 @@ Recommended approach:
 
 Recommended approach:
 
-- use Hybrid v2 first
-- use Subtle UI for polished interfaces with small state changes
+- start with the default settings
+- lower the smallest change for polished interfaces with small state changes
 - annotate accepted steps with action-oriented titles
 - export accepted steps as the final documentation package
 
@@ -685,15 +346,14 @@ Recommended approach:
 
 Recommended approach:
 
-- try Current v1 first
-- start with Content mode
-- use Adaptive mode only if fades are important
+- each slide that stays on screen becomes a step, so the defaults usually work
+- use the computer recording type for screen-shared slides with a mouse pointer
 
 ## Final Advice
 
 If you are unsure where to begin:
 
-1. Start with **Hybrid v2 + Balanced**.
+1. Pick the **recording type** and keep the other defaults.
 2. Run once.
 3. Review whether the result is missing steps or producing noise.
 4. Change only one thing at a time.
@@ -701,8 +361,8 @@ If you are unsure where to begin:
 
 In most research workflows, the fastest path is:
 
-- begin with the v2 default
-- use presets before advanced tuning
+- begin with the defaults for your recording type
+- change the minimum time on screen or the smallest change before anything under advanced
 - review candidates carefully
 - add manual steps only for important misses
 - export accepted steps once the walkthrough is clean

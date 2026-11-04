@@ -1,5 +1,4 @@
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
-import { getHybridEffectiveSampleFps } from '../../../lib/analysisMetadata';
 import { formatElapsedDuration } from '../../../lib/utils';
 import { formatAnalysisEngineLabel, formatAnalysisPresetLabel } from '../../../lib/runSettings';
 import { formatPercent, formatRunShortTimestamp } from '../../../lib/formatters';
@@ -19,7 +18,6 @@ export interface AnalysisTasksPanelProps {
   analysisMetadata: AnalysisMetadata | null;
   bulkDeletePending: boolean;
   bulkExportPending: boolean;
-  enableV1Engine: boolean;
   expandedTaskRunId: string | null;
   groupedTaskItems: AnalysisTaskGroup[];
   onAbortRun: (runId: string) => void;
@@ -49,7 +47,6 @@ export function AnalysisTasksPanel({
   analysisMetadata,
   bulkDeletePending,
   bulkExportPending,
-  enableV1Engine,
   expandedTaskRunId,
   groupedTaskItems,
   onAbortRun,
@@ -129,139 +126,30 @@ export function AnalysisTasksPanel({
               ? [{ key: 'scroll', label: 'scroll', value: 'merged', isDirty: stableDefaults?.scroll_mode !== 'merge' }]
               : []),
           ]
-        : run.analysis_engine === 'hybrid_v2'
-        ? [
-            ...(enableV1Engine
-              ? [
-                  {
-                    key: 'engine',
-                    label: 'engine',
-                    value: formatAnalysisEngineLabel(run.analysis_engine),
-                    valueClassName: 'mode',
-                    isDirty: run.analysis_engine !== projectDefaultSettings.analysis_engine,
-                  },
-                ]
-              : []),
+        : // Runs of the retired engines: what they were made with, read-only.
+          [
             {
-              key: 'preset',
-              label: 'preset',
-              value: formatAnalysisPresetLabel(run.analysis_preset),
+              key: 'engine',
+              label: 'engine',
+              value: formatAnalysisEngineLabel(run.analysis_engine),
               valueClassName: 'mode',
-              isDirty: run.analysis_preset !== projectDefaultSettings.analysis_preset,
+              isDirty: false,
             },
-            {
-              key: 'hybrid-fps',
-              label: 'fps',
-              value: (() => {
-                const sampleFps = getHybridEffectiveSampleFps(run, analysisMetadata);
-                return sampleFps == null ? 'preset' : String(sampleFps);
-              })(),
-              valueClassName: 'sample-fps',
-              isDirty:
-                (run.advanced?.sample_fps_override ?? null) !==
-                (projectDefaultSettings.advanced?.sample_fps_override ?? null),
-            },
-            ...(run.advanced?.min_dwell_ms != null
+            ...(run.analysis_engine === 'hybrid_v2'
               ? [
+                  { key: 'preset', label: 'preset', value: formatAnalysisPresetLabel(run.analysis_preset), isDirty: false },
                   {
-                    key: 'dwell',
-                    label: 'dwell',
-                    value: `${run.advanced.min_dwell_ms}ms`,
-                    isDirty:
-                      (run.advanced.min_dwell_ms ?? null) !==
-                      (projectDefaultSettings.advanced?.min_dwell_ms ?? null),
+                    key: 'ocr',
+                    label: 'ocr',
+                    value: run.advanced?.enable_ocr === false ? 'off' : 'on',
+                    isDirty: false,
                   },
                 ]
-              : []),
-            ...(run.advanced?.settle_window_ms != null
-              ? [
-                  {
-                    key: 'settle',
-                    label: 'settle',
-                    value: `${run.advanced.settle_window_ms}ms`,
-                    isDirty:
-                      (run.advanced.settle_window_ms ?? null) !==
-                      (projectDefaultSettings.advanced?.settle_window_ms ?? null),
-                  },
-                ]
-              : []),
-            ...(run.advanced?.proposal_threshold != null
-              ? [
-                  {
-                    key: 'proposal-threshold',
-                    label: 'proposal',
-                    value: run.advanced.proposal_threshold.toFixed(2),
-                    isDirty:
-                      (run.advanced.proposal_threshold ?? null) !==
-                      (projectDefaultSettings.advanced?.proposal_threshold ?? null),
-                  },
-                ]
-              : []),
-            ...(run.advanced?.settle_threshold != null
-              ? [
-                  {
-                    key: 'settle-threshold',
-                    label: 'settle thr',
-                    value: run.advanced.settle_threshold.toFixed(2),
-                    isDirty:
-                      (run.advanced.settle_threshold ?? null) !==
-                      (projectDefaultSettings.advanced?.settle_threshold ?? null),
-                  },
-                ]
-              : []),
-            ...(run.advanced?.ocr_trigger_threshold != null
-              ? [
-                  {
-                    key: 'ocr-trigger-threshold',
-                    label: 'ocr trig',
-                    value: run.advanced.ocr_trigger_threshold.toFixed(2),
-                    isDirty:
-                      (run.advanced.ocr_trigger_threshold ?? null) !==
-                      (projectDefaultSettings.advanced?.ocr_trigger_threshold ?? null),
-                  },
-                ]
-              : []),
-            {
-              key: 'ocr',
-              label: 'ocr',
-              value: run.advanced?.enable_ocr === false ? 'off' : 'on',
-              isDirty:
-                (run.advanced?.enable_ocr ?? true) !== (projectDefaultSettings.advanced?.enable_ocr ?? true),
-            },
-          ]
-        : [
-            {
-              key: 'tolerance',
-              label: 'tolerance',
-              value: String(run.tolerance),
-              isDirty: run.tolerance !== projectDefaultSettings.tolerance,
-            },
-            {
-              key: 'gaps',
-              label: 'gaps',
-              value: String(run.min_scene_gap_ms),
-              isDirty: run.min_scene_gap_ms !== projectDefaultSettings.min_scene_gap_ms,
-            },
-            {
-              key: 'fps',
-              label: 'fps',
-              value: run.sample_fps ? String(run.sample_fps) : 'src',
-              valueClassName: 'sample-fps',
-              isDirty: run.sample_fps !== projectDefaultSettings.sample_fps,
-            },
-            {
-              key: 'offset',
-              label: 'offset',
-              value: String(run.extract_offset_ms),
-              isDirty: run.extract_offset_ms !== projectDefaultSettings.extract_offset_ms,
-            },
-            {
-              key: 'mode',
-              label: 'mode',
-              value: run.detector_mode,
-              valueClassName: 'mode',
-              isDirty: run.detector_mode !== projectDefaultSettings.detector_mode,
-            },
+              : [
+                  { key: 'mode', label: 'mode', value: run.detector_mode, isDirty: false },
+                  { key: 'tolerance', label: 'tolerance', value: String(run.tolerance), isDirty: false },
+                  { key: 'gaps', label: 'gaps', value: `${run.min_scene_gap_ms}ms`, isDirty: false },
+                ]),
           ];
     const progressLabel = isDone
       ? `${run.candidate_count} ${run.analysis_engine === 'stable_v3' ? 'steps' : 'scenes'}`

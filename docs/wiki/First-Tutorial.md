@@ -60,8 +60,7 @@ Go to the **Analysis** stage.
 
 For your first run:
 
-- use **Hybrid v2**
-- choose the **Balanced** preset
+- pick the **recording type** that matches the device: phone or tablet, or computer
 - keep the other settings at their default values
 
 Then run the analysis.

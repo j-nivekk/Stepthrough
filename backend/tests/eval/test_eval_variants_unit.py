@@ -2,12 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cv2
 
-from app.services.hybrid_detection import _prepare_frame
 
-from tests.eval.rendering import ViewportSpec, default_viewport, pt, px, use_viewport
-from tests.eval.runner import _aggregate_dimensions
+from tests.eval.rendering import default_viewport, pt, px, use_viewport
 from tests.eval.scenarios import all_scenarios
 from tests.eval.types import GroundTruthEvent, ScenarioResult
 
@@ -72,60 +69,3 @@ def test_realistic_full_registry_filters_profile_resolution_and_fps() -> None:
 
     names = [name for name, _ in scenarios]
     assert names == ["feed_fullscreen_swipe__fullscreen_vertical__1080x1920__src60__sample12"]
-
-
-def test_aggregate_dimensions_groups_by_variant_metadata() -> None:
-    dimensions = _aggregate_dimensions(
-        {
-            "a": {
-                "precision": 1.0,
-                "recall": 0.5,
-                "f1": 0.66,
-                "profile_id": "phone_portrait",
-                "orientation": "portrait",
-                "encoded_width": 390,
-                "encoded_height": 844,
-                "source_fps": 30,
-                "sample_fps": 6,
-            },
-            "b": {
-                "precision": 0.5,
-                "recall": 1.0,
-                "f1": 0.66,
-                "profile_id": "phone_portrait",
-                "orientation": "portrait",
-                "encoded_width": 390,
-                "encoded_height": 844,
-                "source_fps": 30,
-                "sample_fps": 6,
-            },
-        }
-    )
-
-    assert dimensions["profile_id"]["phone_portrait"]["count"] == 2
-    assert dimensions["encoded_size"]["390x844"]["mean_f1"] == 0.66
-    assert dimensions["sample_fps"]["6"]["mean_precision"] == 0.75
-
-
-def test_high_res_vertical_variant_crosses_resize_threshold(tmp_path: Path) -> None:
-    _, factory = all_scenarios(
-        matrix="realistic-full",
-        profile="fullscreen_vertical",
-        resolution_tier="1080x1920",
-        source_fps=60,
-        sample_fps=12,
-    )[0]
-
-    scenario_dir = tmp_path / "hires"
-    scenario_dir.mkdir()
-    scenario_result = factory(scenario_dir)
-
-    cap = cv2.VideoCapture(str(scenario_result.video_path))
-    success, frame = cap.read()
-    cap.release()
-
-    assert success
-    assert max(frame.shape[0], frame.shape[1]) > 960
-
-    sample = _prepare_frame(frame, timestamp_ms=0, max_frame_edge=960)
-    assert max(sample.bgr.shape[0], sample.bgr.shape[1]) == 960

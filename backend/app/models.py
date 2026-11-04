@@ -9,6 +9,7 @@ CandidateOrigin = Literal["detected", "manual"]
 RunStatus = Literal["queued", "running", "awaiting_fallback", "completed", "failed", "cancelled"]
 DetectorMode = Literal["content", "adaptive"]
 ExportMode = Literal["accepted", "all"]
+# scene_v1 and hybrid_v2 are retired: their stored runs still load, review and export, but only stable_v3 runs.
 AnalysisEngine = Literal["scene_v1", "hybrid_v2", "stable_v3"]
 RecordingType = Literal["phone", "desktop"]
 ScrollMode = Literal["each_stop", "merge"]
@@ -227,20 +228,6 @@ class CandidateScoreBreakdown(BaseModel):
     grouped_states: int | None = None
 
 
-class HybridPresetMetadataResponse(BaseModel):
-    label: str
-    short_description: str
-    intended_use: str
-    good_for: list[str] = Field(default_factory=list)
-    tradeoffs: list[str] = Field(default_factory=list)
-    sample_fps: int
-    min_dwell_ms: int
-    settle_window_ms: int
-    proposal_threshold: float
-    settle_threshold: float
-    ocr_trigger_threshold: float
-
-
 class AnalysisControlMetadataResponse(BaseModel):
     supported: bool
     reason: str | None = None
@@ -256,7 +243,6 @@ class StableRecordingTypeMetadataResponse(BaseModel):
 
 
 class AnalysisMetadataResponse(BaseModel):
-    hybrid_presets: dict[AnalysisPreset, HybridPresetMetadataResponse]
     stable_recording_types: dict[RecordingType, StableRecordingTypeMetadataResponse] = Field(default_factory=dict)
     stable_engine_version: str | None = None
     controls_by_engine: dict[AnalysisEngine, dict[str, AnalysisControlMetadataResponse]]

@@ -48,7 +48,6 @@ import {
 import { loadAppPreferences, saveAppPreferences, type AppPreferences } from './lib/appPreferences';
 import {
   areRunSettingsEqual,
-  clampRunSettingsForRecording,
   defaultRunSettings,
   enforceLocalOcrAvailability,
   getProjectPresetStorageKey,
@@ -419,7 +418,7 @@ function App() {
   }, [pendingTaskNavigation, selectedRun]);
 
   const effectiveProjectDefaultSettings = useMemo(
-    () => clampRunSettingsForRecording(applyLocalOcrAvailability(projectDefaultSettings), selectedRecordingSummary?.fps ?? null),
+    () => applyLocalOcrAvailability(projectDefaultSettings),
     [projectDefaultSettings, selectedRecordingSummary?.fps, ocrAvailability],
   );
   const healthWarning = Boolean(healthQuery.data && healthQuery.data.missing_tools.length > 0);
@@ -468,21 +467,6 @@ function App() {
         return new Date(right.run.created_at).getTime() - new Date(left.run.created_at).getTime();
       });
   }, [analysisRecordingQueries, projectRecordings]);
-
-  useEffect(() => {
-    setRunSettings((current) => {
-      const nextSettings = clampRunSettingsForRecording(current, selectedRecordingSummary?.fps ?? null);
-      return areRunSettingsEqual(current, nextSettings) ? current : nextSettings;
-    });
-  }, [selectedRecordingSummary?.fps, runSettings.allow_high_fps_sampling]);
-
-  useEffect(() => {
-    if (!appPrefs.enableV1Engine && runSettings.analysis_engine === 'scene_v1') {
-      setRunSettings((current) =>
-        sanitizeRunSettings({ ...current, analysis_engine: 'stable_v3', stable: current.stable ?? null }),
-      );
-    }
-  }, [appPrefs.enableV1Engine, runSettings.analysis_engine]);
 
   useEffect(() => {
     if (ocrAvailability !== false) {
@@ -868,7 +852,7 @@ function App() {
   }
 
   function applyAnalysisSettings(nextSettings: RunSettings, feedback: string) {
-    setRunSettings(clampRunSettingsForRecording(sanitizeRunSettings(applyLocalOcrAvailability(nextSettings)), selectedRecordingSummary?.fps ?? null));
+    setRunSettings(sanitizeRunSettings(applyLocalOcrAvailability(nextSettings)));
     setSettingsFeedback(feedback);
   }
 
@@ -1519,7 +1503,6 @@ function App() {
         selectedRunLoading={runDetailQuery.isLoading || runDetailQuery.isFetching}
         setRunSettings={setRunSettings}
         settingsFeedback={settingsFeedback}
-        enableV1Engine={appPrefs.enableV1Engine}
         showPresetText={presetText}
       />
       <AppWatermark onOpenSettings={() => setShowSettings(true)} />

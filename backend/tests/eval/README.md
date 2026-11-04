@@ -1,73 +1,42 @@
-# Hybrid v2 Detection Engine — Eval Pipeline
+# Detection Eval Pipeline
 
-Synthetic video generator and evaluation framework for measuring the accuracy
-of the hybrid v2 scene detection engine.
+Synthetic screen recordings with known ground truth, used to measure the stable-screen engine
+(`stable_v3`) the way real uploads arrive.
 
 ## Quick start
 
 ```bash
 cd backend
 
-# Run all scenarios and save results
-python -m tests.eval.runner
+# Regression gates (part of the normal test run)
+uv run pytest tests/eval/ -q
 
-# Run with detailed per-candidate output
-python -m tests.eval.runner --debug
-
-# Compare against previous run
-python -m tests.eval.runner --compare
-
-# Run as pytest
-pytest tests/eval/ -v
-
-# Run the curated realistic smoke matrix
-python -m tests.eval.runner --matrix realistic-smoke
-
-# Run one high-resolution fullscreen realistic variant
-python -m tests.eval.runner --matrix realistic-full --profile fullscreen_vertical --resolution-tier 1080x1920 --source-fps 60 --sample-fps 12 --scenario feed_fullscreen_swipe
+# Full stress matrix with a summary table
+uv run python -m tests.eval.stress --set all
 ```
 
 ## Architecture
 
 ```
 tests/eval/
-├── README.md            ← this file
-├── __init__.py
-├── types.py             ← GroundTruthEvent, ScenarioResult, EvalMetrics
-├── rendering.py         ← UI rendering toolkit (widgets, layouts, transitions)
-├── scenarios.py         ← scenario generators organized by category
-├── evaluator.py         ← matching algorithm, metrics, breakdowns, debug reports
-├── runner.py            ← standalone CLI runner + JSON output
-├── test_eval_suite.py   ← pytest integration
-└── results/             ← timestamped JSON results (gitignored except .gitkeep)
-```
-
-### Data flow
-
-```
-Scenario generator       →  ScenarioResult (video_path + ground_truth)
-                                ↓
-detect_candidates_hybrid  →  list[candidate dicts]
-                                ↓
-evaluator.evaluate        →  EvalMetrics (precision, recall, F1, timing error)
-                                ↓
-runner / pytest           →  summary table + JSON results file
+├── README.md             ← this file
+├── types.py              ← GroundTruthEvent, ScenarioResult, EvalMetrics
+├── rendering.py          ← UI rendering toolkit (widgets, layouts, transitions)
+├── scenarios.py          ← baseline scenario generators, by category
+├── step_scenarios.py     ← scenarios about what a step should be (typing, form fields, toggles)
+├── evaluator.py          ← matching algorithm and metrics
+├── stress.py             ← uploads as they really arrive (H.264, phone-style VFR, overlays); CLI
+├── test_eval_stress.py   ← pytest regression gates
+└── results/              ← JSON summaries written with --json (gitignored except .gitkeep)
 ```
 
 ## Modules
 
 ### `types.py`
 
-Core data types shared across the pipeline.
-
-| Type | Purpose |
-|------|---------|
-| `GroundTruthEvent` | A known event: type, start/end ms, difficulty, metadata |
-| `ScenarioResult` | Video path + ground truth + metadata |
-| `EventMatchResult` | Per-event match detail |
-| `EvalMetrics` | Aggregate precision/recall/F1/timing |
-| `Difficulty` | `"easy"` \| `"medium"` \| `"hard"` |
-| `Category` | `"navigation"` \| `"scrolling"` \| `"feed"` \| `"overlay"` \| `"content"` \| `"composite"` |
+Core data types shared across the pipeline: `GroundTruthEvent` (a known event with type, start and end
+time, difficulty), `ScenarioResult` (video path, ground truth, metadata), `EventMatchResult` and
+`EvalMetrics` (precision, recall, F1, timing error).
 
 ### `rendering.py`
 
@@ -121,56 +90,11 @@ metrics by event type and difficulty level.
 which ground truth event each candidate matched (or didn't), with score
 breakdowns.
 
-### `runner.py`
-
-CLI runner with options:
-
-```
---matrix NAME         Scenario matrix: baseline, realistic-smoke, realistic-full
---scenario NAME       Filter scenarios by name substring
---category CAT        Filter by category prefix
---profile PROFILE     Filter realistic matrices by device profile
---resolution-tier T   Filter realistic matrices by encoded resolution tier
---preset PRESET       Analysis preset: subtle_ui, balanced, noise_resistant
---ocr                 Enable OCR during detection
---debug               Print per-candidate debug detail
---compare             Compare the two most recent saved runs
---no-save             Don't save results to disk
---source-fps FPS      Override source FPS used to render scenarios
---sample-fps FPS      Override detector sampling FPS for eval runs
---fps FPS             Backward-compatible alias for --source-fps
-```
-
-### Realistic variant matrices
-
-The realistic matrices add device-aware rendering and detector sampling
-metadata on top of the baseline suite.
-
-Profiles:
-
-| Profile | Shell | Logical size | Resolution tiers |
-|---------|-------|--------------|------------------|
-| `phone_portrait` | `mobile_app` | `390x844` | `390x844`, `780x1688` |
-| `laptop_landscape` | `desktop_browser` | `1280x800` | `1280x800` |
-| `fullscreen_vertical` | `fullscreen` | `540x960` | `540x960`, `1080x1920` |
-| `fullscreen_horizontal` | `fullscreen` | `960x540` | `960x540`, `1920x1080` |
-
-Variant names use:
-
-```text
-base__profile__resolution__src{fps}__sample{fps}
-```
-
-This keeps existing `nav` / `scroll` / `feed` prefix filtering working.
-
-Results are saved to `tests/eval/results/eval_YYYYMMDD_HHMMSS.json`.
-
 ## Stress matrix (`stress.py`)
 
 The baseline scenarios are clean MJPEG at constant frame rate, which real uploads never are. `stress.py`
 re-encodes every scenario the way uploads arrive and adds interface noise, then runs each variant
-through the app's own pipeline (ingest working copy, ffprobe metadata, detection with `--engine
-hybrid_v2` or `stable_v3`):
+through the app's own pipeline (ingest working copy, ffprobe metadata, stable-screen detection):
 
 | variant | simulates |
 |---|---|
@@ -184,28 +108,30 @@ Besides P/R/F1 it reports:
 - **screenshot fidelity**: whether each matched candidate's PNG shows the settled post-event state rather
   than the pre-event one, judged where those two frames differ (so a toggle is not lost in compression
   noise). The timing-window evaluator alone passes mid-animation screenshots.
-- **opening** (stable engine): the opening-screen step is present and shows the first frame. Ground truth
+- **opening**: the opening-screen step is present and shows the first frame. Ground truth
   lists changes only, so that step is left out of precision and recall.
 - **labels**: how often the matched candidate's `transition_type` describes the ground-truth event type.
 
 `--set steps` (or `all`) adds the scenarios in `step_scenarios.py`, which test what a step should be
 rather than whether a change is found: a message typed word by word with pauses (one step), two form
 fields filled in turn (one step each) and three toggles in a column (three steps, not a typing group).
-They are kept out of `BASELINE_SCENARIOS` so the hybrid v2 baseline suite stays comparable.
+They are kept out of `BASELINE_SCENARIOS` so the baseline set stays comparable with earlier results.
 
 ```bash
-python -m tests.eval.stress --engine stable_v3 --set all   # the default engine, all 25 scenarios
-python -m tests.eval.stress                      # hybrid v2, full matrix, balanced preset (about 5 minutes)
-python -m tests.eval.stress --preset subtle_ui
+python -m tests.eval.stress --set all            # all 25 scenarios, every variant
 python -m tests.eval.stress --no-ingest          # detect on the upload itself, as before working copies
 python -m tests.eval.stress --only nav_basic --variants h264_vfr,h264_vfr+spinner
 ```
 
-`test_eval_stress.py` holds the regression gates that run in `pytest`. For hybrid v2, on a set of
-scenarios it handles well, a phone-style (VFR) upload must find at least as much as a constant-frame-rate
-upload of the same content, with every matched screenshot settled. For stable v3, a phone-style upload of
-14 scenarios (including the typing and toggle ones) must find every event with a settled screenshot and
-the opening screen, and any extra step must be a return to an earlier screen.
+`test_eval_stress.py` holds the regression gates that run in `pytest`. On a set of scenarios, a
+phone-style (VFR) upload must find at least as much as a constant-frame-rate upload of the same content,
+with every matched screenshot settled. On 14 scenarios (including the typing and toggle ones), a
+phone-style upload must find every event with a settled screenshot and the opening screen, and any extra
+step must be a return to an earlier screen.
+
+The retired hybrid v2 engine and its scenario runner (`runner.py`, realistic matrices, stored results)
+are at the git tag `last-with-hybrid-v2`. On this matrix it scored 0.79 F1 on clean uploads against 0.98
+for stable screens; see `docs/robustness-review-2026-11.md`.
 
 ## Adding a new scenario
 
@@ -240,19 +166,7 @@ def my_scenario(output_dir: Path, fps: float = r.DEFAULT_FPS) -> ScenarioResult:
 
 2. Register it in `ALL_SCENARIOS` at the bottom of `scenarios.py`.
 
-3. Run `python -m tests.eval.runner --scenario my_scenario --debug` to verify.
-
-## Interpreting results
-
-- **PASS** = recall >= 50% (soft threshold, will tighten as engine improves)
-- **FAIL** = recall < 50%
-- **FP** (false positive) = candidate not matched to any ground truth event
-- **miss** = ground truth event with no matching candidate
-- **err** = mean timing error in ms
-
-The difficulty breakdown shows detection rate by difficulty level — expect
-easy events to be detected first, hard events to improve as the engine
-evolves.
+3. Run `python -m tests.eval.stress --only my_scenario` to verify.
 
 ## Ground truth event types
 

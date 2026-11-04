@@ -11,8 +11,7 @@ dependencies = [
   "pillow>=10.4.0",
   "pydantic>=2.9.0",
   "python-multipart>=0.0.12",
-  "scenedetect>=0.6.4",
-  "uvicorn[standard]>=0.32.0"
+  "uvicorn[standard]>=0.32.0",
 ]
 
 [dependency-groups]
@@ -21,7 +20,8 @@ dev = [
   "pytest>=8.3.0"
 ]
 
-hybrid = [
+# Optional text recognition for step screenshots (ocr_text in exports): uv sync --group ocr
+ocr = [
   "paddlepaddle==3.3.0",
   "paddleocr==3.3.0",
   "setuptools>=70.0.0"

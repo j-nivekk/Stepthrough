@@ -50,7 +50,7 @@ For your first sessions, use this workflow:
 
 1. Create or open a project.
 2. Import one recording.
-3. Start with **Hybrid v2 + Balanced**.
+3. Pick the recording type and keep the default settings.
 4. Wait for the run to finish.
 5. Review the candidates one by one.
 6. Accept the meaningful steps.
@@ -91,15 +91,15 @@ If you are teaching this app in a course or lab, the sequence below works well:
    Ask what the detector caught well, what it missed, and when a manual step was useful.
 
 5. **Troubleshooting and tuning**  
-   Only after the first exercise, introduce preset choice and basic parameter changes.
+   Only after the first exercise, introduce the minimum time on screen, the smallest change and ignore areas.
 
 ## Recommended Rules For New Users
 
 These rules keep the first experience manageable:
 
-- Start with **Hybrid v2 + Balanced**.
-- If the run misses important states, try **Subtle UI**.
-- If the run finds too much noise, try **Ignore Noise**.
+- Start with the recording type that matches the device, and the default settings.
+- If the run misses brief or small states, lower the **minimum time on screen** or the **smallest change**.
+- If something that keeps moving adds steps, draw an **ignore area** over it.
 - If one important moment is missing, add a manual step.
 - Change one thing at a time between runs.
 

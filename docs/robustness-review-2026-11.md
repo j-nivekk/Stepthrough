@@ -17,7 +17,9 @@ Everything below was measured on this machine (M-series Mac, ffmpeg 9.0.2, OpenC
 
 ### Update: phase 1 implemented (stable-screen engine)
 
-Phase 1 of section 7 is in place as a third engine, `stable_v3` ("stable screens"), now the default for new runs. Hybrid v2 stays selectable for comparison with earlier runs. Code: `backend/app/services/stable_detection.py`.
+Phase 1 of section 7 is in place as a third engine, `stable_v3` ("stable screens"), now the default for new runs. Code: `backend/app/services/stable_detection.py`.
+
+*Later update (4 November 2026):* hybrid v2 and v1 are retired. Only `stable_v3` starts new runs; runs made with the earlier engines still open, review, compare and export. Their code, and the scripts that produced the hybrid v2 numbers below, are at the git tag `last-with-hybrid-v2`.
 
 **How it works.** A step is a screen that stays still for at least the minimum time on screen. The working copy is decoded small and grey on a fixed real-time grid. Two passes then run:
 
@@ -382,19 +384,14 @@ From `backend/`:
 
 ```bash
 # real-recording timestamp drift
-.venv/bin/python experiments/vfr_drift.py ../data/projects/*/recordings/*/source/*.mp4
-# stress matrix, current engine (about 4 minutes per preset)
-.venv/bin/python experiments/stress.py --engine hybrid --preset balanced
-# stress matrix, stable-interval prototype
-.venv/bin/python experiments/stress.py --engine plateau
-# both engines on real recordings, with contact sheets
-.venv/bin/python experiments/real_compare.py experiments/out ../data/projects/*/recordings/*/source/*.mp4
+uv run python experiments/vfr_drift.py ../data/projects/*/recordings/*/source/*.mp4
+# stable_v3 through the real pipeline (working copy), 25 scenarios
+uv run python -m tests.eval.stress --set all
+# stable_v3 on real recordings, with labelled contact sheets; CACHE keeps the working copies
+uv run python experiments/real_stable.py experiments/out CACHE ../data/projects/*/recordings/*/source/*.mp4
 
-# phase 1: stable_v3 and hybrid v2 through the real pipeline (working copy), 25 scenarios
-uv run python -m tests.eval.stress --engine stable_v3 --set all
-uv run python -m tests.eval.stress --engine hybrid_v2 --set all
-# stable_v3 (and hybrid v2) on real recordings, with labelled contact sheets; CACHE keeps the working copies
-uv run python experiments/real_stable.py experiments/out CACHE ../data/projects/*/recordings/*/source/*.mp4 --hybrid
+# The hybrid v2 and prototype numbers (experiments/stress.py, real_compare.py, tests.eval.stress --engine
+# hybrid_v2, real_stable.py --hybrid) need a checkout of the tag last-with-hybrid-v2.
 ```
 
 ## References

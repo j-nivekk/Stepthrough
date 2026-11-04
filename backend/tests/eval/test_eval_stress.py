@@ -68,8 +68,7 @@ def test_stable_engine_on_phone_style_upload(scenario_name: str, tmp_path: Path)
     scenario = factory(tmp_path, 30)
     frames, fps = read_frames(scenario.video_path)
     result = run_variant(
-        scenario_name, tmp_path, (frames, fps, scenario.video_path), scenario.ground_truth, "h264_vfr", None,
-        engine="stable_v3",
+        scenario_name, tmp_path, (frames, fps, scenario.video_path), scenario.ground_truth, "h264_vfr", None
     )
     assert result.metrics.missed_events == 0, f"missed {result.metrics.missed_events} event(s)"
     assert result.screenshots_correct == result.screenshots_matched

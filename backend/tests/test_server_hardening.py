@@ -96,7 +96,7 @@ def test_runs_use_the_working_copy_and_serve_it_for_preview(client: TestClient, 
     recording = _import(client, video_factory)
     assert recording['source_url'].endswith('/flow.mp4')
 
-    run = client.post(f"/recordings/{recording['id']}/runs", json={'analysis_engine': 'hybrid_v2'}).json()
+    run = client.post(f"/recordings/{recording['id']}/runs", json={}).json()
     detail = wait_for_run(client, run['id'])
     assert detail['summary']['status'] == 'completed', detail['summary']['message']
     assert any('working copy' in event['message'] for event in detail['events'])
