@@ -398,8 +398,14 @@ def test_stable_run_export_records_engine_and_timings(client: TestClient, video_
     assert manifest['run']['settings']['stable']['min_dwell_ms'] == 500
     assert manifest['run']['resolved_settings']['min_change_percent'] == 0.25
     header = (bundle / 'steps.csv').read_text().splitlines()[0].split(',')
-    assert {'transition_type', 'change_started_ms', 'settled_ms', 'time_on_screen_ms'} <= set(header)
+    assert {'transition_type', 'change_started_ms', 'settled_ms', 'time_on_screen_ms', 'ocr_text'} <= set(header)
     assert manifest['steps'][1]['transition_type'] == 'navigation'
+    # Readable without the app: no server URLs, no settings of other engines, units explained.
+    assert all('image_url' not in step and 'ocr_text' in step for step in manifest['steps'])
+    assert 'detector_mode' not in manifest['run'] and 'tolerance' not in manifest['run']
+    assert manifest['recording']['width'] == 640 and manifest['recording']['height'] == 360
+    assert 'stayed on screen' in manifest['field_notes']['time_on_screen_ms']
+    assert 'pixels of the recording' in manifest['field_notes']['score_breakdown.changed_regions']
 
 
 def test_delete_project_removes_it_and_its_recordings(client: TestClient, video_factory) -> None:

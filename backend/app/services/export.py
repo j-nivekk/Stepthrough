@@ -40,7 +40,78 @@ def _run_settings(run: dict) -> dict:
         settings["min_scene_gap_ms"] = run.get("min_scene_gap_ms")
     elif run.get("analysis_engine") == "stable_v3":
         settings["stable"] = _json_value(run.get("analysis_stable"))
+    else:
+        for key in ("detector_mode", "tolerance", "min_scene_gap_ms", "sample_fps", "allow_high_fps_sampling",
+                    "extract_offset_ms"):
+            settings[key] = run.get(key)
     return settings
+
+
+def _regions_in_recording_pixels(breakdown: dict | None, run: dict, recording: dict) -> dict | None:
+    """Hybrid v2 measures changed regions on a frame scaled to at most 960 px on its long edge; exports give
+    every engine's regions in pixels of the recording. (stable_v3 already stores them that way.)"""
+    if not breakdown or run.get("analysis_engine") != "hybrid_v2" or not breakdown.get("changed_regions"):
+        return breakdown
+    long_edge = max(int(recording.get("width") or 0), int(recording.get("height") or 0))
+    max_edge = int((_json_value(run.get("analysis_config")) or {}).get("max_frame_edge") or 960)
+    if long_edge <= max_edge:
+        return breakdown
+    scale = long_edge / max_edge
+    regions = [
+        {**region, **{key: round(float(region[key]) * scale) for key in ("x", "y", "width", "height")}}
+        for region in breakdown["changed_regions"]
+    ]
+    return {**breakdown, "changed_regions": regions}
+
+
+_COMMON_NOTES = {
+    "timestamp_ms": "time of the screenshot, in ms from the start of the recording",
+    "image_path": "the screenshot, inside this bundle",
+    "status, title, notes": "the reviewer's decision and annotations",
+    "ocr_text": "text read from the screenshot by OCR; null when OCR was off or found no text",
+    "score_breakdown.changed_regions": (
+        "up to 6 changed areas as boxes (x, y, width, height) in pixels of the recording "
+        "(recording.width x recording.height)"
+    ),
+    "revisit_group_id, similar_to_step_id": "steps showing a screen seen earlier share a revisit group",
+}
+
+_ENGINE_NOTES = {
+    "stable_v3": {
+        "step": "a screen that stayed still for at least resolved_settings.min_dwell_ms",
+        "scene_score": "share of the screen that changed into this step (share of a 24 x 24 grid of regions); 1 for the opening screen",
+        "transition_type": (
+            "how the step was reached: opening_screen, navigation, scroll, feed_card_swap, modal, content_update, "
+            "small_ui_change or text_entry (a typing burst grouped into one step); a description, not used to find steps"
+        ),
+        "change_started_ms": "when the screen started changing away from the previous step",
+        "settled_ms": "when this step's screen stopped changing",
+        "time_on_screen_ms": "how long this step's screen stayed on screen",
+        "grouped_states": "number of stable screens merged into this step (typing burst or merged scroll stops)",
+        "score_breakdown.changed_regions.score": "share of the box that changed, 0 to 1",
+        "revisit_group_id, similar_to_step_id": (
+            "a revisit is the same screen state again: no change larger than the smallest change"
+        ),
+    },
+    "hybrid_v2": {
+        "step": "the settled screen after a detected change event",
+        "scene_score": "the event's strongest weighted change score, 0 to 1",
+        "transition_type": "how the step was reached, estimated from the change signals",
+        "change_started_ms, settled_ms": "start and end of the change event",
+        "time_on_screen_ms": "time from the end of this change to the start of the next",
+        "score_breakdown.changed_regions.score": "how strongly the area changed (mean difference), 0 to 1",
+        "revisit_group_id, similar_to_step_id": "a revisit is a screenshot with similar image hashes and OCR text",
+    },
+    "scene_v1": {
+        "step": "a scene cut found by PySceneDetect; the screenshot is taken extract_offset_ms after the cut",
+        "scene_score": "the detector's cut score",
+    },
+}
+
+
+def _field_notes(engine: str | None) -> dict:
+    """What the per-step fields mean for this run's engine, so a bundle can be read without the app."""
+    return {**_COMMON_NOTES, **_ENGINE_NOTES.get(engine or "", {})}
 
 
 def _timing_columns(row: dict) -> dict:
@@ -84,6 +155,7 @@ def build_accepted_steps(recording_slug: str, candidates: list[dict]) -> list[di
             "notes": candidate.get("notes"),
             "scene_score": candidate["scene_score"],
             "score_breakdown": _normalized_score_breakdown(candidate),
+            "ocr_text": candidate.get("ocr_text"),
             "revisit_group_id": revisit_group_id,
             "similar_to_step_id": similar_to_step_id,
             "source_candidate_id": candidate["id"],
@@ -115,6 +187,7 @@ def build_all_candidate_rows(recording_slug: str, candidates: list[dict]) -> lis
                 "notes": candidate.get("notes"),
                 "scene_score": candidate["scene_score"],
                 "score_breakdown": _normalized_score_breakdown(candidate),
+                "ocr_text": candidate.get("ocr_text"),
                 "revisit_group_id": candidate.get("revisit_group_id"),
                 "similar_to_step_id": None,
                 "similar_to_source_candidate_id": candidate.get("similar_to_candidate_id"),
@@ -166,7 +239,9 @@ def create_export_bundle(
         source_path = absolute_data_path(row["image_path"])
         target_path = images_dir / row["export_filename"]
         shutil.copy2(source_path, target_path)
-        exported_manifest_rows.append({**row, "image_path": f"images/{row['export_filename']}", **_timing_columns(row)})
+        exported = {key: value for key, value in row.items() if key != "image_url"}  # server-only URL
+        exported["score_breakdown"] = _regions_in_recording_pixels(row.get("score_breakdown"), run, recording)
+        exported_manifest_rows.append({**exported, "image_path": f"images/{row['export_filename']}", **_timing_columns(row)})
 
     manifest = {
         "bundle_id": bundle_id,
@@ -182,6 +257,9 @@ def create_export_bundle(
             "filename": recording["filename"],
             "slug": recording["slug"],
             "duration_ms": recording["duration_ms"],
+            "width": recording.get("width"),
+            "height": recording.get("height"),
+            "fps": recording.get("fps"),
         },
         "run": {
             "id": run["id"],
@@ -189,9 +267,8 @@ def create_export_bundle(
             "engine_version": (_json_value(run.get("analysis_config")) or {}).get("engine_version"),
             "settings": _run_settings(run),
             "resolved_settings": _json_value(run.get("analysis_config")),
-            "detector_mode": run["detector_mode"],
-            "tolerance": run["tolerance"],
         },
+        "field_notes": _field_notes(run.get("analysis_engine")),
         "steps": exported_manifest_rows,
     }
 
@@ -216,6 +293,7 @@ def create_export_bundle(
                 "settled_ms",
                 "time_on_screen_ms",
                 "grouped_states",
+                "ocr_text",
                 "revisit_group_id",
                 "similar_to_step_id",
                 "similar_to_source_candidate_id",

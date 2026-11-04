@@ -43,15 +43,23 @@ Settings (`RunSettings.stable`; `null` means the recording type's default):
 | `scroll_mode` | `each_stop` (every scroll stop is a step) or `merge` (keep the first) | `each_stop` |
 | `group_typing` | a burst of typing with short pauses becomes one step with the finished text | on |
 | `include_opening_screen` | the first screen is step 0 | on |
-| `enable_ocr` | read the text of each screenshot (exports, revisit matching); not used to find steps | off |
+| `enable_ocr` | read the text of each screenshot into exports (`ocr_text`); not used to find steps | off |
 | `sensitivity` | pixel threshold in multiples of the noise measured on the recording (at least 10 grey levels) | 4 |
 | `sample_fps` | analysis rate, rounded to a whole share of the working copy's frame rate | 15 |
 
 Each run stores what it actually used in `analysis_config`: the resolved settings, `engine_version`, and
-`measured` (noise, pixel threshold, stable intervals found, typing groups). Exports carry the same in
-`steps.json` (`run.engine_version`, `run.settings`, `run.resolved_settings`), and `steps.csv` has
-per-step timing: `transition_type`, `change_started_ms`, `settled_ms`, `time_on_screen_ms` and
-`grouped_states`.
+`measured` (noise, pixel threshold, stable intervals found, typing groups).
+
+## Exports
+
+An export is a zip with `images/` (one PNG per step), `steps.json` and `steps.csv`. `steps.json` holds the
+project, the recording (with the working copy's `width`, `height` and `fps`), the run (`analysis_engine`,
+`engine_version`, the `settings` as chosen and the `resolved_settings` actually used, including what was
+measured), `field_notes` explaining each per-step field for that run's engine, and the steps. Per step:
+time, image path inside the bundle, the reviewer's status, title and notes, `ocr_text`, the score
+breakdown, revisit links and the timing columns `transition_type`, `change_started_ms`, `settled_ms`,
+`time_on_screen_ms` and `grouped_states`. Changed regions are in pixels of the recording for every engine.
+`steps.csv` has the same per-step fields without the nested score breakdown.
 
 ## Configuration
 

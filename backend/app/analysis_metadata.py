@@ -220,7 +220,7 @@ ANALYSIS_CONTROLS_BY_ENGINE: dict[AnalysisEngine, dict[str, AnalysisControlMetad
         "stable.include_opening_screen": AnalysisControlMetadata(supported=True),
         "stable.enable_ocr": AnalysisControlMetadata(
             supported=True,
-            note="Reads the text in each screenshot, for revisit matching and exports. Not needed to detect steps.",
+            note="Reads the text in each screenshot and adds it to exports (ocr_text). Not needed to detect steps.",
         ),
         "stable.sensitivity": AnalysisControlMetadata(
             supported=True,

@@ -51,7 +51,7 @@ On phones, a change confined to the keyboard (switching to numbers or symbols) c
 - Read text (OCR).
 - Advanced: pixel threshold in multiples of the measured noise, and analysis rate.
 
-Each run stores its resolved settings, the engine version and what was measured (noise, pixel threshold, intervals found, typing groups). These appear in the run header and in exports: `steps.json` gains `engine_version`, `settings` and `resolved_settings`, and `steps.csv` gains `transition_type`, `change_started_ms`, `settled_ms`, `time_on_screen_ms` and `grouped_states`.
+Each run stores its resolved settings, the engine version and what was measured (noise, pixel threshold, intervals found, typing groups). These appear in the run header and in exports: `steps.json` gains `engine_version`, `settings` and `resolved_settings`, and `steps.csv` gains `transition_type`, `change_started_ms`, `settled_ms`, `time_on_screen_ms` and `grouped_states`. Both now include `ocr_text`. `steps.json` also carries `field_notes`, which explain each field for the run's engine. Changed regions are in recording pixels for every engine, and the server-only `image_url` is gone.
 
 **Stress matrix, 25 scenarios.** The 22 baseline scenarios plus three new ones in `backend/tests/eval/step_scenarios.py`:
 - a chat message typed word by word with reading pauses, then sent;

@@ -358,7 +358,7 @@ export function AnalysisScreen({
     stable_min_dwell_ms:
       'how long the screen must stay still to count as a step. shorter catches brief screens; longer skips screens the user only passed through.',
     stable_ocr:
-      'reads the text in each screenshot so it can be searched and exported. it is not needed to find steps and makes runs slower.',
+      'reads the text in each screenshot and adds it to exports (ocr_text). it is not needed to find steps and makes runs slower.',
     stable_opening_screen: 'include the screen the recording starts on as step 0.',
     stable_recording_type:
       'sets sensible defaults: phone recordings ignore the status bar; computer recordings ignore small changes such as the moving mouse pointer.',
