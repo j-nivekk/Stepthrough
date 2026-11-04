@@ -1,7 +1,50 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { absoluteApiUrl } from '../api';
 import { candidateLabelType, transitionLabelText, type SimilarLink } from '../lib/analysis';
+import type { StepHoverState } from '../features/analysis/useHoverClips';
 import type { CandidateFrame, CandidateStatus } from '../types';
+
+/** Hover intent on a step's screenshot: wait, then the clip plays and "play from here" appears. */
+export interface StepHoverProps {
+  state: StepHoverState | null;
+  onEnter: (slot: HTMLElement | null) => void;
+  onLeave: () => void;
+  onPlayFromHere: () => void;
+}
+
+function PlayFromHereButton({ iconOnly, onClick }: { iconOnly: boolean; onClick: () => void }) {
+  return (
+    <button
+      aria-label="play from here"
+      className={`candidate-play-from-here ${iconOnly ? 'icon-only' : ''}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+      title="play from here in the preview (p)"
+      type="button"
+    >
+      <svg aria-hidden="true" fill="currentColor" height="12" viewBox="0 0 12 12" width="12">
+        <path d="M3 1.8v8.4L10 6z" />
+      </svg>
+      {iconOnly ? null : <span>play from here</span>}
+    </button>
+  );
+}
+
+// Mouse rather than pointer events: browsers send mouse enter and leave when the page scrolls under a
+// still pointer. Moving within a screenshot restarts the wait after a scroll cancelled it.
+function hoverHandlers(hover: StepHoverProps | undefined, slot: { current: HTMLElement | null }) {
+  if (!hover) return {};
+  return {
+    onMouseEnter: () => hover.onEnter(slot.current),
+    onMouseMove: () => {
+      if (hover.state === null) hover.onEnter(slot.current);
+    },
+    onMouseLeave: () => hover.onLeave(),
+  };
+}
 
 function hasFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
@@ -172,6 +215,7 @@ export interface CandidateCardProps {
   onUpdate: (payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>>) => void;
   /** Narrow card: scores and the notes toggle move out of the way until the card is active. */
   compact?: boolean;
+  hover?: StepHoverProps;
 }
 
 export function CandidateCard({
@@ -190,7 +234,9 @@ export function CandidateCard({
   similarLink,
   onUpdate,
   compact = false,
+  hover,
 }: CandidateCardProps) {
+  const liveSlotRef = useRef<HTMLDivElement | null>(null);
   const { title, setTitle, notes, setNotes, commit: commitTextField } = useAnnotationDrafts(candidate, onUpdate);
   // The title and notes fields open only on request, so a selected card can still be just a screenshot.
   // Saved text stays visible as plain text while the fields are closed.
@@ -209,8 +255,15 @@ export function CandidateCard({
       onFocus={onActivate}
       tabIndex={-1}
     >
-      <div className="candidate-image-wrap" style={{ aspectRatio: String(imageAspectRatio) }}>
+      <div
+        className={`candidate-image-wrap ${hover?.state ? `hover-${hover.state}` : ''}`}
+        style={{ aspectRatio: String(imageAspectRatio) }}
+        {...hoverHandlers(hover, liveSlotRef)}
+      >
         <img alt={`candidate screenshot at ${candidate.timestamp_tc}`} src={absoluteApiUrl(candidate.image_url)} />
+        <div aria-hidden="true" className="candidate-live-slot" ref={liveSlotRef} />
+        <span aria-hidden="true" className="candidate-hover-progress" />
+        {hover?.state === 'armed' ? <PlayFromHereButton iconOnly={compact} onClick={hover.onPlayFromHere} /> : null}
         <div className="candidate-overlay">
           <span className="candidate-timecode">{candidate.timestamp_tc}</span>
           {isSelectable ? (
@@ -397,6 +450,7 @@ export interface CandidateRowProps {
   similarLink?: SimilarLink | undefined;
   thumbHeight: number;
   thumbWidth: number;
+  hover?: StepHoverProps;
 }
 
 /** One step as a table row: for runs with many steps, and for writing titles and notes in one pass. */
@@ -413,7 +467,9 @@ export function CandidateRow({
   similarLink,
   thumbHeight,
   thumbWidth,
+  hover,
 }: CandidateRowProps) {
+  const noSlot = useRef<HTMLElement | null>(null);
   const { title, setTitle, notes, setNotes, commit } = useAnnotationDrafts(candidate, onUpdate);
   const onScreenMs = candidate.score_breakdown?.dwell_after_ms;
   const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
@@ -438,12 +494,19 @@ export function CandidateRow({
           />
         ) : null}
       </div>
-      <div className="candidate-row-thumb" role="cell" style={{ width: thumbWidth, height: thumbHeight }}>
+      <div
+        className={`candidate-row-thumb ${hover?.state ? `hover-${hover.state}` : ''}`}
+        role="cell"
+        style={{ width: thumbWidth, height: thumbHeight }}
+        {...hoverHandlers(hover, noSlot)}
+      >
         <img
           alt={`candidate screenshot at ${candidate.timestamp_tc}`}
           loading="lazy"
           src={absoluteApiUrl(candidate.image_url)}
         />
+        <span aria-hidden="true" className="candidate-hover-progress" />
+        {hover?.state === 'armed' ? <PlayFromHereButton iconOnly onClick={hover.onPlayFromHere} /> : null}
       </div>
       <div className="candidate-row-step" role="cell">
         <strong>

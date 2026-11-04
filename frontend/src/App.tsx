@@ -1475,6 +1475,7 @@ function App() {
         onJumpToSelection={handleJumpToAnalysisSelection}
         onNavigateStage={setProjectStage}
         onPreviewRecording={handlePreviewRecording}
+        onOpenPreview={setPreviewRecordingId}
         onRenameProject={handleRenameProject}
         onRenameRecording={handleRenameRecording}
         onResetToProjectDefaults={handleResetToProjectDefaults}
