@@ -165,6 +165,34 @@ This keeps existing `nav` / `scroll` / `feed` prefix filtering working.
 
 Results are saved to `tests/eval/results/eval_YYYYMMDD_HHMMSS.json`.
 
+## Stress matrix (`stress.py`)
+
+The baseline scenarios are clean MJPEG at constant frame rate, which real uploads never are. `stress.py`
+re-encodes every baseline scenario the way uploads arrive and adds interface noise, then runs each
+variant through the app's own pipeline (ingest working copy, ffprobe metadata, hybrid detection):
+
+| variant | simulates |
+|---|---|
+| `raw` | the generated file itself (what the baseline suite tests) |
+| `h264_cfr` | a compressed upload (H.264, CRF 23) |
+| `h264_vfr` | a phone screen recording: a frame is written only when the screen changes (at least one per second) |
+| `+cursor` / `+spinner` / `+pointer` / `+clock` | blinking caret, looping activity indicator, moving mouse pointer, ticking status-bar clock |
+
+Besides P/R/F1 it reports **screenshot fidelity**: whether each matched candidate's PNG shows the settled
+post-event state rather than the pre-event one. The timing-window evaluator alone passes mid-animation
+screenshots and fails correct ones that land just outside the window.
+
+```bash
+python -m tests.eval.stress                      # full matrix, balanced preset (about 5 minutes)
+python -m tests.eval.stress --preset subtle_ui
+python -m tests.eval.stress --no-ingest          # detect on the upload itself, as before working copies
+python -m tests.eval.stress --only nav_basic --variants h264_vfr,h264_vfr+spinner
+```
+
+`test_eval_stress.py` is the regression gate that runs in `pytest`: on a set of scenarios the engine
+handles well, a phone-style (VFR) upload must find at least as much as a constant-frame-rate upload of
+the same content, and every matched screenshot must show the settled screen.
+
 ## Adding a new scenario
 
 1. Write a function in `scenarios.py` following the pattern:

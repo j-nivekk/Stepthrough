@@ -1,0 +1,47 @@
+"""Regression gate for real-world uploads (see ``stress.py`` for the full matrix).
+
+Phone and desktop screen recordings are variable frame rate. Through the ingest working copy, such an
+upload must give the same detections as a constant-frame-rate upload of the same content, and every
+matched screenshot must show the settled screen rather than the one before it.
+"""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+
+import pytest
+
+from .scenarios import BASELINE_SCENARIOS
+from .stress import read_frames, run_variant
+
+GATED_SCENARIOS = (
+    "nav_basic",
+    "nav_with_fade",
+    "overlay_modal",
+    "overlay_bottom_sheet",
+    "feed_card_swap",
+    "content_loading_to_data",
+    "composite_back_and_forth",
+)
+
+pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is required")
+
+
+@pytest.mark.parametrize("scenario_name", GATED_SCENARIOS)
+def test_vfr_upload_matches_cfr_upload(scenario_name: str, tmp_path: Path) -> None:
+    factory = dict(BASELINE_SCENARIOS)[scenario_name]
+    scenario = factory(tmp_path, 30)
+    frames, fps = read_frames(scenario.video_path)
+    reference = (frames, fps, scenario.video_path)
+
+    cfr = run_variant(scenario_name, tmp_path, reference, scenario.ground_truth, "h264_cfr", None)
+    vfr = run_variant(scenario_name, tmp_path, reference, scenario.ground_truth, "h264_vfr", None)
+
+    assert vfr.metrics.recall >= cfr.metrics.recall, (
+        f"VFR recall {vfr.metrics.recall:.2f} < CFR recall {cfr.metrics.recall:.2f}"
+    )
+    assert vfr.screenshots_correct == vfr.screenshots_matched, (
+        f"{vfr.screenshots_matched - vfr.screenshots_correct} of {vfr.screenshots_matched} screenshots "
+        "show the wrong state"
+    )

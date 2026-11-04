@@ -13,3 +13,4 @@ website/dist/
 TODO.md
 .vscode/
 .pytest_cache/
+backend/experiments/out/

@@ -161,7 +161,10 @@ export function getAnalysisMetadata(): Promise<AnalysisMetadata> {
 }
 
 export function resetDatabase(): Promise<void> {
-  return request<void>('/admin/reset-db', { method: 'POST' });
+  return request<void>('/admin/reset-db', {
+    method: 'POST',
+    headers: { 'X-Stepthrough-Confirm': 'reset-database' },
+  });
 }
 
 export function recheckOcr(): Promise<void> {

@@ -200,6 +200,35 @@ def update_recording_filename(recording_id: str, filename: str) -> dict[str, Any
     return get_recording(recording_id)
 
 
+def update_recording_media(
+    recording_id: str,
+    *,
+    working_path: str,
+    duration_ms: int,
+    width: int,
+    height: int,
+    fps: float,
+) -> dict[str, Any] | None:
+    payload = {
+        "id": recording_id,
+        "working_path": working_path,
+        "duration_ms": duration_ms,
+        "width": width,
+        "height": height,
+        "fps": fps,
+    }
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE recordings
+            SET working_path = :working_path, duration_ms = :duration_ms, width = :width, height = :height, fps = :fps
+            WHERE id = :id
+            """,
+            payload,
+        )
+    return get_recording(recording_id)
+
+
 def delete_recording_record(recording_id: str) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
@@ -439,6 +468,27 @@ def create_run_event(run_id: str, phase: str, level: str, message: str, progress
             payload,
         )
     return payload
+
+
+def fail_interrupted_runs(message: str) -> list[str]:
+    """Runs left queued or running by a previous process can never finish: mark them failed."""
+    now = utc_now()
+    with connect() as conn:
+        run_ids = [
+            row["id"]
+            for row in conn.execute("SELECT id FROM detection_runs WHERE status IN ('queued', 'running')").fetchall()
+        ]
+        conn.executemany(
+            """
+            UPDATE detection_runs
+            SET status = 'failed', phase = 'failed', message = ?, completed_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            [(message, now, now, run_id) for run_id in run_ids],
+        )
+    for run_id in run_ids:
+        create_run_event(run_id, phase="failed", level="error", message=message, progress=None)
+    return run_ids
 
 
 def list_run_events(run_id: str) -> list[dict[str, Any]]:
