@@ -1404,6 +1404,21 @@ export function AnalysisScreen({
 
         {previewVideoUrl && (
           <div className="analysis-preview-wrap" data-bg={previewBg}>
+            <div className="analysis-preview-close-rail">
+              <button
+                aria-label="close preview"
+                className="preview-control-btn analysis-preview-close"
+                onClick={() => {
+                  if (previewRecording) onPreviewRecording(previewRecording.id);
+                }}
+                title="close preview"
+                type="button"
+              >
+                <svg aria-hidden="true" fill="none" height="14" stroke="currentColor" strokeLinecap="round" strokeWidth="1.6" viewBox="0 0 14 14" width="14">
+                  <path d="M3.5 3.5l7 7M10.5 3.5l-7 7" />
+                </svg>
+              </button>
+            </div>
             <section className="analysis-panel analysis-preview-panel" data-size={previewSizeKey} id="analysis-video-preview">
                   <span className="analysis-preview-filename">{previewRecording?.filename}</span>
                   <video

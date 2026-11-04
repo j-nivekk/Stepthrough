@@ -2207,6 +2207,7 @@ a {
 }
 
 .analysis-preview-wrap {
+  position: relative;
   display: flex;
   justify-content: center;
   background: #1e1e1e;
@@ -2217,6 +2218,23 @@ a {
 
 .analysis-preview-wrap[data-bg='light'] {
   background: #f0ede8;
+}
+
+/* The close button runs down the band's right margin and stays in view while any part of the preview does. */
+.analysis-preview-close-rail {
+  position: absolute;
+  top: 12px;
+  right: 8px;
+  bottom: 12px;
+  width: 30px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.analysis-preview-close {
+  position: sticky;
+  top: 12px;
+  pointer-events: auto;
 }
 
 .analysis-panel {
