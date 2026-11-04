@@ -3,20 +3,21 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import json
+import logging
 import math
 import shutil
 from pathlib import Path
 from threading import Thread
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .analysis_metadata import serialize_analysis_metadata
-from .config import DATA_ROOT, build_tool_diagnostics, ensure_app_dirs
+from .config import DATA_ROOT, build_server_config, build_tool_diagnostics, ensure_app_dirs
 from .database import init_db, reset_db
 from .models import (
     AnalysisMetadataResponse,
@@ -47,6 +48,7 @@ from .repository import (
     delete_project_record,
     delete_recording_record,
     delete_run_record,
+    fail_interrupted_runs,
     get_candidate,
     get_export_bundle,
     get_export_bundle_for_run,
@@ -64,6 +66,7 @@ from .repository import (
     update_candidate,
     update_project_name,
     update_recording_filename,
+    update_recording_media,
     update_run,
 )
 from .services.detection import (
@@ -72,9 +75,11 @@ from .services.detection import (
 )
 from .services.export import build_accepted_steps, create_export_bundle
 from .services.hybrid_detection import detect_candidates_hybrid, probe_paddleocr_availability, resolve_hybrid_config
+from .services.ingest import ensure_working_copy, working_copy_path
 from .services.jobs import JobManager
 from .services.similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string
 from .services.video import (
+    UploadTooLargeError,
     VideoToolError,
     display_timecode,
     extract_frame,
@@ -95,6 +100,10 @@ from .storage import (
 from .utils import sanitize_filename, utc_now
 
 TERMINAL_WEBSOCKET_STATES = {"completed", "failed", "cancelled"}
+INTERRUPTED_RUN_MESSAGE = "Interrupted: the backend restarted while this run was active. Start a new run."
+ADMIN_CONFIRM_HEADER = "X-Stepthrough-Confirm"
+logger = logging.getLogger("stepthrough")
+server_config = build_server_config()
 
 
 @dataclass(frozen=True)
@@ -107,11 +116,22 @@ class OcrHealthState:
 app = FastAPI(title="Stepthrough API", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=list(server_config.cors_origins),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def reject_oversized_uploads(request: Request, call_next):
+    # Refuse before the multipart body is spooled to disk; save_upload_file re-checks chunked uploads.
+    content_length = request.headers.get("content-length")
+    if request.url.path == "/recordings/import" and content_length and content_length.isdigit():
+        if int(content_length) > server_config.max_upload_bytes:
+            limit_mb = server_config.max_upload_bytes // (1024 * 1024)
+            return JSONResponse(status_code=413, content={"detail": f"Recording is larger than the {limit_mb} MB upload limit."})
+    return await call_next(request)
 
 
 def _checking_ocr_state() -> OcrHealthState:
@@ -170,10 +190,12 @@ def startup() -> None:
     app.state.tool_diagnostics = build_tool_diagnostics()
     _set_ocr_state(_checking_ocr_state())
     app.state.job_manager = JobManager()
+    fail_interrupted_runs(INTERRUPTED_RUN_MESSAGE)
     _start_background_ocr_probe()
 
 
-app.mount("/assets", StaticFiles(directory=str(DATA_ROOT), check_dir=False), name="assets")
+# Only project media is public; the database, OCR models and caches under DATA_ROOT are not.
+app.mount("/assets/projects", StaticFiles(directory=str(DATA_ROOT / "projects"), check_dir=False), name="assets")
 
 
 def _job_manager() -> JobManager:
@@ -257,7 +279,7 @@ def _serialize_recording(row: dict) -> RecordingImportResponse:
         project_id=row["project_id"],
         filename=row["filename"],
         slug=row["slug"],
-        source_url=asset_url(row["source_path"]),
+        source_url=asset_url(row.get("working_path") or row["source_path"]),
         duration_ms=row["duration_ms"],
         duration_tc=display_timecode(row["duration_ms"]),
         width=row["width"],
@@ -464,6 +486,60 @@ def _run_artifact_paths(project: dict, recording: dict, run_id: str) -> tuple[Pa
     return current_run_dir, current_run_dir / "frames"
 
 
+def _recording_video_path(recording: dict[str, Any]) -> Path:
+    """The file every analysis, preview and screenshot uses: the working copy once it exists."""
+    if recording.get("working_path"):
+        working = absolute_data_path(recording["working_path"])
+        if working.exists():
+            return working
+    return absolute_data_path(recording["source_path"])
+
+
+def _ensure_recording_working_copy(
+    project: dict[str, Any],
+    recording: dict[str, Any],
+    *,
+    progress_callback: Callable[[float], None] | None = None,
+    cancellation_callback: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    if recording.get("working_path") and absolute_data_path(recording["working_path"]).exists():
+        return recording
+    destination = working_copy_path(recording_dir(project["slug"], project["id"], recording["slug"], recording["id"]))
+    ensure_working_copy(
+        absolute_data_path(recording["source_path"]),
+        destination,
+        key=recording["id"],
+        progress_callback=progress_callback,
+        cancellation_callback=cancellation_callback,
+    )
+    metadata = probe_video(destination)
+    return update_recording_media(
+        recording["id"],
+        working_path=relative_data_path(destination),
+        duration_ms=metadata.duration_ms,
+        width=metadata.width,
+        height=metadata.height,
+        fps=metadata.fps,
+    ) or recording
+
+
+def _prepare_recording_in_background(recording_id: str) -> None:
+    try:
+        project, recording = _recording_context(recording_id)
+        _ensure_recording_working_copy(project, recording)
+    except Exception:  # pragma: no cover - the first run retries and reports the error
+        logger.exception("Background preparation failed for recording %s", recording_id)
+
+
+def _start_background_ingest(recording_id: str) -> None:
+    Thread(
+        target=_prepare_recording_in_background,
+        args=(recording_id,),
+        name=f"stepthrough-ingest-{recording_id[:8]}",
+        daemon=True,
+    ).start()
+
+
 def _run_detection_job(run_id: str) -> None:
     manager = _job_manager()
     temp_root: Path | None = None
@@ -499,11 +575,35 @@ def _run_detection_job(run_id: str) -> None:
             completed_at=None,
         )
 
+        last_ingest_bucket = -1
+
+        def publish_ingest_progress(fraction: float) -> None:
+            nonlocal last_ingest_bucket
+            bucket = int(fraction * 10)
+            if bucket == last_ingest_bucket:
+                return
+            last_ingest_bucket = bucket
+            _set_run_state(
+                run_id,
+                status="running",
+                phase="probing",
+                progress=0.04 + (0.05 * fraction),
+                message=f"Preparing a constant-frame-rate working copy ({round(fraction * 100)}%)",
+                level="info",
+            )
+
+        recording = _ensure_recording_working_copy(
+            project,
+            recording,
+            progress_callback=publish_ingest_progress,
+            cancellation_callback=lambda: manager.is_cancelled(run_id),
+        )
+
         if settings.analysis_engine == "hybrid_v2":
             resolved_config = resolve_hybrid_config(settings, recording["fps"])
             update_run(run_id, analysis_config=json.dumps(resolved_config.__dict__))
 
-        video_path = absolute_data_path(recording["source_path"])
+        video_path = _recording_video_path(recording)
 
         def publish_progress(phase: str, message: str, progress: float, level: str) -> None:
             _set_run_state(run_id, status="running", phase=phase, progress=progress, message=message, level=level)
@@ -593,7 +693,12 @@ def analysis_metadata() -> AnalysisMetadataResponse:
 
 
 @app.post("/admin/reset-db", status_code=204)
-def admin_reset_db() -> Response:
+def admin_reset_db(confirm: str | None = Header(default=None, alias=ADMIN_CONFIRM_HEADER)) -> Response:
+    if not server_config.allow_admin_reset:
+        raise HTTPException(status_code=403, detail="Database reset is disabled on this server.")
+    # A custom header forces a CORS preflight, so other websites cannot trigger this from a browser.
+    if confirm != "reset-database":
+        raise HTTPException(status_code=400, detail=f"Send the `{ADMIN_CONFIRM_HEADER}: reset-database` header to confirm.")
     reset_db()
     app.state.job_manager = JobManager()
     return Response(status_code=204)
@@ -672,8 +777,11 @@ async def recordings_import(
         sanitized_name,
     )
     try:
-        await save_upload_file(file, destination)
+        await save_upload_file(file, destination, max_bytes=server_config.max_upload_bytes)
         metadata = probe_video(destination)
+    except UploadTooLargeError as exc:
+        shutil.rmtree(destination.parent.parent, ignore_errors=True)
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except VideoToolError as exc:
         if destination.exists():
             destination.unlink(missing_ok=True)
@@ -690,6 +798,7 @@ async def recordings_import(
         height=metadata.height,
         fps=metadata.fps,
     )
+    _start_background_ingest(recording["id"])
     return _serialize_recording(recording)
 
 
@@ -836,7 +945,7 @@ def runs_add_manual_candidate(run_id: str, payload: ManualCandidateCreate) -> Ca
     image_path = frames_path / f"manual-{candidate_id[:8]}__{slug_timecode(timestamp_ms)}.png"
 
     try:
-        extract_frame(absolute_data_path(recording["source_path"]), image_path, timestamp_ms)
+        extract_frame(_recording_video_path(recording), image_path, timestamp_ms)
         fingerprint = fingerprint_image(image_path)
     except (VideoToolError, FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=500, detail=f"Could not add a manual step at {timestamp_tc}. Try seeking to a nearby frame.") from exc

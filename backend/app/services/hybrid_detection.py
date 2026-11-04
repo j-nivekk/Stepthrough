@@ -33,6 +33,7 @@ from .similarity import (
 from .video import extract_frame
 
 
+SETTLE_MOTION_TOLERANCE = 0.02
 SCAN_RANGE = (0.1, 0.46)
 EXTRACT_RANGE = (0.48, 0.92)
 
@@ -193,16 +194,30 @@ class _OcrCache:
 
 @dataclass
 class _SequentialReader:
+    """Reads a constant-frame-rate file (the ingest working copy) by frame index.
+
+    Reading forward with grab() is cheaper than a seek, which decodes from the previous keyframe, so
+    seeks are reserved for jumps longer than about two seconds or backwards.
+    """
+
     capture: cv2.VideoCapture
     source_fps: float
     total_frames: int | None = None
-    seek_gap_frames: int = 5
+    seek_gap_frames: int | None = None
     last_frame_index: int | None = None
 
     def __post_init__(self) -> None:
         if self.total_frames is None:
             raw_total_frames = int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT))
             self.total_frames = raw_total_frames if raw_total_frames > 0 else None
+        if self.seek_gap_frames is None:
+            self.seek_gap_frames = max(5, round(self.source_fps * 2))
+
+    def frame_timestamp_ms(self) -> int | None:
+        """Exact time of the last frame read, floored so that seeking to it returns this very frame."""
+        if self.last_frame_index is None or self.source_fps <= 0:
+            return None
+        return int((self.last_frame_index * 1000) // self.source_fps)
 
     def _frame_index_for_timestamp(self, timestamp_ms: int) -> int:
         target_index = max(0, int(round((timestamp_ms / 1000.0) * self.source_fps)))
@@ -1227,9 +1242,13 @@ def _finalize_event(event: EventWindow, config: HybridDetectorConfig) -> dict[st
     if event.micro_change_mode:
         representative = strongest
     else:
+        # Earliest of the quietest settle samples: compression noise (motion around 0.005) must not push
+        # the screenshot later than the moment the screen settled.
+        settle_samples = event.settle_samples or [event.active_samples[-1]]
+        quietest = min(sample.motion for sample in settle_samples)
         representative = min(
-            event.settle_samples or [event.active_samples[-1]],
-            key=lambda sample: (sample.motion, sample.combined, sample.timestamp_ms),
+            (sample for sample in settle_samples if sample.motion <= quietest + SETTLE_MOTION_TOLERANCE),
+            key=lambda sample: sample.timestamp_ms,
         )
     transition_type = _classify_transition(
         strongest,
@@ -1313,6 +1332,9 @@ def detect_candidates_hybrid(
                 frame = frame_reader.next(timestamp_ms)
             if frame is None:
                 continue
+            if frame_reader is not None:
+                # Report the analysed frame's own time; the screenshot is extracted at exactly this time.
+                timestamp_ms = frame_reader.frame_timestamp_ms() or timestamp_ms
             current_sample = _prepare_frame(frame, timestamp_ms, config.max_frame_edge)
             if previous_sample is None:
                 previous_sample = current_sample

@@ -41,6 +41,51 @@ class OcrRuntimeConfig:
         return self.cache_dir / "text_recognition"
 
 
+DeploymentMode = Literal["local", "server"]
+LOCAL_DEV_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+)
+DEFAULT_MAX_UPLOAD_MB = 2048
+
+
+@dataclass(frozen=True)
+class ServerConfig:
+    deployment: DeploymentMode
+    cors_origins: tuple[str, ...]
+    max_upload_bytes: int
+    allow_admin_reset: bool
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def build_server_config() -> ServerConfig:
+    """`local` keeps the single-user desktop behaviour; `server` is the shared, multi-user default."""
+    deployment = os.environ.get("STEPTHROUGH_DEPLOYMENT", "local").strip().lower() or "local"
+    if deployment not in ("local", "server"):
+        raise ValueError(f"Invalid STEPTHROUGH_DEPLOYMENT `{deployment}`. Use `local` or `server`.")
+    origins_env = os.environ.get("STEPTHROUGH_CORS_ORIGINS")
+    if origins_env is not None:
+        cors_origins = tuple(origin.strip().rstrip("/") for origin in origins_env.split(",") if origin.strip())
+    else:
+        # A server serves the frontend from its own origin, so it needs no cross-origin access by default.
+        cors_origins = LOCAL_DEV_ORIGINS if deployment == "local" else ()
+    max_upload_mb = float(os.environ.get("STEPTHROUGH_MAX_UPLOAD_MB") or DEFAULT_MAX_UPLOAD_MB)
+    return ServerConfig(
+        deployment=deployment,  # type: ignore[arg-type]
+        cors_origins=cors_origins,
+        max_upload_bytes=int(max_upload_mb * 1024 * 1024),
+        allow_admin_reset=_env_flag("STEPTHROUGH_ALLOW_ADMIN_RESET", deployment == "local"),
+    )
+
+
 def ensure_app_dirs() -> None:
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     (DATA_ROOT / "projects").mkdir(parents=True, exist_ok=True)

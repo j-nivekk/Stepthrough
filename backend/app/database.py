@@ -180,4 +180,5 @@ def init_db() -> None:
         _ensure_column(conn, "candidate_frames", "perceptual_hash", "TEXT")
         _ensure_column(conn, "candidate_frames", "ocr_text", "TEXT")
         _ensure_column(conn, "candidate_frames", "score_breakdown", "TEXT")
+        _ensure_column(conn, "recordings", "working_path", "TEXT")
         _backfill_detection_run_phase(conn)

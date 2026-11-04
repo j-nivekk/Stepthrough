@@ -14,6 +14,10 @@ class VideoToolError(RuntimeError):
     pass
 
 
+class UploadTooLargeError(RuntimeError):
+    pass
+
+
 FRAME_EXTRACTION_FALLBACK_OFFSETS_MS = (0, 33, 80, 160, 320, 640, 1000, 2000, 4000)
 
 
@@ -72,12 +76,20 @@ def probe_video(path: Path) -> VideoMetadata:
     )
 
 
-async def save_upload_file(upload: UploadFile, destination: Path) -> None:
+async def save_upload_file(upload: UploadFile, destination: Path, max_bytes: int | None = None) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("wb") as output:
-        while chunk := await upload.read(1024 * 1024):
-            output.write(chunk)
-    await upload.close()
+    written = 0
+    try:
+        with destination.open("wb") as output:
+            while chunk := await upload.read(1024 * 1024):
+                written += len(chunk)
+                if max_bytes is not None and written > max_bytes:
+                    raise UploadTooLargeError(
+                        f"Recording is larger than the {max_bytes // (1024 * 1024)} MB upload limit."
+                    )
+                output.write(chunk)
+    finally:
+        await upload.close()
 
 
 def _frame_extract_timestamps(timestamp_ms: int) -> list[int]:
