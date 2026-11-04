@@ -2951,6 +2951,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  overflow-clip-margin: 8px;
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -3069,13 +3070,18 @@ a {
 
 .analysis-screen .summary-block,
 .analysis-screen .accepted-step-chip,
-.analysis-screen .candidate-card,
 .analysis-screen .disclosure-card,
 .analysis-screen .log-row,
 .analysis-screen .banner {
   background: var(--analysis-surface-overlay);
   border-radius: 0;
   box-shadow: none;
+}
+
+/* Cards keep their box-shadow for the playback ring and the selected state. */
+.analysis-screen .candidate-card {
+  background: var(--analysis-surface-overlay);
+  border-radius: 0;
 }
 
 .analysis-screen .candidate-image-wrap,
@@ -4151,7 +4157,7 @@ button:disabled {
 }
 
 .candidate-row.selected {
-  box-shadow: inset 0 0 0 2px rgba(72, 175, 124, 0.42);
+  box-shadow: inset 0 0 0 2px rgba(72, 175, 124, 0.42), var(--playback-ring);
 }
 
 .candidate-row.accepted {
@@ -4290,7 +4296,112 @@ button:disabled {
 }
 
 .candidate-card.selected {
-  box-shadow: inset 0 0 0 2px rgba(72, 175, 124, 0.42);
+  box-shadow: inset 0 0 0 2px rgba(72, 175, 124, 0.42), var(--playback-ring);
+}
+
+/* While the preview plays, the step on screen gets a ring; --playback (0 to 1) is set by
+   usePlaybackHighlight and fades it in and out around the step's time on screen. */
+.candidate-card,
+.candidate-row {
+  --playback-ring: 0 0 0 calc(4px * var(--playback, 0)) rgba(47, 100, 130, calc(0.85 * var(--playback, 0)));
+  box-shadow: var(--playback-ring);
+  transition: box-shadow 120ms linear;
+}
+
+/* Hover intent on a screenshot: a line fills while waiting, then the clip plays in the card and
+   "play from here" appears. */
+.candidate-live-slot {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.candidate-live-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--analysis-surface);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.candidate-live-video.visible {
+  opacity: 1;
+}
+
+.candidate-hover-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 0;
+  height: 3px;
+  background: rgba(47, 100, 130, 0.85);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.hover-waiting > .candidate-hover-progress {
+  width: 100%;
+  transition: width 400ms linear;
+}
+
+.candidate-play-from-here {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: rgba(20, 20, 20, 0.72);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  animation: candidate-play-in 140ms ease-out;
+}
+
+.candidate-play-from-here.icon-only {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.candidate-play-from-here:hover,
+.candidate-play-from-here:focus-visible {
+  background: rgba(20, 20, 20, 0.88);
+}
+
+@keyframes candidate-play-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.92);
+  }
+}
+
+.candidate-row-thumb {
+  position: relative;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hover-waiting > .candidate-hover-progress,
+  .candidate-live-video,
+  .candidate-card,
+  .candidate-row {
+    transition: none;
+  }
+
+  .candidate-play-from-here {
+    animation: none;
+  }
 }
 
 .candidate-card.accepted {

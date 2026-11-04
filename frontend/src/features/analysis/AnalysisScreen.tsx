@@ -68,6 +68,10 @@ import {
   type StepLayout,
 } from '../../lib/stepLayout';
 import { rangeFillStyle } from '../../lib/rangeFill';
+import { playbackWindows, stepClip } from '../../lib/stepClips';
+import type { StepHoverProps } from '../../components/CandidateCard';
+import { useHoverClips } from './useHoverClips';
+import { usePlaybackHighlight } from './usePlaybackHighlight';
 
 function engineShortLabel(engine: AnalysisEngine): string {
   return engine === 'scene_v1' ? 'v1' : engine === 'hybrid_v2' ? 'v2' : 'v3';
@@ -109,6 +113,8 @@ export interface AnalysisScreenProps {
   onJumpToSelection: () => void;
   onNavigateStage: (stage: WorkflowStage) => void;
   onPreviewRecording: (recordingId: string) => void;
+  /** Open the preview on a recording without toggling it closed when it is already open. */
+  onOpenPreview: (recordingId: string) => void;
   onRenameProject: (projectId: string, name: string) => Promise<void>;
   onRenameRecording: (recordingId: string, filename: string) => Promise<void>;
   onResetToProjectDefaults: () => void;
@@ -228,6 +234,7 @@ export function AnalysisScreen({
   onJumpToSelection,
   onNavigateStage,
   onPreviewRecording,
+  onOpenPreview,
   onRenameProject,
   onRenameRecording,
   onResetToProjectDefaults,
@@ -267,6 +274,7 @@ export function AnalysisScreen({
   const [openPopover, setOpenPopover] = useState<AnalysisPopoverKey | null>(null);
   const [activeCandidateFilter, setActiveCandidateFilter] = useState<CandidateFilter>('all');
   const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
+  const [pendingPlayFromMs, setPendingPlayFromMs] = useState<number | null>(null);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [bulkCandidatePending, setBulkCandidatePending] = useState(false);
   const [queuedManualMarkItems, setQueuedManualMarkItems] = useState<PendingManualMark[]>([]);
@@ -459,6 +467,13 @@ export function AnalysisScreen({
     saveStepLayout(stepLayout);
   }, [stepLayout]);
   const scrubDurationMs = previewRecording?.duration_ms ?? selectedRecordingSummary?.duration_ms ?? 0;
+  // Hover clips and "play from here" use the selected run's recording; the ring follows the preview.
+  const runRecording = recordings.find((recording) => recording.id === selectedRun?.summary.recording_id) ?? null;
+  const hoverClips = useHoverClips(runRecording ? absoluteApiUrl(runRecording.source_url) : null);
+  const stepPlaybackWindows = useMemo(
+    () => playbackWindows(selectedRun?.candidates ?? [], runRecording?.duration_ms ?? 0),
+    [runRecording?.duration_ms, selectedRun?.candidates],
+  );
   const timelineCandidates = useMemo(() => {
     if (!selectedRun) {
       return [];
@@ -802,12 +817,15 @@ export function AnalysisScreen({
       } else if (lowerKey === 'u') {
         event.preventDefault();
         handleCandidateStatusChange(activeCandidate, 'pending');
+      } else if (lowerKey === 'p') {
+        event.preventDefault();
+        handlePlayFromHere(activeCandidate);
       }
     }
 
     window.addEventListener('keydown', handleReviewKeydown);
     return () => window.removeEventListener('keydown', handleReviewKeydown);
-  }, [activeCandidate, canReviewCandidates, filteredCandidates]);
+  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedRun?.summary.id]);
 
   useEffect(() => {
     if (!previewVideoUrl) {
@@ -886,6 +904,50 @@ export function AnalysisScreen({
     observer.observe(video);
     return () => observer.disconnect();
   }, [previewVideoUrl]);
+
+  usePlaybackHighlight(previewVideoRef, stepPlaybackWindows, previewMatchesSelectedRun && canReviewCandidates, previewVideoUrl);
+
+  // "Play from here": once the preview shows this run's recording, seek, scroll it into view and start
+  // playing when it is visible (the preview pauses itself while it is scrolled out of view).
+  useEffect(() => {
+    if (pendingPlayFromMs === null || !previewMatchesSelectedRun) return;
+    const video = previewVideoRef.current;
+    if (!video) return;
+    const startMs = pendingPlayFromMs;
+    let observer: IntersectionObserver | null = null;
+    let fallback: number | null = null;
+    let done = false;
+
+    function go() {
+      if (done || !video) return;
+      done = true;
+      observer?.disconnect();
+      if (fallback !== null) window.clearTimeout(fallback);
+      void video.play().catch(() => undefined);
+      setPendingPlayFromMs(null);
+    }
+
+    function seekAndReveal() {
+      if (!video) return;
+      video.currentTime = startMs / 1000;
+      setPreviewPlaybackMs(startMs);
+      jumpToAnchor('analysis-video-preview');
+      observer = new IntersectionObserver(([entry]) => {
+        if (entry.intersectionRatio >= 0.5) go();
+      }, { threshold: [0.5] });
+      observer.observe(video);
+      fallback = window.setTimeout(go, 1500);
+    }
+
+    if (video.readyState >= 1) seekAndReveal();
+    else video.addEventListener('loadedmetadata', seekAndReveal, { once: true });
+    return () => {
+      done = true;
+      observer?.disconnect();
+      if (fallback !== null) window.clearTimeout(fallback);
+      video.removeEventListener('loadedmetadata', seekAndReveal);
+    };
+  }, [pendingPlayFromMs, previewMatchesSelectedRun, previewVideoUrl]);
 
   function updateHintCardPosition(element: HTMLElement) {
     const container = parameterColumnRef.current;
@@ -1156,6 +1218,23 @@ export function AnalysisScreen({
     }
     setActiveCandidateId(nextCandidateId);
     window.setTimeout(() => jumpToAnchor(`candidate-${nextCandidateId}`), 0);
+  }
+
+  function handlePlayFromHere(candidate: CandidateFrame) {
+    if (!selectedRun) return;
+    hoverClips.stop();
+    setActiveCandidateId(candidate.id);
+    setPendingPlayFromMs(stepClip(candidate).startMs);
+    if (!previewMatchesSelectedRun) onOpenPreview(selectedRun.summary.recording_id);
+  }
+
+  function stepHover(candidate: CandidateFrame): StepHoverProps {
+    return {
+      state: hoverClips.hover?.id === candidate.id ? hoverClips.hover.state : null,
+      onEnter: (slot) => hoverClips.start(candidate, slot),
+      onLeave: () => hoverClips.leave(candidate.id),
+      onPlayFromHere: () => handlePlayFromHere(candidate),
+    };
   }
 
   function handleStepCandidate(direction: -1 | 1) {
@@ -1981,12 +2060,13 @@ export function AnalysisScreen({
                     </div>
                     {canReviewCandidates && (
                       <span
-                        aria-label="keyboard shortcuts: a to accept, r to reject, u to reset pending, arrow keys to step"
+                        aria-label="keyboard shortcuts: a to accept, r to reject, u to reset pending, p to play from the step, arrow keys to step"
                         className="candidate-review-key-hint"
                       >
                         <span className="candidate-key-badge">a</span> accept {' · '}
                         <span className="candidate-key-badge">r</span> reject {' · '}
                         <span className="candidate-key-badge">u</span> reset {' · '}
+                        <span className="candidate-key-badge">p</span> play {' · '}
                         <span className="candidate-key-badge">← →</span> step
                       </span>
                     )}
@@ -2183,6 +2263,7 @@ export function AnalysisScreen({
                           similarLink={similarityLink}
                           thumbHeight={stepThumb.height}
                           thumbWidth={stepThumb.width}
+                          hover={stepHover(candidate)}
                         />
                       );
                     })}
@@ -2199,6 +2280,7 @@ export function AnalysisScreen({
                         <CandidateCard
                           candidate={candidate}
                           compact={stepCardBox.width < 190}
+                          hover={stepHover(candidate)}
                           isActive={activeCandidateId === candidate.id}
                           isAnnotationExpanded={expandedAnnotationCandidateId === candidate.id}
                           isSelected={selectedPendingCandidateIds.includes(candidate.id)}
