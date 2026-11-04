@@ -156,7 +156,7 @@ export function AnalysisParametersPanel({
   const projectHybridAdvancedDefaults = projectDefaultSettings.advanced ?? defaultHybridAdvancedSettings;
 
   return (
-    <section className="analysis-column analysis-parameter-column" ref={parameterColumnRef}>
+    <section className={`analysis-column analysis-parameter-column ${showHints ? 'hints-on' : ''}`} ref={parameterColumnRef}>
       <div className="analysis-column-head">
         <p>parameters</p>
         <button
@@ -174,7 +174,7 @@ export function AnalysisParametersPanel({
           <div className="analysis-toolbar-shell" ref={loadMenuRef}>
             <button
               aria-expanded={openPopover === 'load'}
-              className="analysis-pill success"
+              className={`analysis-task-link subtle ${openPopover === 'load' ? 'active' : ''}`}
               {...bindHint('load')}
               onClick={() => togglePopover('load')}
               type="button"
@@ -215,7 +215,7 @@ export function AnalysisParametersPanel({
           <div className="analysis-toolbar-shell" ref={saveMenuRef}>
             <button
               aria-expanded={openPopover === 'save'}
-              className="analysis-pill analysis-pill-accent"
+              className={`analysis-task-link subtle ${openPopover === 'save' ? 'active' : ''}`}
               {...bindHint('save')}
               onClick={() => togglePopover('save')}
               type="button"

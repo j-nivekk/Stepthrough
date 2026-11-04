@@ -195,7 +195,7 @@ export function ImportScreen({
                     <span className="import-pill neutral muted">uploading...</span>
                   ) : row.status === 'error' ? (
                     <button
-                      className="import-pill retry"
+                      className="analysis-task-link subtle"
                       disabled={isUploadBlocked}
                       onClick={() => onUploadRow(row.localId)}
                       type="button"
@@ -204,7 +204,7 @@ export function ImportScreen({
                     </button>
                   ) : (
                     <button
-                      className="import-pill success"
+                      className="analysis-task-link subtle"
                       disabled={isUploadBlocked}
                       onClick={() => onUploadRow(row.localId)}
                       type="button"
@@ -213,7 +213,7 @@ export function ImportScreen({
                     </button>
                   )}
                   <button
-                    className="import-pill danger import-delete-button"
+                    className="analysis-task-link danger import-delete-button"
                     disabled={isDeleting || row.status === 'uploading'}
                     onClick={() => onDeleteRow(row.localId)}
                     type="button"

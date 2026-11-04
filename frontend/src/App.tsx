@@ -286,40 +286,70 @@ function App() {
     }
   }, [recordingDetailQuery.data, selectedRunId]);
 
+  const selectedRunRecordingId = runDetailQuery.data?.summary.recording_id ?? null;
+  const selectedRunIsActive = runDetailQuery.data
+    ? activeRunStatuses.includes(runDetailQuery.data.summary.status)
+    : false;
+
+  // One progress connection per running task. It must not depend on the run data itself: every progress
+  // event refreshes that data, and re-subscribing on each refresh closed the socket, blanked the message
+  // and replayed every earlier event, so the progress line flickered and the page jumped.
   useEffect(() => {
-    if (!selectedRunId || !runDetailQuery.data) {
+    if (!selectedRunId || !selectedRunRecordingId) {
       return;
     }
-    if (!activeRunStatuses.includes(runDetailQuery.data.summary.status)) {
+    if (!selectedRunIsActive) {
       setLiveMessage('');
       return;
     }
 
-    const recordingId = runDetailQuery.data.summary.recording_id;
-    const socketUrl = new URL(`/runs/${selectedRunId}/events`, import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000')
+    const runId = selectedRunId;
+    const recordingId = selectedRunRecordingId;
+    const socketUrl = new URL(`/runs/${runId}/events`, import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000')
       .toString()
       .replace(/^http/, 'ws');
     const socket = new WebSocket(socketUrl);
+
+    // A run sends several progress events a second; refresh the task list and run at most once a second.
+    let refreshTimer: number | null = null;
+    let lastRefreshAt = 0;
+    function scheduleRefresh() {
+      if (refreshTimer !== null) {
+        return;
+      }
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        lastRefreshAt = Date.now();
+        void refreshRunQueries(runId, recordingId);
+      }, Math.max(0, 1000 - (Date.now() - lastRefreshAt)));
+    }
 
     socket.onmessage = (event) => {
       const payload = JSON.parse(event.data) as { message?: string };
       if (payload.message) {
         setLiveMessage(payload.message);
       }
-      void refreshRunQueries(selectedRunId, recordingId);
+      scheduleRefresh();
     };
 
     socket.onclose = () => {
       setLiveMessage('');
-      void refreshRunQueries(selectedRunId, recordingId);
+      void refreshRunQueries(runId, recordingId);
     };
 
     socket.onerror = () => {
       setLiveMessage('Live progress connection dropped. Polling will continue.');
     };
 
-    return () => socket.close();
-  }, [runDetailQuery.data, selectedRunId]);
+    return () => {
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+      }
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.close();
+    };
+  }, [selectedRunId, selectedRunRecordingId, selectedRunIsActive]);
 
   const selectedProject = useMemo(
     () => projectsQuery.data?.find((project) => project.id === selectedProjectId) ?? null,

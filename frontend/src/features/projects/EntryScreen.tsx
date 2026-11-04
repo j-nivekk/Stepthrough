@@ -200,7 +200,7 @@ export function EntryScreen({
                     </div>
                     <div className="entry-project-actions">
                       <button
-                        className="analysis-pill success entry-project-action-pill"
+                        className="analysis-task-link subtle entry-project-action-pill"
                         onClick={() => onOpenProject(project.id, 'import')}
                         type="button"
                       >
@@ -208,7 +208,7 @@ export function EntryScreen({
                       </button>
                       {project.recording_count > 0 ? (
                         <button
-                          className="analysis-pill analysis-pill-accent entry-project-action-pill"
+                          className="analysis-task-link subtle entry-project-action-pill"
                           onClick={() => onOpenProject(project.id, 'analysis')}
                           type="button"
                         >
@@ -216,7 +216,7 @@ export function EntryScreen({
                         </button>
                       ) : null}
                       <button
-                        className="analysis-pill danger entry-project-action-pill"
+                        className="analysis-task-link danger entry-project-action-pill"
                         disabled={deletingProjectId === project.id}
                         onClick={() => onDeleteProject(project.id, project.name)}
                         type="button"

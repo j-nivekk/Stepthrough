@@ -57,6 +57,73 @@ textarea {
   font: inherit;
 }
 
+/* Placeholder text is italic everywhere, so it never reads as something already typed. */
+::placeholder {
+  font-style: italic;
+}
+
+/* Sliders: no border. The empty part of the track is flat grey, the part before the thumb the accent
+   colour (pages set --range-fill, 0 to 1, via rangeFillStyle); the thumb is a circle because it is pressed. */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type='range']:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+input[type='range']:focus-visible {
+  outline: 2px solid rgba(72, 175, 124, 0.32);
+  outline-offset: 2px;
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border: none;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0,
+    var(--accent) calc(7px + (100% - 14px) * var(--range-fill, 0)),
+    rgba(0, 0, 0, 0.14) calc(7px + (100% - 14px) * var(--range-fill, 0))
+  );
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+input[type='range']::-moz-range-track {
+  height: 4px;
+  border: none;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+input[type='range']::-moz-range-progress {
+  height: 4px;
+  background: var(--accent);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -226,7 +293,7 @@ a {
   font-size: 10px;
   background: rgba(0, 0, 0, 0.1);
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: 0;
 }
 
 .app-settings-tool-row {
@@ -317,7 +384,7 @@ a {
   background: rgba(177, 69, 60, 0.08);
   color: var(--danger);
   padding: 2px 7px;
-  border-radius: 4px;
+  border-radius: 0;
   font-size: 11px;
   line-height: 1.6;
   width: 80px;
@@ -488,7 +555,7 @@ a {
   height: 30px;
   padding: 0 12px;
   background: rgba(0, 0, 0, 0.055);
-  border-radius: 100px;
+  border-radius: 0;
   white-space: nowrap;
   user-select: none;
 }
@@ -619,13 +686,27 @@ a {
 
 .entry-notice-dismiss {
   flex-shrink: 0;
-  border: 1px solid rgba(0, 0, 0, 0.22);
+  border: none;
   background: transparent;
-  padding: 2px 9px;
-  border-radius: 4px;
+  padding: 0;
   color: rgba(0, 0, 0, 0.55);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
   cursor: pointer;
+}
+
+/* Progress of the running task: one line in the top bar, so updates never move the page. */
+.analysis-live-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  line-height: 1.2;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .nav-ocr-inline {
@@ -652,9 +733,7 @@ a {
 }
 
 .entry-notice-dismiss:hover {
-  border-color: rgba(0, 0, 0, 0.38);
-  color: rgba(0, 0, 0, 0.75);
-  background: rgba(0, 0, 0, 0.03);
+  color: rgba(0, 0, 0, 0.85);
 }
 
 .entry-notice-dismiss:focus-visible {
@@ -681,7 +760,7 @@ a {
   width: 282px;
   height: 36px;
   border: none;
-  border-radius: 2px;
+  border-radius: 0;
   padding: 0 20px;
   background: #d9d9d9;
   color: rgba(0, 0, 0, 0.72);
@@ -702,7 +781,7 @@ a {
   width: 82px;
   height: 36px;
   border: none;
-  border-radius: 20px;
+  border-radius: 4px;
   background: #48af7c;
   color: #fff;
   font-size: 20px;
@@ -1011,7 +1090,7 @@ a {
   position: relative;
   min-height: 107px;
   border: 2px dashed #7a7a7a;
-  border-radius: 20px;
+  border-radius: 4px;
   background: #d9d9d9;
   padding: 20px 28px;
   display: flex;
@@ -1101,7 +1180,7 @@ a {
 .import-pill {
   height: 20px;
   border: none;
-  border-radius: 20px;
+  border-radius: 0;
   padding: 0 10px;
   display: inline-flex;
   align-items: center;
@@ -1112,33 +1191,11 @@ a {
   white-space: nowrap;
 }
 
-.import-pill.success {
-  background: #48af7c;
-  color: #fff;
-  cursor: pointer;
-}
-
 .import-pill.neutral {
   background: #d9d9d9;
   color: #000;
 }
 
-.import-pill.retry {
-  background: #c75a00;
-  color: #fff;
-  cursor: pointer;
-}
-
-.import-pill.danger {
-  background: #bf2725;
-  color: #fff;
-  cursor: pointer;
-}
-
-.import-pill:disabled {
-  opacity: 0.68;
-  cursor: not-allowed;
-}
 
 .import-delete-button {
   position: absolute;
@@ -1158,7 +1215,6 @@ a {
 
 .import-row.error {
   background: rgba(191, 39, 37, 0.05);
-  border-radius: 6px;
   padding: 4px 6px;
   margin: -4px -6px;
 }
@@ -1278,7 +1334,7 @@ a {
 
 .analysis-pill {
   border: none;
-  border-radius: 20px;
+  border-radius: 4px;
   padding: 3px 9px;
   display: inline-flex;
   align-items: center;
@@ -1300,7 +1356,7 @@ a {
 }
 
 .analysis-tuning-summary:focus-visible {
-  border-radius: 0;
+  border-radius: 4px;
 }
 
 .analysis-pill.success {
@@ -1313,21 +1369,11 @@ a {
   color: #fff;
 }
 
-.analysis-pill-accent {
-  background: #cd6d1e;
-  color: #fff;
-}
-
-.analysis-pill-muted {
-  background: #5f5f5f;
-  color: #fff;
-}
 
 .analysis-run-button {
   width: 100%;
   justify-content: center;
   text-align: center;
-  border-radius: 0;
 }
 
 .analysis-videos,
@@ -1339,6 +1385,13 @@ a {
   overflow-y: auto;
   padding-right: 6px;
   scrollbar-gutter: stable;
+}
+
+/* Video rows run the full width of the divider above them; a scrollbar only takes room once the list
+   is long enough to scroll. */
+.analysis-videos {
+  padding-right: 0;
+  scrollbar-gutter: auto;
 }
 
 .analysis-task-toolbar {
@@ -1750,20 +1803,24 @@ a {
   background: #48af7c;
 }
 
+/* Settings wrap as whole items: stable-screen runs list up to seven, and a fixed five-column grid
+   squeezed them at narrow widths. */
 .analysis-task-settings {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
   color: #000;
 }
 
 .analysis-task-setting {
   display: grid;
   gap: 2px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .analysis-task-setting.mode {
-  justify-self: end;
+  margin-left: auto;
 }
 
 .analysis-task-setting-label,
@@ -2142,6 +2199,12 @@ a {
 
 .analysis-guidance-copy.warning {
   color: #cd6d1e;
+}
+
+/* The grey explanations under each setting appear with "show hints"; warnings always show. */
+.analysis-parameter-column:not(.hints-on) .analysis-parameter-annotation,
+.analysis-parameter-column:not(.hints-on) .analysis-guidance-copy:not(.warning) {
+  display: none;
 }
 
 .analysis-mode-button {
@@ -2741,7 +2804,7 @@ a {
   height: 30px;
   border: none;
   background: none;
-  border-radius: 6px;
+  border-radius: 50%;
   cursor: pointer;
   color: rgba(0, 0, 0, 0.6);
   padding: 0;
@@ -2821,7 +2884,7 @@ a {
   height: 32px;
   padding: 0 12px 0 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   background: #48af7c;
   color: #fff;
   font-size: 13px;
@@ -2847,7 +2910,7 @@ a {
   min-width: 18px;
   padding: 0 5px;
   background: rgba(255, 255, 255, 0.22);
-  border-radius: 3px;
+  border-radius: 0;
   font-size: 11px;
   font-family: inherit;
 }
@@ -2860,7 +2923,7 @@ a {
   height: 18px;
   padding: 0 5px;
   background: rgba(0, 0, 0, 0.16);
-  border-radius: 3px;
+  border-radius: 0;
   font-size: 11px;
 }
 
@@ -2906,6 +2969,13 @@ a {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+}
+
+/* The browser's default h2 margins (about 20px above and below) pushed the file name away from its
+   eyebrow and the run details; the column gap alone spaces them. */
+.analysis-detail-copy h2 {
+  margin: 0;
+  line-height: 1.25;
 }
 
 .analysis-detail-primary-actions {
@@ -3362,7 +3432,7 @@ button:disabled {
 .slug-pill,
 .status-pill,
 .count-badge {
-  border-radius: 999px;
+  border-radius: 0;
   padding: 6px 10px;
   font-size: 0.8rem;
   white-space: nowrap;
@@ -3914,6 +3984,293 @@ button:disabled {
   justify-content: start;
 }
 
+/* ── step layout: grid size slider, list view, label filter note ── */
+
+.candidate-view-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.candidate-view-note {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.candidate-view-controls {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-left: auto;
+}
+
+.candidate-view-switch {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.candidate-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.candidate-size-control input {
+  width: 140px;
+}
+
+/* Width comes from the size slider (area-based, so portrait and landscape recordings both read well). */
+.candidate-grid.sized {
+  grid-template-columns: repeat(auto-fill, minmax(0, var(--candidate-card-width)));
+}
+
+.candidate-grid.sized .candidate-card {
+  max-width: none;
+}
+
+.candidate-grid.sized .candidate-image-wrap,
+.candidate-grid.sized .candidate-image-wrap img {
+  max-height: none;
+}
+
+.candidate-card.compact .candidate-body {
+  padding: 10px;
+  gap: 6px;
+}
+
+.candidate-card.compact:not(.active):not(.annotating) .candidate-meta-row {
+  display: none;
+}
+
+.candidate-annotation-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.candidate-annotation-summary-title {
+  color: #000;
+  font-size: 13px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.candidate-annotation-summary-notes {
+  display: -webkit-box;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.candidate-card.compact .candidate-overlay {
+  top: 6px;
+  left: 6px;
+  right: 6px;
+}
+
+.candidate-card.compact .candidate-timecode {
+  min-height: 20px;
+  padding: 0 5px;
+  font-size: 11px;
+}
+
+.candidate-card.compact .candidate-overlay-actions {
+  bottom: 6px;
+  right: 6px;
+  gap: 4px;
+  padding: 4px 5px;
+}
+
+.candidate-card.compact .candidate-decision-button {
+  width: 24px;
+  height: 24px;
+}
+
+.candidate-card.compact .candidate-decision-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.candidate-label-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.candidate-label-count {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.candidate-row {
+  display: grid;
+  grid-template-columns:
+    18px var(--candidate-thumb-width) 76px minmax(110px, 0.8fr) 64px
+    minmax(140px, 1.3fr) minmax(140px, 1.3fr) auto;
+  grid-template-areas: 'select thumb step label duration title notes actions';
+  align-items: center;
+  column-gap: 14px;
+  padding: 6px 10px;
+  background: var(--analysis-surface-soft);
+  min-width: 0;
+  scroll-margin: 100px;
+}
+
+.candidate-row-head {
+  padding-top: 0;
+  padding-bottom: 2px;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.candidate-row.active {
+  outline: 2px solid rgba(205, 109, 30, 0.56);
+  outline-offset: -2px;
+}
+
+.candidate-row.selected {
+  box-shadow: inset 0 0 0 2px rgba(72, 175, 124, 0.42);
+}
+
+.candidate-row.accepted {
+  background: rgba(72, 175, 124, 0.12);
+}
+
+.candidate-row.rejected {
+  opacity: 0.54;
+}
+
+.candidate-row-select {
+  grid-area: select;
+  display: flex;
+  justify-content: center;
+}
+
+.candidate-row-select input {
+  margin: 0;
+  accent-color: #48af7c;
+}
+
+.candidate-row-thumb {
+  grid-area: thumb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--analysis-surface);
+}
+
+.candidate-row-head .candidate-row-thumb {
+  background: transparent;
+}
+
+.candidate-row-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.candidate-row-step {
+  grid-area: step;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.candidate-row-step strong {
+  color: #000;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.candidate-row-label {
+  grid-area: label;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.candidate-row-duration {
+  grid-area: duration;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.candidate-row-title {
+  grid-area: title;
+  min-width: 0;
+}
+
+.candidate-row-notes {
+  grid-area: notes;
+  min-width: 0;
+}
+
+.candidate-row .candidate-field {
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.candidate-row-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.candidate-row.accepted .candidate-row-actions,
+.candidate-row.rejected .candidate-row-actions {
+  opacity: 0.7;
+}
+
+@media (max-width: 900px) {
+  .candidate-row {
+    grid-template-columns: 18px var(--candidate-thumb-width) minmax(0, 1fr) auto;
+    grid-template-areas:
+      'select thumb step actions'
+      'select thumb label actions'
+      'select thumb duration actions'
+      'select thumb title title'
+      'select thumb notes notes';
+    row-gap: 6px;
+  }
+
+  .candidate-row-head {
+    display: none;
+  }
+}
+
 .candidate-card {
   background: var(--analysis-surface-soft);
   border: none;
@@ -3982,7 +4339,7 @@ button:disabled {
   padding: 5px 7px;
   background: rgba(255, 255, 255, 0.18);
   backdrop-filter: blur(6px);
-  border-radius: 999px;
+  border-radius: 0;
 }
 
 .candidate-card.accepted .candidate-overlay-actions,
@@ -4229,7 +4586,7 @@ button:disabled {
   height: 18px;
   padding: 0 4px;
   border: 1px solid rgba(0, 0, 0, 0.18);
-  border-radius: 3px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.6);
   color: rgba(0, 0, 0, 0.54);
   font-size: 10px;
@@ -4478,6 +4835,7 @@ button:disabled {
 
 .analysis-tuning-summary {
   align-items: center;
+  border-radius: 4px;
   background: var(--accent);
   color: #fff;
   cursor: pointer;
@@ -4572,6 +4930,7 @@ button:disabled {
 
 .analysis-compare-trigger {
   align-items: center;
+  border-radius: 4px;
   background: rgba(0, 0, 0, 0.06);
   color: rgba(0, 0, 0, 0.72);
   cursor: pointer;
@@ -4719,7 +5078,7 @@ button:disabled {
 }
 
 .analysis-compare-badge {
-  border-radius: 999px;
+  border-radius: 0;
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.06em;
@@ -4861,7 +5220,7 @@ button:disabled {
   display: inline-block;
   width: 14px;
   height: 6px;
-  border-radius: 3px;
+  border-radius: 0;
   background-image: repeating-linear-gradient(
     45deg,
     currentColor 0,
@@ -4900,7 +5259,7 @@ button:disabled {
   max-width: 100%;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 0;
   background: var(--analysis-surface-soft);
   cursor: crosshair;
   touch-action: none;
@@ -4932,7 +5291,7 @@ button:disabled {
   position: absolute;
   border: 1.5px solid var(--accent);
   background: rgba(209, 109, 56, 0.22);
-  border-radius: 2px;
+  border-radius: 0;
 }
 
 .stable-ignore-box.draft {
@@ -4966,7 +5325,7 @@ button:disabled {
   width: 18px;
   height: 18px;
   border: none;
-  border-radius: 0 2px 0 4px;
+  border-radius: 50%;
   background: var(--accent);
   color: #fff;
   font-size: 13px;
@@ -4990,7 +5349,6 @@ button:disabled {
 
 .stable-ignore-scrub input {
   flex: 1;
-  accent-color: var(--accent);
 }
 
 .stable-ignore-scrub-time {

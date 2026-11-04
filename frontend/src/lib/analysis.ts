@@ -89,17 +89,52 @@ export function candidateMatchesFilter(candidate: CandidateFrame, filter: Candid
   return filter === 'all' ? true : candidate.status === filter;
 }
 
+/** Step labels in legend order, with the short names used on screen. */
+export const transitionLabels: { type: string; label: string }[] = [
+  { type: 'opening_screen', label: 'opening' },
+  { type: 'scroll', label: 'scroll' },
+  { type: 'dwell', label: 'dwell' },
+  { type: 'navigation', label: 'navigation' },
+  { type: 'modal', label: 'modal' },
+  { type: 'feed_card_swap', label: 'feed swap' },
+  { type: 'content_update', label: 'update' },
+  { type: 'small_ui_change', label: 'ui change' },
+  { type: 'text_entry', label: 'typing' },
+  { type: 'unknown', label: 'unknown' },
+];
+
+export function transitionLabelText(type: string): string {
+  return transitionLabels.find((entry) => entry.type === type)?.label ?? type.replace(/_/g, ' ');
+}
+
+/** The label a step carries on the timeline, or null for steps without one (manual steps). */
+export function candidateLabelType(candidate: CandidateFrame): string | null {
+  const breakdown = candidate.score_breakdown;
+  if (!breakdown) {
+    return null;
+  }
+  return breakdown.transition_type ?? 'unknown';
+}
+
+export function candidateMatchesLabels(candidate: CandidateFrame, hiddenLabels: ReadonlySet<string>): boolean {
+  const type = candidateLabelType(candidate);
+  return type === null || !hiddenLabels.has(type);
+}
+
 export function getNextCandidateFocusId(
   candidates: CandidateFrame[],
   currentCandidateId: string,
   filter: CandidateFilter,
+  hiddenLabels: ReadonlySet<string> = new Set(),
 ): string | null {
   const currentIndex = candidates.findIndex((candidate) => candidate.id === currentCandidateId);
   if (currentIndex === -1) {
     return null;
   }
 
-  const remainingCandidates = candidates.slice(currentIndex + 1);
+  const remainingCandidates = candidates
+    .slice(currentIndex + 1)
+    .filter((candidate) => candidateMatchesLabels(candidate, hiddenLabels));
   if (filter === 'all' || filter === 'pending') {
     return remainingCandidates.find((candidate) => candidate.status === 'pending')?.id ?? null;
   }
