@@ -258,7 +258,7 @@ export function AnalysisParametersPanel({
         </p>
         {showLowCandidateHint ? (
           <p className="analysis-guidance-copy warning">
-            this run found very few stable screens. if the screen keeps moving (video, animation), draw an ignore area
+            this run found very few screens that stayed still. if the screen keeps moving (video, animation), draw an ignore area
             over it, or lower the minimum time on screen.
           </p>
         ) : null}

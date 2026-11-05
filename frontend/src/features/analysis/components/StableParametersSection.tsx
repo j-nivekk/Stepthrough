@@ -207,7 +207,10 @@ export function StableParametersSection({
             width={recordingWidth ?? 16}
           />
         ) : null}
-        {stable.recording_type === 'phone' ? (
+      </div>
+
+      {stable.recording_type === 'phone' ? (
+        <div className="analysis-parameter-group">
           <div className="analysis-mode-row" {...bindHint('stable_status_bar')}>
             <span>phone status bar</span>
             <div className="analysis-parameter-control">
@@ -222,8 +225,8 @@ export function StableParametersSection({
             </div>
             {resetButton('ignore_status_bar', 'phone status bar')}
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       <div className="analysis-parameter-group">
         <div className="analysis-mode-row" {...bindHint('stable_scroll_mode')}>

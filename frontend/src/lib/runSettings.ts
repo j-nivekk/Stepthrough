@@ -1,12 +1,4 @@
-import type {
-  AnalysisEngine,
-  AnalysisMetadata,
-  AnalysisPreset,
-  GlobalRunPreset,
-  ProjectRunPreset,
-  RunSettings,
-  RunSummary,
-} from '../types';
+import type { AnalysisMetadata, GlobalRunPreset, ProjectRunPreset, RunSettings, RunSummary } from '../types';
 import {
   areStableSettingsEqual,
   defaultStableSettings,
@@ -21,20 +13,16 @@ const PRESET_STORAGE_VERSION = 1;
 const GLOBAL_PRESET_STORAGE_KEY = 'stepthrough.run-preset.global.v1';
 const PROJECT_PRESET_STORAGE_KEY_PREFIX = 'stepthrough.run-preset.project.v1';
 
-// Engines whose earlier runs can still be opened, reviewed and exported, but not started again.
-const RETIRED_ENGINES: Partial<Record<AnalysisEngine, string>> = { hybrid_v2: 'hybrid v2', scene_v1: 'v1' };
-
 export const defaultRunSettings: RunSettings = {
   analysis_engine: 'stable_v3',
   stable: defaultStableSettings,
 };
 
-/** Settings for a new run. Presets saved for a retired engine fall back to the stable-screen defaults. */
-export function sanitizeRunSettings(settings?: { analysis_engine?: string; stable?: unknown } | null): RunSettings {
-  const stable = settings?.analysis_engine === 'stable_v3' ? settings.stable : null;
+/** Settings for a new run; anything missing or unreadable falls back to the defaults. */
+export function sanitizeRunSettings(settings?: { stable?: unknown } | null): RunSettings {
   return {
     analysis_engine: 'stable_v3',
-    stable: sanitizeStableSettings(stable as Parameters<typeof sanitizeStableSettings>[0]),
+    stable: sanitizeStableSettings((settings?.stable ?? null) as Parameters<typeof sanitizeStableSettings>[0]),
   };
 }
 
@@ -121,52 +109,17 @@ export function persistProjectRunPreset(projectId: string, settings: RunSettings
   return preset;
 }
 
-export function formatAnalysisEngineLabel(engine: AnalysisEngine): string {
-  const retired = RETIRED_ENGINES[engine];
-  return retired ? `${retired} (retired)` : 'stable screens';
-}
-
-/** Preset names of the retired hybrid v2 engine, shown on its earlier runs. */
-export function formatAnalysisPresetLabel(preset: AnalysisPreset): string {
-  if (preset === 'subtle_ui') return 'subtle ui';
-  if (preset === 'noise_resistant') return 'ignore noise';
-  return 'balanced';
-}
-
 export function areRunSettingsEqual(left: RunSettings, right: RunSettings): boolean {
   return areStableSettingsEqual(left.stable, right.stable);
 }
 
-export function formatRunSettingsSummary(settings: RunSettings, analysisMetadata?: AnalysisMetadata | null): string {
-  return [formatAnalysisEngineLabel(settings.analysis_engine), ...formatStableSummary(settings.stable, analysisMetadata)].join(
-    ' · ',
-  );
-}
-
-/** One line describing how any run was made, including runs of the retired engines. */
-export function formatRunSummaryLabel(
-  run: Pick<RunSummary, 'analysis_engine' | 'analysis_preset' | 'stable' | 'detector_mode' | 'tolerance'> & {
-    engine_version?: string | null;
-  },
-  analysisMetadata?: AnalysisMetadata | null,
-  { withVersion = false }: { withVersion?: boolean } = {},
-): string {
-  const engine = formatAnalysisEngineLabel(run.analysis_engine);
-  if (run.analysis_engine === 'stable_v3') {
-    return [engine, ...formatStableSummary(run.stable ?? defaultStableSettings, analysisMetadata), withVersion ? run.engine_version : null]
-      .filter(Boolean)
-      .join(' · ');
-  }
-  if (run.analysis_engine === 'hybrid_v2') {
-    return `${engine} · ${formatAnalysisPresetLabel(run.analysis_preset)}`;
-  }
-  return `${engine} · ${run.detector_mode} · tolerance ${run.tolerance}`;
+/** One line describing the settings a run was made with. */
+export function formatRunSummaryLabel(run: Pick<RunSummary, 'stable'>, analysisMetadata?: AnalysisMetadata | null): string {
+  return formatStableSummary(run.stable ?? defaultStableSettings, analysisMetadata).join(' · ');
 }
 
 export function serializeRunPresetText(settings: RunSettings): string {
-  return ['stepthrough detection preset', 'engine: stable_v3', ...serializeStablePresetLines(settings.stable ?? defaultStableSettings)].join(
-    '\n',
-  );
+  return ['stepthrough detection preset', ...serializeStablePresetLines(settings.stable ?? defaultStableSettings)].join('\n');
 }
 
 export function parseRunPresetText(rawText: string): { error: string } | { settings: RunSettings } {
@@ -182,19 +135,8 @@ export function parseRunPresetText(rawText: string): { error: string } | { setti
   const lines =
     normalizedLines[0]?.toLowerCase() === 'stepthrough detection preset' ? normalizedLines.slice(1) : normalizedLines;
 
-  const engineLine = lines.find((line) => /^engine\s*:/i.test(line));
-  const engineValue = engineLine?.slice(engineLine.indexOf(':') + 1).trim().toLowerCase();
-  if (engineValue && engineValue !== 'stable_v3') {
-    const retired = RETIRED_ENGINES[engineValue as AnalysisEngine];
-    return {
-      error: retired
-        ? `This preset is for the ${retired} engine, which has been retired. Set the stable-screen values here instead.`
-        : 'Engine must be stable_v3.',
-    };
-  }
-
   const stableFields = new Map<string, string>();
-  const allowed = new Set<string>(['engine', ...STABLE_PRESET_FIELDS]);
+  const allowed = new Set<string>(STABLE_PRESET_FIELDS);
   for (const line of lines) {
     const separatorIndex = line.indexOf(':');
     if (separatorIndex === -1) {
@@ -202,6 +144,9 @@ export function parseRunPresetText(rawText: string): { error: string } | { setti
     }
     const label = line.slice(0, separatorIndex).trim().toLowerCase();
     const value = line.slice(separatorIndex + 1).trim();
+    if (label === 'engine') {
+      continue; // preset text copied before the engine line was dropped
+    }
     if (!allowed.has(label)) {
       return { error: `Couldn't parse "${line}".` };
     }

@@ -38,7 +38,6 @@ import {
   normalizeZipFilename,
   clampInteger,
 } from '../../lib/utils';
-import type { AnalysisEngine } from '../../types';
 import type {
   AnalysisMetadata,
   CandidateFrame,
@@ -73,9 +72,6 @@ import type { StepHoverProps } from '../../components/CandidateCard';
 import { useHoverClips } from './useHoverClips';
 import { usePlaybackHighlight } from './usePlaybackHighlight';
 
-function engineShortLabel(engine: AnalysisEngine): string {
-  return engine === 'scene_v1' ? 'v1' : engine === 'hybrid_v2' ? 'v2' : 'v3';
-}
 
 export interface AnalysisScreenProps {
   acceptedStepSimilarityLinks: Map<string, SimilarLink>;
@@ -1682,7 +1678,7 @@ export function AnalysisScreen({
                   </div>
                 )}
                 <p className="analysis-detail-meta">
-                  {formatRunSummaryLabel(selectedRun.summary, analysisMetadata, { withVersion: true })}
+                  {formatRunSummaryLabel(selectedRun.summary, analysisMetadata)}
                 </p>
                 {!isCompletedReview && selectedRun.summary.message ? (
                   <p className="muted">{selectedRun.summary.message}</p>
@@ -1795,8 +1791,8 @@ export function AnalysisScreen({
                               : row.badge === 'timing_shifted'
                                 ? 'timing shifted'
                                 : row.badge === 'left_only'
-                                  ? `${engineShortLabel(selectedRun.summary.analysis_engine)} only`
-                                  : `${engineShortLabel(comparedRun.summary.analysis_engine)} only`;
+                                  ? 'selected only'
+                                  : 'comparison only';
                           return (
                             <article
                               className="analysis-compare-card"
@@ -1890,7 +1886,7 @@ export function AnalysisScreen({
                             </strong>
                             {similarityLink ? (
                               <div className="linked-scene-row">
-                                <span className="accepted-step-link-label">returning scene</span>
+                                <span className="accepted-step-link-label">returning screen</span>
                                 <button
                                   className="inline-link-button"
                                   onClick={(event) => {
@@ -2304,10 +2300,10 @@ export function AnalysisScreen({
                     {labelHiddenCount > 0 && labelVisibleCandidates.length === 0
                       ? 'every step in this run has a hidden label.'
                       : activeCandidateFilter === 'all'
-                      ? 'no scenes in this run.'
+                      ? 'no steps in this run.'
                       : activeCandidateFilter === 'pending'
-                        ? 'no pending scenes left in this run.'
-                        : `no ${activeCandidateFilter} scenes in this view.`}
+                        ? 'no pending steps left in this run.'
+                        : `no ${activeCandidateFilter} steps in this view.`}
                   </p>
                 )}
               </>
