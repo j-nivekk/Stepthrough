@@ -8,8 +8,8 @@ data/
 .DS_Store
 backend/tests/eval/results/*.json
 backend/tests/eval/results/demos/
-website/node_modules/
-website/dist/
+# Leftover build of an old project website: packages, build output and cache only, no source.
+website/
 TODO.md
 .vscode/
 .pytest_cache/
