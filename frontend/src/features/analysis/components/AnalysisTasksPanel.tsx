@@ -1,6 +1,5 @@
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
 import { formatElapsedDuration } from '../../../lib/utils';
-import { formatAnalysisEngineLabel, formatAnalysisPresetLabel } from '../../../lib/runSettings';
 import { formatPercent, formatRunShortTimestamp } from '../../../lib/formatters';
 import { formatRecordingTypeLabel, getEffectiveStableValues } from '../../../lib/stableSettings';
 import type { AnalysisMetadata, RunSettings, RunSummary } from '../../../types';
@@ -85,15 +84,8 @@ export function AnalysisTasksPanel({
     const stableRun = run.stable ?? null;
     const stableDefaults = projectDefaultSettings.stable ?? null;
     const taskSettings: AnalysisTaskRowSetting[] =
-      run.analysis_engine === 'stable_v3' && stableRun
+      stableRun
         ? [
-            {
-              key: 'engine',
-              label: 'engine',
-              value: formatAnalysisEngineLabel(run.analysis_engine),
-              valueClassName: 'mode',
-              isDirty: run.analysis_engine !== projectDefaultSettings.analysis_engine,
-            },
             {
               key: 'type',
               label: 'type',
@@ -126,33 +118,9 @@ export function AnalysisTasksPanel({
               ? [{ key: 'scroll', label: 'scroll', value: 'merged', isDirty: stableDefaults?.scroll_mode !== 'merge' }]
               : []),
           ]
-        : // Runs of the retired engines: what they were made with, read-only.
-          [
-            {
-              key: 'engine',
-              label: 'engine',
-              value: formatAnalysisEngineLabel(run.analysis_engine),
-              valueClassName: 'mode',
-              isDirty: false,
-            },
-            ...(run.analysis_engine === 'hybrid_v2'
-              ? [
-                  { key: 'preset', label: 'preset', value: formatAnalysisPresetLabel(run.analysis_preset), isDirty: false },
-                  {
-                    key: 'ocr',
-                    label: 'ocr',
-                    value: run.advanced?.enable_ocr === false ? 'off' : 'on',
-                    isDirty: false,
-                  },
-                ]
-              : [
-                  { key: 'mode', label: 'mode', value: run.detector_mode, isDirty: false },
-                  { key: 'tolerance', label: 'tolerance', value: String(run.tolerance), isDirty: false },
-                  { key: 'gaps', label: 'gaps', value: `${run.min_scene_gap_ms}ms`, isDirty: false },
-                ]),
-          ];
+        : [];
     const progressLabel = isDone
-      ? `${run.candidate_count} ${run.analysis_engine === 'stable_v3' ? 'steps' : 'scenes'}`
+      ? `${run.candidate_count} ${run.candidate_count === 1 ? 'step' : 'steps'}`
       : isError
         ? 'error'
         : run.status === 'cancelled'
