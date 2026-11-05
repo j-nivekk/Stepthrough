@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { HowItWorksDemo } from './howItWorks/HowItWorksDemo';
 
 const APP_IDENTITY = 'stepthrough, v 0.1.0';
 
@@ -8,6 +9,7 @@ interface AppWatermarkProps {
 
 export function AppWatermark({ onOpenSettings }: AppWatermarkProps) {
   const [showAbout, setShowAbout] = useState(false);
+  const [showDemo, setShowDemo] = useState(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -46,10 +48,21 @@ export function AppWatermark({ onOpenSettings }: AppWatermarkProps) {
       </button>
       {showAbout ? (
         <div className="app-watermark-popover">
-          <p>stepthrough helps researchers turn screen recordings into reviewable scene candidates for step-by-step analysis.</p>
+          <p>stepthrough turns screen recordings into reviewable walkthrough steps for app and interface research.</p>
+          <button
+            className="analysis-task-link subtle app-watermark-demo-link"
+            onClick={() => {
+              setShowAbout(false);
+              setShowDemo(true);
+            }}
+            type="button"
+          >
+            how it works
+          </button>
           <p>version 0.1.0</p>
         </div>
       ) : null}
+      {showDemo ? <HowItWorksDemo onClose={() => setShowDemo(false)} /> : null}
     </div>
   );
 }

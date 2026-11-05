@@ -89,13 +89,11 @@ By default, the backend runs at `http://127.0.0.1:8000` and the frontend at `htt
 
 ## 📚 Documentation
 
-For onboarding and tutorials aimed at new researchers, start with:
-
-- [`docs/wiki/Home.md`](docs/wiki/Home.md)
-- [`docs/wiki/Researcher-Onboarding.md`](docs/wiki/Researcher-Onboarding.md)
-- [`docs/wiki/First-Tutorial.md`](docs/wiki/First-Tutorial.md)
-- [`docs/wiki/Choosing-Settings.md`](docs/wiki/Choosing-Settings.md)
-- [`manual.md`](manual.md)
+- [`GUIDE.md`](GUIDE.md): how Stepthrough works and how to use it, with a first tutorial, settings,
+  review, exports, recording tips and notes on research use.
+- In the app, **about → how it works** shows the analysis of a sample recording, step by step.
+- [`backend/README.md`](backend/README.md): the detection engine, its settings and the export format, for
+  developers.
 
 ---
 

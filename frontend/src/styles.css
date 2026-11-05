@@ -197,6 +197,759 @@ a {
   line-height: 1.3;
 }
 
+.app-watermark-demo-link {
+  justify-self: start;
+  font-size: 12px;
+}
+
+/* ── "how it works" demo ─────────────────────────────────────────────── */
+
+.demo-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 20, 20, 0.5);
+}
+
+.demo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(1080px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 20px 26px;
+  background: var(--bg);
+  color: #000;
+  outline: none;
+}
+
+.demo-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.demo-eyebrow {
+  margin: 0 0 4px;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.demo-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.demo-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.07);
+  color: rgba(0, 0, 0, 0.72);
+  cursor: pointer;
+}
+
+.demo-icon-button:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.13);
+  color: #000;
+}
+
+.demo-icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.demo-icon-button.primary {
+  width: 34px;
+  height: 34px;
+  background: #48af7c;
+  color: #fff;
+}
+
+.demo-icon-button.primary:hover {
+  background: #3d9a6c;
+  color: #fff;
+}
+
+.demo-body {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.demo-phone-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.demo-time {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.demo-main {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.demo-caption {
+  min-height: 104px;
+}
+
+.demo-stage-count {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.demo-caption h3 {
+  margin: 4px 0 6px;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.demo-caption p {
+  max-width: 62ch;
+  margin: 0;
+  color: rgba(0, 0, 0, 0.75);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.demo-guide-link {
+  display: inline-block;
+  margin-top: 6px;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.2;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.demo-guide-link:hover,
+.demo-guide-link:focus-visible {
+  color: #000;
+}
+
+.demo-timeline {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--analysis-surface-overlay);
+}
+
+.demo-axis {
+  stroke: rgba(0, 0, 0, 0.3);
+  stroke-width: 1;
+}
+
+.demo-axis-label,
+.demo-note {
+  fill: rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+}
+
+.demo-row-label {
+  fill: rgba(0, 0, 0, 0.62);
+  font-size: 12px;
+}
+
+.demo-row-label.muted {
+  fill: rgba(0, 0, 0, 0.42);
+}
+
+.demo-recording-bar {
+  fill: rgba(0, 0, 0, 0.08);
+}
+
+.demo-recording-bar.played {
+  fill: rgba(47, 100, 130, 0.35);
+}
+
+.demo-frame {
+  stroke-width: 1;
+}
+
+.demo-frame.recorded {
+  stroke: rgba(209, 109, 56, 0.85);
+}
+
+.demo-frame.working {
+  stroke: rgba(47, 100, 130, 0.6);
+}
+
+.demo-curve {
+  fill: rgba(47, 100, 130, 0.18);
+  stroke: rgb(47, 100, 130);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+}
+
+.demo-threshold {
+  stroke: #cd6d1e;
+  stroke-dasharray: 4 3;
+  stroke-width: 1;
+}
+
+.demo-threshold-label {
+  fill: #cd6d1e;
+  font-size: 11px;
+}
+
+.demo-ignored {
+  stroke: rgba(0, 0, 0, 0.32);
+  stroke-width: 1.5;
+}
+
+.demo-still.stable {
+  fill: rgba(72, 175, 124, 0.6);
+}
+
+.demo-still.pending {
+  fill: rgba(0, 0, 0, 0.16);
+}
+
+.demo-still.too-short {
+  fill: rgba(191, 39, 37, 0.45);
+}
+
+.demo-group {
+  fill: none;
+  stroke-width: 1.2;
+  stroke-dasharray: 3 2;
+}
+
+.demo-step {
+  opacity: 0.85;
+}
+
+.demo-step-label {
+  fill: rgba(0, 0, 0, 0.75);
+  font-size: 11.5px;
+}
+
+.demo-shot {
+  fill: #fff;
+  stroke: #000;
+  stroke-width: 1.4;
+}
+
+.demo-shot-line {
+  stroke: rgba(0, 0, 0, 0.25);
+  stroke-dasharray: 2 3;
+}
+
+.demo-playhead {
+  stroke: #000;
+  stroke-width: 1.2;
+  opacity: 0.55;
+}
+
+.demo-strip {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 18px;
+  min-height: 186px;
+}
+
+.demo-thumbs {
+  display: flex;
+  gap: 10px;
+}
+
+.demo-thumb {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 72px;
+  margin: 0;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 250ms ease, transform 250ms ease;
+}
+
+.demo-thumb.shown {
+  opacity: 1;
+  transform: none;
+}
+
+.demo-thumb.rejected .demo-thumb-frame {
+  opacity: 0.5;
+}
+
+.demo-thumb-frame {
+  position: relative;
+  width: 72px;
+  height: 156px;
+  overflow: hidden;
+}
+
+.demo-decision {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: #fff;
+}
+
+.demo-decision.accepted {
+  background: #48af7c;
+}
+
+.demo-decision.rejected {
+  background: #bf2725;
+}
+
+.demo-thumb figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  color: rgba(0, 0, 0, 0.7);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.demo-thumb figcaption em {
+  width: 100%;
+  color: rgba(0, 0, 0, 0.5);
+  font-style: normal;
+}
+
+.demo-thumb-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 4px;
+}
+
+.demo-export {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  background: var(--analysis-surface);
+  color: rgba(0, 0, 0, 0.7);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.demo-export.shown {
+  opacity: 1;
+}
+
+.demo-export strong {
+  color: #000;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.demo-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.demo-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.demo-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The phone is a drawing of a device, so it keeps its rounded hardware shape. */
+.demo-phone {
+  flex: none;
+  width: 200px;
+  height: 433px;
+  padding: 7px;
+  border-radius: 30px;
+  background: #1d1d1d;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+
+.demo-phone.mini {
+  box-shadow: none;
+  transform: scale(0.36);
+  transform-origin: top left;
+}
+
+.demo-phone-screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 24px;
+  background: #fff;
+  color: #111;
+  font-size: 11px;
+}
+
+.demo-phone-status {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 26px;
+  padding: 0 18px;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.demo-phone-status-icons {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.demo-phone-status-icons i {
+  width: 8px;
+  height: 6px;
+  background: #111;
+}
+
+.demo-phone-status-icons b {
+  width: 15px;
+  height: 8px;
+  border: 1px solid #111;
+}
+
+.demo-phone-pages {
+  position: absolute;
+  top: 26px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+}
+
+.demo-phone-page {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+}
+
+.demo-phone-title {
+  margin: 0;
+  padding: 8px 14px 6px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.demo-phone-title.chat {
+  border-bottom: 1px solid #eee;
+  color: #2f6482;
+  font-size: 13px;
+}
+
+.demo-phone-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 14px;
+  overflow: hidden;
+}
+
+.demo-phone-row.tapped {
+  background: #ececec;
+}
+
+.demo-phone-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+
+.demo-phone-row-text {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+}
+
+.demo-phone-row-text strong {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.demo-phone-row-text i {
+  display: block;
+  height: 5px;
+  background: #ddd;
+}
+
+.demo-phone-row small {
+  align-self: flex-start;
+  margin-top: 3px;
+  color: #999;
+  font-size: 9px;
+}
+
+.demo-phone-ripple {
+  position: absolute;
+  top: 50%;
+  left: 55%;
+  width: 10px;
+  height: 10px;
+  margin: -5px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.14);
+  animation: demo-ripple 380ms ease-out forwards;
+}
+
+@keyframes demo-ripple {
+  to {
+    opacity: 0;
+    transform: scale(14);
+  }
+}
+
+.demo-phone-thread {
+  position: absolute;
+  top: 36px;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+
+.demo-phone-messages {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.demo-phone-bubble {
+  max-width: 74%;
+  padding: 6px 9px;
+  border-radius: 12px;
+  font-size: 10.5px;
+  line-height: 1.25;
+}
+
+.demo-phone-bubble.in {
+  align-self: flex-start;
+  background: #ececec;
+}
+
+.demo-phone-bubble.out {
+  align-self: flex-end;
+  background: #48af7c;
+  color: #fff;
+}
+
+.demo-phone-input {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  height: 30px;
+  margin-bottom: 6px;
+  padding: 0 12px;
+  border-radius: 15px;
+  background: #f1f1f1;
+  font-size: 11px;
+}
+
+.demo-phone-placeholder {
+  color: #aaa;
+}
+
+.demo-phone-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 13px;
+  margin-left: 1px;
+  vertical-align: -2px;
+  background: #2f6482;
+  opacity: 0;
+}
+
+.demo-phone-caret.on {
+  opacity: 1;
+}
+
+.demo-phone-caret.masked {
+  opacity: 0.35;
+  outline: 1.5px dashed #cd6d1e;
+  outline-offset: 3px;
+}
+
+.demo-phone-caret.masked.on {
+  opacity: 1;
+}
+
+.demo-phone-keyboard {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 9px 4px;
+  background: #d6d8dc;
+}
+
+.demo-phone-keys {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+
+.demo-phone-keys i {
+  width: 15px;
+  height: 26px;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.demo-phone-keys i.wide {
+  width: 110px;
+}
+
+.demo-phone-toast {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  z-index: 4;
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: rgba(20, 20, 20, 0.85);
+  color: #fff;
+  font-size: 10px;
+  transform: translateX(-50%);
+}
+
+.demo-phone-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.demo-phone-dialog {
+  display: grid;
+  gap: 6px;
+  width: 150px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+}
+
+.demo-phone-dialog strong {
+  font-size: 12px;
+}
+
+.demo-phone-dialog span {
+  color: #888;
+  font-size: 10px;
+}
+
+.demo-phone-dialog div {
+  display: flex;
+  justify-content: space-around;
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+}
+
+.demo-phone-dialog i {
+  color: #2f6482;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.demo-phone-dialog i.danger {
+  color: #bf2725;
+}
+
+.demo-phone-mask.status {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  background: repeating-linear-gradient(45deg, rgba(205, 109, 30, 0.32) 0 4px, transparent 4px 8px);
+  outline: 1.5px dashed #cd6d1e;
+  outline-offset: -1.5px;
+}
+
+.demo-phone-mask.status span {
+  padding: 0 4px;
+  background: #fff;
+  color: #9d4d26;
+  font-size: 9px;
+}
+
+@media (max-width: 860px) {
+  .demo-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-thumb,
+  .demo-export {
+    transition: none;
+  }
+
+  .demo-phone-ripple {
+    animation: none;
+  }
+}
+
 /* ── app settings panel ─────────────────────────────────────────────────── */
 
 .app-settings-panel {

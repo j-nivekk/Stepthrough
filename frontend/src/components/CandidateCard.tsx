@@ -397,7 +397,7 @@ export function CandidateCard({
             <button
               className="inline-link-button candidate-similarity-link"
               onClick={onJumpToSimilar}
-              title="jump to the earlier matching scene."
+              title="jump to the earlier step that shows the same screen"
               type="button"
             >
               {similarLink.label}
@@ -524,7 +524,7 @@ export function CandidateRow({
               stop(event);
               onJumpToSimilar();
             }}
-            title="jump to the earlier matching scene."
+            title="jump to the earlier step that shows the same screen"
             type="button"
           >
             {similarLink.label}
