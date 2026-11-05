@@ -1526,7 +1526,7 @@ export function AnalysisScreen({
                         className="preview-control-btn"
                         disabled={!previewMatchesSelectedRun || timelineCandidates.length === 0}
                         onClick={() => handlePreviewJumpToPin('prev')}
-                        title="jump to previous scene"
+                        title="jump to the previous step"
                         type="button"
                       >
                         <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 16 16" width="16">
@@ -1574,7 +1574,7 @@ export function AnalysisScreen({
                         className="preview-control-btn"
                         disabled={!previewMatchesSelectedRun || timelineCandidates.length === 0}
                         onClick={() => handlePreviewJumpToPin('next')}
-                        title="jump to next scene"
+                        title="jump to the next step"
                         type="button"
                       >
                         <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.7" viewBox="0 0 16 16" width="16">
