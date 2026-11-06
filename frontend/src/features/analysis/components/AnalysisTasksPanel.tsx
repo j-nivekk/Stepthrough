@@ -1,8 +1,31 @@
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
 import { formatElapsedDuration } from '../../../lib/utils';
 import { formatPercent, formatRunShortTimestamp } from '../../../lib/formatters';
 import { formatRecordingTypeLabel, getEffectiveStableValues } from '../../../lib/stableSettings';
 import type { AnalysisMetadata, RunSettings, RunSummary } from '../../../types';
+
+const COLLAPSED_GROUPS_KEY = 'stepthrough.taskGroups.collapsed';
+
+/** Statuses that count as "working right now" for the live highlight; queued runs have not started yet. */
+const liveRunStatuses: RunSummary['status'][] = ['running', 'awaiting_fallback'];
+
+function loadCollapsedGroups(): Set<string> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(COLLAPSED_GROUPS_KEY) ?? '[]') as unknown;
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCollapsedGroups(ids: Set<string>): void {
+  try {
+    window.localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...ids]));
+  } catch {
+    // storage can be unavailable (private window, blocked site data); collapsing still works for this visit
+  }
+}
 
 interface AnalysisTaskRowSetting {
   isDirty: boolean;
@@ -69,6 +92,39 @@ export function AnalysisTasksPanel({
   taskFilter,
   taskSelectMode,
 }: AnalysisTasksPanelProps) {
+  const [collapsedRecordingIds, setCollapsedRecordingIds] = useState<Set<string>>(loadCollapsedGroups);
+  const knownActiveRunIds = useRef<Set<string> | null>(null);
+
+  function setGroupCollapsed(recordingId: string, collapsed: boolean) {
+    setCollapsedRecordingIds((current) => {
+      if (current.has(recordingId) === collapsed) return current;
+      const next = new Set(current);
+      if (collapsed) next.add(recordingId);
+      else next.delete(recordingId);
+      saveCollapsedGroups(next);
+      return next;
+    });
+  }
+
+  // A run that has just been started opens its video's group, so a new run never starts out of sight.
+  useEffect(() => {
+    const activeItems = analysisTaskItems.filter((item) => activeRunStatuses.includes(item.run.status));
+    const previous = knownActiveRunIds.current;
+    knownActiveRunIds.current = new Set(activeItems.map((item) => item.run.id));
+    if (!previous) return;
+    activeItems
+      .filter((item) => !previous.has(item.run.id))
+      .forEach((item) => setGroupCollapsed(item.recording.id, false));
+  }, [analysisTaskItems]);
+
+  // Selecting a run from elsewhere (the videos list, the review board) opens the group it sits in.
+  useEffect(() => {
+    if (!selectedRunId) return;
+    const item = analysisTaskItems.find((candidate) => candidate.run.id === selectedRunId);
+    if (item) setGroupCollapsed(item.recording.id, false);
+    // only a change of selection reopens a group; list refreshes must not undo a collapse
+  }, [selectedRunId]);
+
   function renderTaskRow(item: AnalysisTaskItem) {
     const isSelected = selectedRunId === item.run.id;
     const run = isSelected && selectedRunSummary?.id === item.run.id ? selectedRunSummary : item.run;
@@ -128,6 +184,12 @@ export function AnalysisTasksPanel({
           : formatPercent(run.progress);
     const elapsedSource = activeRunStatuses.includes(run.status) ? run.started_at ?? run.created_at : null;
     const elapsedLabel = elapsedSource ? formatElapsedDuration(taskClockMs - new Date(elapsedSource).getTime()) : null;
+    const isLive = liveRunStatuses.includes(run.status);
+    // the expanded, unselected row already shows the full progress bar
+    const showLiveLine = isLive && !(isExpanded && !isSelected);
+    const rowClassName = ['analysis-task-row', isSelected ? 'selected' : null, isLive ? 'running' : null, showLiveLine ? 'live-line' : null]
+      .filter(Boolean)
+      .join(' ');
 
     if (run.is_abortable) {
       actionButtons.push({ label: 'end' });
@@ -138,7 +200,11 @@ export function AnalysisTasksPanel({
     }
 
     return (
-      <div className={`analysis-task-row ${isSelected ? 'selected' : ''}`} key={run.id}>
+      <div
+        className={rowClassName}
+        key={run.id}
+        style={showLiveLine ? ({ '--run-progress': formatPercent(run.progress) } as CSSProperties) : undefined}
+      >
         <div className="analysis-task-head">
           <div className="analysis-task-head-primary">
             {taskSelectMode && (
@@ -240,16 +306,39 @@ export function AnalysisTasksPanel({
   }
 
   function renderTaskGroup(group: AnalysisTaskGroup) {
-    const visibleRunCountLabel = `${group.runs.length} ${group.runs.length === 1 ? 'run' : 'runs'}`;
+    const isCollapsed = collapsedRecordingIds.has(group.recording.id);
+    const runCountLabel = `${group.runs.length} ${group.runs.length === 1 ? 'run' : 'runs'}`;
+    const liveCount = group.runs.filter((item) => liveRunStatuses.includes(item.run.status)).length;
+    const queuedCount = group.runs.filter((item) => item.run.status === 'queued').length;
+    const rowsId = `analysis-task-group-rows-${group.recording.id}`;
     return (
-      <div className="analysis-task-group" key={group.recording.id}>
-        <div className="analysis-task-group-header">
-          <span className="analysis-task-group-title" title={group.recording.filename}>
-            {group.recording.filename}
+      <div className={`analysis-task-group ${isCollapsed ? 'collapsed' : ''}`} key={group.recording.id}>
+        <button
+          aria-controls={rowsId}
+          aria-expanded={!isCollapsed}
+          className="analysis-task-group-header"
+          onClick={() => setGroupCollapsed(group.recording.id, !isCollapsed)}
+          title={`${isCollapsed ? 'show' : 'hide'} runs for ${group.recording.filename}`}
+          type="button"
+        >
+          <span aria-hidden="true" className="analysis-task-group-chevron" />
+          <span className="analysis-task-group-title">{group.recording.filename}</span>
+          <span className="analysis-task-group-count">
+            {isCollapsed && liveCount ? (
+              <span className="analysis-task-group-live">
+                <span aria-hidden="true" className="analysis-task-group-live-dot" />
+                {liveCount} running
+              </span>
+            ) : null}
+            {isCollapsed && queuedCount ? <span>{queuedCount} queued</span> : null}
+            <span>{runCountLabel}</span>
           </span>
-          <span className="analysis-task-group-count">{visibleRunCountLabel}</span>
-        </div>
-        <div className="analysis-task-group-rows">{group.runs.map((item) => renderTaskRow(item))}</div>
+        </button>
+        {isCollapsed ? null : (
+          <div className="analysis-task-group-rows" id={rowsId}>
+            {group.runs.map((item) => renderTaskRow(item))}
+          </div>
+        )}
       </div>
     );
   }
