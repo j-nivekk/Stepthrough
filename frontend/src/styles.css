@@ -2322,11 +2322,78 @@ a {
   padding-top: 10px;
 }
 
+/* The video's name is the toggle for its runs: a text control, so no shape of its own, with a
+   disclosure triangle that points right when the runs are hidden. */
 .analysis-task-group-header {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.analysis-task-group-header:focus-visible {
+  outline: 2px solid rgba(205, 109, 30, 0.6);
+  outline-offset: 2px;
+}
+
+.analysis-task-group-chevron {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid rgba(0, 0, 0, 0.45);
+  transition: transform 140ms ease, border-top-color 140ms ease;
+}
+
+.analysis-task-group.collapsed .analysis-task-group-chevron {
+  transform: rotate(-90deg);
+}
+
+.analysis-task-group-header:hover .analysis-task-group-chevron,
+.analysis-task-group-header:focus-visible .analysis-task-group-chevron {
+  border-top-color: #000;
+}
+
+.analysis-task-group-header:hover .analysis-task-group-title,
+.analysis-task-group-header:focus-visible .analysis-task-group-title {
+  color: #000;
+}
+
+.analysis-task-group-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.analysis-task-group-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #2f8a5c;
+}
+
+.analysis-task-group-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #48af7c;
+  animation: analysis-task-live-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes analysis-task-live-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 .analysis-task-group-title,
@@ -2398,6 +2465,59 @@ a {
 
 .analysis-task-row.selected .analysis-task-title {
   color: #cd6d1e;
+}
+
+/* A run that is working right now: a green tint (green means go) that flashes when the run starts
+   and then breathes, a green edge, and a thin progress line along the bottom. Selection keeps its
+   orange tint; the edge and the line still mark the run as live. */
+.analysis-task-row.running {
+  margin-inline: -8px;
+  padding: 6px 8px 8px;
+  background-color: rgba(72, 175, 124, 0.1);
+  box-shadow: inset 2px 0 0 #48af7c;
+  animation:
+    analysis-task-run-start 1.1s ease-out,
+    analysis-task-run-breathe 2.6s ease-in-out 1.1s infinite;
+}
+
+.analysis-task-row.running.selected {
+  background-color: rgba(205, 109, 30, 0.12);
+  animation: analysis-task-run-edge 2.6s ease-in-out infinite;
+}
+
+.analysis-task-row.live-line {
+  background-image: linear-gradient(#48af7c, #48af7c);
+  background-position: left bottom;
+  background-repeat: no-repeat;
+  background-size: var(--run-progress, 0%) 2px;
+  transition: background-size 400ms ease;
+}
+
+@keyframes analysis-task-run-start {
+  from { background-color: rgba(72, 175, 124, 0.34); }
+  to { background-color: rgba(72, 175, 124, 0.1); }
+}
+
+@keyframes analysis-task-run-breathe {
+  0%, 100% { background-color: rgba(72, 175, 124, 0.1); }
+  50% { background-color: rgba(72, 175, 124, 0.04); }
+}
+
+@keyframes analysis-task-run-edge {
+  0%, 100% { box-shadow: inset 3px 0 0 #48af7c; }
+  50% { box-shadow: inset 2px 0 0 rgba(72, 175, 124, 0.45); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-task-row.running,
+  .analysis-task-row.running.selected,
+  .analysis-task-group-live-dot {
+    animation: none;
+  }
+
+  .analysis-task-row.live-line {
+    transition: none;
+  }
 }
 
 .analysis-task-head {
@@ -5639,9 +5759,12 @@ button:disabled {
   }
 
   .analysis-video-row-button,
-  .analysis-task-head,
-  .analysis-task-group-header {
+  .analysis-task-head {
     flex-direction: column;
+  }
+
+  .analysis-task-group-header {
+    flex-wrap: wrap;
   }
 
   .analysis-video-meta,
