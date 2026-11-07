@@ -21,6 +21,7 @@ dev = [
 ]
 
 # Optional text recognition for step screenshots (ocr_text in exports): uv sync --group ocr
+# Bump paddlepaddle and paddleocr together and test on x86 first: see "PaddlePaddle version bugs" in README.md.
 ocr = [
   "paddlepaddle==3.3.0",
   "paddleocr==3.3.0",

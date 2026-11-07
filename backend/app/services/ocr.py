@@ -241,6 +241,10 @@ class PaddleOcrEngine:
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
             "use_textline_orientation": False,
+            # On x86 CPUs PaddlePaddle 3.3.0 runs inference through oneDNN (MKLDNN), and that path fails at the
+            # first prediction ("ConvertPirAttribute2RuntimeAttribute not support"), which broke every OCR run on a
+            # Linux server. Plain CPU kernels are slower but work; ARM (Apple silicon) never used oneDNN.
+            "enable_mkldnn": False,
         }
         if runtime_config.model_source == "local" or (
             runtime_config.det_model_dir is not None and runtime_config.rec_model_dir is not None

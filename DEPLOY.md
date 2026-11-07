@@ -112,6 +112,10 @@ crashes as soon as recognition starts). The first run with text recognition down
 which needs internet access from the server. To check it end to end, add `--ocr` to the smoke test:
 `docker compose exec -T stepthrough python - --ocr < smoke_test.py`.
 
+On x86 servers recognition is slower than on a Mac: PaddlePaddle 3.3.0's oneDNN acceleration is broken on x86 and
+Stepthrough switches it off. The known PaddlePaddle version bugs are listed in
+[`backend/README.md`](backend/README.md#paddlepaddle-version-bugs).
+
 ## Build the image yourself
 
 ```bash
