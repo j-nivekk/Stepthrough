@@ -75,10 +75,16 @@ breakdown, revisit links and the timing columns `transition_type`, `change_start
 | `STEPTHROUGH_CORS_ORIGINS` | the Vite dev and preview origins in `local`; none in `server` | comma-separated origins allowed to call the API from a browser |
 | `STEPTHROUGH_MAX_UPLOAD_MB` | `2048` | largest accepted upload; also enforce it in the reverse proxy (`client_max_body_size`) |
 | `STEPTHROUGH_ALLOW_ADMIN_RESET` | on in `local`, off in `server` | whether `POST /admin/reset-db` is available (it also requires the `X-Stepthrough-Confirm: reset-database` header) |
+| `STEPTHROUGH_MAX_CONCURRENT_RUNS` | no limit in `local`, `2` in `server` | analyses that may run at once; later runs wait as `queued`, first come first served, and can be ended while they wait. `0` lifts the limit |
+| `STEPTHROUGH_FRONTEND_DIR` | unset | a built frontend (`frontend/dist`) to serve from the API's own origin, as the Docker image does; it must contain `index.html` |
 
 Only `data/projects/` is served under `/assets/projects/`; the database, OCR models and other files in
 the data root are not reachable over HTTP. Runs that were queued or running when the backend stopped are
 marked failed at the next start-up.
+
+Run the API with a single worker process: run progress, cancel requests and the run queue live in that process's
+memory. The database uses SQLite's write-ahead log; copy it with `python -m app.backup` (SQLite's backup API)
+rather than copying the file. For the Docker image, see [`DEPLOY.md`](../DEPLOY.md).
 
 Not yet in place for a shared server: user accounts and per-user access checks (planned behind SURFconext
 login at the reverse proxy), and a job queue that bounds concurrent runs.

@@ -13,7 +13,19 @@ import type {
   RunSummary,
 } from './types';
 
-export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000';
+const configuredApiBase = import.meta.env.VITE_API_BASE_URL;
+
+/**
+ * Where the backend lives. Unset (the local app): the backend on port 8000. Set to an empty string (the Docker
+ * image): the server this page was loaded from, so one build works on any domain.
+ */
+export const API_BASE =
+  configuredApiBase === undefined ? 'http://127.0.0.1:8000' : configuredApiBase.trim() || window.location.origin;
+
+/** The same address for a WebSocket (`ws:` or `wss:`). */
+export function apiSocketUrl(path: string): string {
+  return new URL(path, API_BASE).toString().replace(/^http/, 'ws');
+}
 
 class ApiError extends Error {
   status: number;
