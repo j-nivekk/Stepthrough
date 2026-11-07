@@ -14,3 +14,6 @@ TODO.md
 .vscode/
 .pytest_cache/
 backend/experiments/out/
+
+# Docker settings for a deployment (see .env.example).
+.env

@@ -77,6 +77,11 @@ By default, the backend runs at `http://127.0.0.1:8000` and the frontend at `htt
 
 *(To run them manually in separate terminal windows, you can simply use: `cd backend && uv run uvicorn app.main:app --reload` and `cd frontend && npm run dev`)*
 
+### On a server
+
+A Docker image runs Stepthrough for a group, behind a web server such as nginx. [`DEPLOY.md`](DEPLOY.md)
+covers installing, configuring, upgrading and backing it up.
+
 ---
 
 ## 🛠 Project Structure
@@ -94,6 +99,7 @@ By default, the backend runs at `http://127.0.0.1:8000` and the frontend at `htt
 - In the app, **about → how it works** shows the analysis of a sample recording, step by step.
 - [`backend/README.md`](backend/README.md): the detection engine, its settings and the export format, for
   developers.
+- [`DEPLOY.md`](DEPLOY.md): running the Docker image on a server.
 
 ---
 

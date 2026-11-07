@@ -1,0 +1,137 @@
+# Running Stepthrough on a server
+
+Stepthrough runs as one Docker container: the web interface, the API and the analysis, with everything it stores in
+one Docker volume. A web server on the host (nginx in the examples) adds HTTPS and the domain name. The setup follows
+the pattern of other Digital Methods Initiative tools such as 4CAT: a `compose.yaml`, a `.env` file for settings, and
+a published image that is updated with `docker compose pull`.
+
+> **Before students use it.** Stepthrough has no accounts yet. Everyone who can open the address sees, and can
+> delete, every project. Until accounts arrive, restrict who can reach it (a shared password or the university
+> network; see the nginx example) and do not use it for recordings that show other people.
+
+## What you need
+
+- A Linux server with Docker Engine and the Compose plugin (`docker compose version` prints 2.17 or later).
+- A web server with a TLS certificate for a subdomain, for example `stepthrough.example.org`. Stepthrough must sit at
+  the root of its domain; a path such as `example.org/stepthrough/` does not work.
+- CPU: each analysis keeps one or two cores busy while it runs. `STEPTHROUGH_MAX_CONCURRENT_RUNS` (default 2) sets how
+  many run at once; the rest wait in line.
+- Disk: about twice the size of everything uploaded. Each recording is kept as uploaded, plus a working copy used for
+  analysis and previews, plus screenshots and exports.
+
+## Install
+
+```bash
+mkdir stepthrough && cd stepthrough
+curl -fsSLO https://raw.githubusercontent.com/j-nivekk/Stepthrough/docker/compose.yaml
+curl -fsSL -o .env https://raw.githubusercontent.com/j-nivekk/Stepthrough/docker/.env.example
+docker compose up -d --wait
+curl -fsS http://127.0.0.1:8080/health
+```
+
+`--wait` returns once the container reports itself healthy. The app now listens on `127.0.0.1:8080`, reachable only
+from the server itself, until the web server is set up.
+
+## Settings
+
+Edit `.env`, then apply it with `docker compose up -d --wait`. Every setting is optional.
+
+| setting | default | meaning |
+|---|---|---|
+| `STEPTHROUGH_TAG` | `stable` | image version: `stable` (latest release), a release such as `0.2.0`, or `edge` (latest from the `docker` branch) |
+| `STEPTHROUGH_BIND_ADDRESS` | `127.0.0.1` | host address to listen on; keep `127.0.0.1` behind a web server |
+| `STEPTHROUGH_PORT` | `8080` | host port |
+| `STEPTHROUGH_MAX_CONCURRENT_RUNS` | `2` | analyses that run at once; `0` is no limit |
+| `STEPTHROUGH_MAX_UPLOAD_MB` | `1024` | largest recording accepted; nginx's `client_max_body_size` must be at least this |
+| `STEPTHROUGH_CPUS`, `STEPTHROUGH_MEMORY` | `0` (no limit) | caps for the container, for example `4` and `8g`, so analyses cannot starve other tools on the host |
+| `STEPTHROUGH_VOLUME` | `stepthrough_data` | name of the Docker volume with all data |
+| `STEPTHROUGH_OCR_MODEL_SOURCE` | `auto` | where the text recognition image downloads its models (`auto`, `huggingface`, `bos`) |
+
+## Web server
+
+[`docker/nginx.conf.example`](docker/nginx.conf.example) is a complete site configuration. Beyond the usual proxy
+settings, Stepthrough needs three things from the web server:
+
+- an upload limit (`client_max_body_size`) at least as large as `STEPTHROUGH_MAX_UPLOAD_MB`;
+- WebSocket upgrades (the `Upgrade` and `Connection` headers), which carry live progress while a run works;
+- long timeouts and no request buffering, so large uploads and long runs are not cut off.
+
+Then check the whole chain from outside, using the smoke test from the repository. It uploads a short generated
+recording, analyses it, exports it and deletes it again:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/j-nivekk/Stepthrough/docker/docker/smoke_test.py
+python3 smoke_test.py https://stepthrough.example.org   # needs ffmpeg on the machine you run it from
+docker compose exec -T stepthrough python - < smoke_test.py   # or inside the container, without the web server
+```
+
+## Upgrade
+
+```bash
+docker compose pull && docker compose up -d --wait
+```
+
+Data lives in the volume and survives upgrades. Database changes are applied automatically at start-up. A restart
+ends analyses that are still running; they show as interrupted and can be started again, so upgrade outside teaching
+hours. To stay on a known version, set `STEPTHROUGH_TAG` to a release number instead of `stable`.
+
+## Back up and restore
+
+Everything is in the volume: the database (`stepthrough.sqlite3`) and, under `projects/`, the recordings,
+screenshots and exports. The simplest consistent backup stops the app for a moment:
+
+```bash
+docker compose stop
+docker run --rm -v stepthrough_data:/data:ro -v "$PWD":/backup debian:trixie-slim \
+  tar czf /backup/stepthrough-$(date +%F).tar.gz -C /data .
+docker compose start
+```
+
+To copy only the database while the app keeps running, use SQLite's backup function rather than copying the file
+(recent changes may still be in `stepthrough.sqlite3-wal`). The copy is written to `backups/` in the volume:
+
+```bash
+docker compose exec stepthrough python -m app.backup
+```
+
+To restore an archive into an empty volume:
+
+```bash
+docker compose down
+docker run --rm -v stepthrough_data:/data -v "$PWD":/backup debian:trixie-slim \
+  sh -c 'tar xzf /backup/stepthrough-2026-11-07.tar.gz -C /data && chown -R 10001:10001 /data'
+docker compose up -d --wait
+```
+
+## Text recognition (OCR)
+
+Reading the text of each screenshot into exports needs PaddleOCR, which adds well over a gigabyte, so it comes in a
+separate image: set `STEPTHROUGH_TAG=stable-ocr` (or any tag with `-ocr` added). It exists for x86-64 servers only,
+because PaddlePaddle publishes no Linux ARM packages, and it does not run under emulation either (on an ARM Mac it
+crashes as soon as recognition starts). The first run with text recognition downloads its models into the volume,
+which needs internet access from the server. To check it end to end, add `--ocr` to the smoke test:
+`docker compose exec -T stepthrough python - --ocr < smoke_test.py`.
+
+## Build the image yourself
+
+```bash
+git clone -b docker https://github.com/j-nivekk/Stepthrough.git && cd Stepthrough
+docker compose up -d --build --wait                                  # build and run this checkout
+STEPTHROUGH_WITH_OCR=true docker compose build                       # the text recognition variant
+docker build -f docker/Dockerfile --target test -t stepthrough:test . && docker run --rm stepthrough:test   # backend tests
+```
+
+The build uses only what the image needs (see `.dockerignore`), so recordings in a local `data/` folder never end up
+in it.
+
+## How the server version differs from the desktop app
+
+- It serves the interface and the API from one address, so no cross-origin settings are needed.
+- The database reset in **settings** is switched off.
+- At most `STEPTHROUGH_MAX_CONCURRENT_RUNS` analyses run at once; later ones show as `queued` and start in order.
+- It runs as one process, because live progress and the run queue are kept in memory. Restarting ends active runs.
+- The container runs as an unprivileged user with no extra Linux capabilities. Logs go to Docker
+  (`docker compose logs -f`), rotated at 5 × 10 MB.
+
+Still to come: accounts and private projects, analysis in a separate worker that survives restarts, and automatic
+deletion of old projects.
