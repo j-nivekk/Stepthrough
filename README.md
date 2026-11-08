@@ -33,16 +33,35 @@ Stepthrough is built around that workflow: record first, then review and curate 
 
 ---
 
+## 🐳 Quickest start: Docker
+
+With [Docker Desktop](https://www.docker.com/products/docker-desktop/) running, on Windows or Mac:
+
+```bash
+mkdir Stepthrough
+cd Stepthrough
+curl -fsSLO https://raw.githubusercontent.com/j-nivekk/Stepthrough/main/compose.yaml
+docker compose up -d
+```
+
+Then open `http://localhost:8080`. [`GUIDE.md`](GUIDE.md#3-installing-and-starting-stepthrough) explains every step,
+including updates, text recognition and what to do if something goes wrong. To run Stepthrough from the source code
+instead, read on.
+
+---
+
 ## 🏗 Requirements
 
-To run Stepthrough locally, you must have the following installed on your system:
-- **Python 3.11+**
+To run Stepthrough from source, you must have the following installed on your system:
 - **Node.js 18+**
-- **FFmpeg & FFprobe**: Required for video frame extraction. 
-  - *Mac:* `brew install ffmpeg` (or download the static build directly from [FFmpeg for Mac](https://evermeet.cx/ffmpeg/))
-  - *Ubuntu/Debian:* `sudo apt install ffmpeg`
-  - *Windows:* Available via `winget install ffmpeg` or [gyan.dev](https://www.gyan.dev/ffmpeg/builds/)
-- **[uv](https://github.com/astral-sh/uv)**: Used to manage Python dependencies blazingly fast.
+- **FFmpeg & FFprobe 5.1+**: Required for video frame extraction.
+  - *Mac:* `brew install ffmpeg`
+  - *Ubuntu/Debian:* `sudo apt install ffmpeg` (Ubuntu 22.04's FFmpeg 4.4 is too old)
+  - *Windows:* `winget install --id Gyan.FFmpeg -e`
+- **[uv](https://github.com/astral-sh/uv)**: Manages the Python dependencies, and installs Python 3.11+ if you do not have it.
+
+On Windows, `setup.sh` and `start.sh` do not run; [`GUIDE.md`](GUIDE.md#from-the-source-code) gives the commands to
+type instead.
 
 ---
 
@@ -97,6 +116,8 @@ covers installing, configuring, upgrading and backing it up.
 - [`GUIDE.md`](GUIDE.md): how Stepthrough works and how to use it, with a first tutorial, settings,
   review, exports, recording tips and notes on research use.
 - In the app, **about → how it works** shows the analysis of a sample recording, step by step.
+- [`docs/evaluation.md`](docs/evaluation.md): how well the detection works, how it was tested, and where it
+  fails.
 - [`backend/README.md`](backend/README.md): the detection engine, its settings and the export format, for
   developers.
 - [`DEPLOY.md`](DEPLOY.md): running the Docker image on a server.
