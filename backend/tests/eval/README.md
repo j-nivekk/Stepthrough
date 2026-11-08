@@ -130,8 +130,8 @@ phone-style upload must find every event with a settled screenshot and the openi
 step must be a return to an earlier screen.
 
 The retired hybrid v2 engine and its scenario runner (`runner.py`, realistic matrices, stored results)
-are at the git tag `last-with-hybrid-v2`. On this matrix it scored 0.79 F1 on clean uploads against 0.98
-for stable screens; see `docs/robustness-review-2026-11.md`.
+are at the git tag `last-with-hybrid-v2`. The current engine's results on this matrix, and its known limits, are
+in `docs/evaluation.md`.
 
 ## Adding a new scenario
 

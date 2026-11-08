@@ -3,14 +3,14 @@
 A walkthrough step is a *settled interface state*: a stretch of the recording in which the screen stops
 changing for at least ``min_dwell_ms``. This engine finds those stretches and takes one screenshot from
 inside each, so every screenshot shows a settled screen by construction. It follows the steady-state
-keyframe location of GIFdroid (Feng and Chen, ICSE 2022); see ``docs/robustness-review-2026-11.md``.
+keyframe location of GIFdroid (Feng and Chen, ICSE 2022); see ``docs/evaluation.md``.
 
 Pipeline:
 
 1. Decode the working copy on a fixed real-time grid (ffmpeg ``fps`` filter), small and grey.
 2. Pass 1, frame to frame: per-cell activity, a noise floor measured on the recording itself, and the
    vertical/horizontal motion of the content (phase correlation).
-3. Ignore regions that keep moving (caret, spinner, clock, a small embedded video), the student's own
+3. Ignore regions that keep moving (caret, spinner, clock, a small embedded video), the user's own
    ignore areas and, on phones, the status bar.
 4. Pass 2: a stable interval is a run of frames that all match its *first* frame, meaning no connected
    change larger than ``min_change_percent`` of the screen outside the ignored regions. Comparing with
@@ -20,7 +20,7 @@ Pipeline:
    (navigation, scroll, modal, ...), collapse typing bursts and, optionally, scroll stops.
 6. Extract one screenshot per step from the working copy.
 
-Every student-facing setting is in physical units. The fully resolved values and the engine version are
+Every user-facing setting is in physical units. The fully resolved values and the engine version are
 stored with each run (``resolve_stable_config``), so results can be reproduced and cited.
 """
 

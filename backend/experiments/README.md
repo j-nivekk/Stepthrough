@@ -1,6 +1,7 @@
 # Experiments (not part of the app)
 
-Scripts behind `docs/robustness-review-2026-11.md`. Run them from `backend/` with the project venv.
+Scripts used while building and measuring the stable-screen engine; `docs/evaluation.md` reports what they
+measure. Run them from `backend/` with the project venv.
 
 | script | what it does |
 |---|---|

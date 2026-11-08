@@ -97,7 +97,7 @@ def _max_concurrent_runs(deployment: str) -> int | None:
     """Detection runs allowed at once; later runs wait as `queued`. `0` lifts the limit."""
     raw = (os.environ.get("STEPTHROUGH_MAX_CONCURRENT_RUNS") or "").strip()
     if not raw:
-        # A shared server must not start one analysis per student at the same moment.
+        # A shared server must not start one analysis per user at the same moment.
         return DEFAULT_SERVER_MAX_CONCURRENT_RUNS if deployment == "server" else None
     try:
         value = int(raw)

@@ -17,3 +17,6 @@ backend/experiments/out/
 
 # Docker settings for a deployment (see .env.example).
 .env
+
+# Internal planning and review notes, kept locally only.
+docs/robustness-review-2026-11.md

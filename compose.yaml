@@ -1,4 +1,4 @@
-# Stepthrough on a server, or to try the server version locally. See DEPLOY.md.
+# Stepthrough as a Docker container, on a server (see DEPLOY.md) or on your own computer (see GUIDE.md, section 3).
 #
 #   docker compose up -d            # pull the published image and start it
 #   docker compose up -d --build    # build the image from this checkout instead

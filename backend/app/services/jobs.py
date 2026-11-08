@@ -9,7 +9,7 @@ class JobManager:
     """Run threads, their progress events and cancel signals, all in this process's memory.
 
     With `max_concurrent_runs` set, at most that many runs hold a slot at once. The rest wait in the order they were
-    started (`wait_for_slot`), so a seminar's worth of runs started together cannot saturate a shared server.
+    started (`wait_for_slot`), so a whole group's runs started together cannot saturate a shared server.
     """
 
     def __init__(self, max_concurrent_runs: int | None = None) -> None:

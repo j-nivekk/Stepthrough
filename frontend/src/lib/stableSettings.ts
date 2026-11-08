@@ -124,7 +124,7 @@ export interface EffectiveStableValues {
   sampleFps: number;
 }
 
-/** The values a run will use: the student's overrides, else the recording type's defaults. */
+/** The values a run will use: the user's overrides, else the recording type's defaults. */
 export function getEffectiveStableValues(
   stable: StableSettings,
   analysisMetadata: AnalysisMetadata | null | undefined,

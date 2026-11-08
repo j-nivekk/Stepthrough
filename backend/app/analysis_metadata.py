@@ -15,7 +15,7 @@ class StableRecordingTypeMetadata:
     ignore_status_bar: bool
 
 
-# Defaults of the stable-screen engine per kind of recording. Students can override each value.
+# Defaults of the stable-screen engine per kind of recording. Users can override each value.
 STABLE_RECORDING_TYPES: dict[RecordingType, StableRecordingTypeMetadata] = {
     "phone": StableRecordingTypeMetadata(
         label="phone or tablet",

@@ -27,7 +27,7 @@ Recording `fps`, `duration_ms`, `width` and `height` describe the working copy o
 Runs use **`stable_v3` ("stable screens")**, in `app/services/stable_detection.py`. A step is a screen that
 stays still for at least the minimum time on screen. The engine takes one screenshot from inside each such
 screen, 200 ms after it settles, so screenshots never catch an animation half-way. The design, its
-evaluation and its limits are in `docs/robustness-review-2026-11.md`, section 1.
+evaluation and its limits are in [`docs/evaluation.md`](../docs/evaluation.md).
 
 The earlier engines, `hybrid_v2` and `scene_v1`, are retired. Their runs still load, review, compare and
 export (their stored settings and field notes are kept), but `POST /recordings/{id}/runs` refuses them with
@@ -105,5 +105,5 @@ Run the API with a single worker process: run progress, cancel requests and the 
 memory. The database uses SQLite's write-ahead log; copy it with `python -m app.backup` (SQLite's backup API)
 rather than copying the file. For the Docker image, see [`DEPLOY.md`](../DEPLOY.md).
 
-Not yet in place for a shared server: user accounts and per-user access checks (planned behind SURFconext
-login at the reverse proxy), and a job queue that bounds concurrent runs.
+Not yet in place for a shared server: user accounts and per-user access checks (planned behind a single sign-on
+login at the reverse proxy), and analysis in a separate worker that survives restarts.

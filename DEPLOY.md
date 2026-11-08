@@ -1,13 +1,15 @@
 # Running Stepthrough on a server
 
-Stepthrough runs as one Docker container: the web interface, the API and the analysis, with everything it stores in
-one Docker volume. A web server on the host (nginx in the examples) adds HTTPS and the domain name. The setup follows
-the pattern of other Digital Methods Initiative tools such as 4CAT: a `compose.yaml`, a `.env` file for settings, and
-a published image that is updated with `docker compose pull`.
+Stepthrough runs as one Docker container that holds the web interface, the API and the analysis. Everything it stores
+is kept in one Docker volume. A web server on the host (nginx in the examples) adds HTTPS and the domain name.
+Settings go in a `.env` file next to `compose.yaml`, and new versions come as a published image that you fetch with
+`docker compose pull`.
 
-> **Before students use it.** Stepthrough has no accounts yet. Everyone who can open the address sees, and can
-> delete, every project. Until accounts arrive, restrict who can reach it (a shared password or the university
-> network; see the nginx example) and do not use it for recordings that show other people.
+To run Stepthrough on your own computer instead, see section 3 of [`GUIDE.md`](GUIDE.md#3-installing-and-starting-stepthrough).
+
+> **Before you share the address.** Stepthrough has no user accounts yet. Everyone who can open the address can see,
+> and delete, every project. Until accounts arrive, limit who can reach it (with a shared password or by network
+> address; see the nginx example), and do not use it for recordings that show other people.
 
 ## What you need
 
@@ -72,8 +74,8 @@ docker compose pull && docker compose up -d --wait
 ```
 
 Data lives in the volume and survives upgrades. Database changes are applied automatically at start-up. A restart
-ends analyses that are still running; they show as interrupted and can be started again, so upgrade outside teaching
-hours. To stay on a known version, set `STEPTHROUGH_TAG` to a release number instead of `stable`.
+ends analyses that are still running; they show as interrupted and can be started again, so upgrade when nobody is
+using it. To stay on a known version, set `STEPTHROUGH_TAG` to a release number instead of `stable`.
 
 ## Back up and restore
 
@@ -106,14 +108,14 @@ docker compose up -d --wait
 ## Text recognition (OCR)
 
 Reading the text of each screenshot into exports needs PaddleOCR, which adds well over a gigabyte, so it comes in a
-separate image: set `STEPTHROUGH_TAG=stable-ocr` (or any tag with `-ocr` added). It exists for x86-64 servers only,
-because PaddlePaddle publishes no Linux ARM packages, and it does not run under emulation either (on an ARM Mac it
-crashes as soon as recognition starts). The first run with text recognition downloads its models into the volume,
-which needs internet access from the server. To check it end to end, add `--ocr` to the smoke test:
+separate image: set `STEPTHROUGH_TAG=stable-ocr` (or add `-ocr` to any other tag). This image is for x86-64 (Intel
+and AMD) machines only: PaddlePaddle publishes no packages for ARM Linux, and the x86-64 image does not work under
+emulation. The first run with text recognition downloads its models into the volume, so the server needs internet
+access. To check it end to end, add `--ocr` to the smoke test:
 `docker compose exec -T stepthrough python - --ocr < smoke_test.py`.
 
-On x86 servers recognition is slower than on a Mac: PaddlePaddle 3.3.0's oneDNN acceleration is broken on x86 and
-Stepthrough switches it off. The known PaddlePaddle version bugs are listed in
+Recognition runs without PaddlePaddle's oneDNN acceleration, which is broken on x86-64 in PaddlePaddle 3.3.0, so it
+is slower than it could be. The known PaddlePaddle version bugs are listed in
 [`backend/README.md`](backend/README.md#paddlepaddle-version-bugs).
 
 ## Build the image yourself
@@ -128,7 +130,7 @@ docker build -f docker/Dockerfile --target test -t stepthrough:test . && docker 
 The build uses only what the image needs (see `.dockerignore`), so recordings in a local `data/` folder never end up
 in it.
 
-## How the server version differs from the desktop app
+## How the Docker image differs from running Stepthrough from source
 
 - It serves the interface and the API from one address, so no cross-origin settings are needed.
 - The database reset in **settings** is switched off.
