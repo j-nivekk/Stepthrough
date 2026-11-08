@@ -49,6 +49,7 @@ LOCAL_DEV_ORIGINS = (
     "http://127.0.0.1:4173",
 )
 DEFAULT_MAX_UPLOAD_MB = 2048
+DEFAULT_SERVER_MAX_CONCURRENT_RUNS = 2
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,10 @@ class ServerConfig:
     cors_origins: tuple[str, ...]
     max_upload_bytes: int
     allow_admin_reset: bool
+    # None means no limit: the desktop app runs whatever its one user starts.
+    max_concurrent_runs: int | None = None
+    # A built frontend (`npm run build` output) to serve from the API's own origin, as the Docker image does.
+    frontend_dir: Path | None = None
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -83,7 +88,34 @@ def build_server_config() -> ServerConfig:
         cors_origins=cors_origins,
         max_upload_bytes=int(max_upload_mb * 1024 * 1024),
         allow_admin_reset=_env_flag("STEPTHROUGH_ALLOW_ADMIN_RESET", deployment == "local"),
+        max_concurrent_runs=_max_concurrent_runs(deployment),
+        frontend_dir=_frontend_dir(),
     )
+
+
+def _max_concurrent_runs(deployment: str) -> int | None:
+    """Detection runs allowed at once; later runs wait as `queued`. `0` lifts the limit."""
+    raw = (os.environ.get("STEPTHROUGH_MAX_CONCURRENT_RUNS") or "").strip()
+    if not raw:
+        # A shared server must not start one analysis per student at the same moment.
+        return DEFAULT_SERVER_MAX_CONCURRENT_RUNS if deployment == "server" else None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"Invalid STEPTHROUGH_MAX_CONCURRENT_RUNS `{raw}`. Use a whole number; 0 means no limit.") from exc
+    if value < 0:
+        raise ValueError(f"Invalid STEPTHROUGH_MAX_CONCURRENT_RUNS `{raw}`. Use a whole number; 0 means no limit.")
+    return value or None
+
+
+def _frontend_dir() -> Path | None:
+    raw = (os.environ.get("STEPTHROUGH_FRONTEND_DIR") or "").strip()
+    if not raw:
+        return None
+    directory = Path(raw).expanduser().resolve()
+    if not (directory / "index.html").is_file():
+        raise ValueError(f"STEPTHROUGH_FRONTEND_DIR `{directory}` has no index.html. Point it at the frontend's `dist` folder.")
+    return directory
 
 
 def ensure_app_dirs() -> None:

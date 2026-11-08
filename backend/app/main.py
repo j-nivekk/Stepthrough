@@ -186,7 +186,7 @@ def startup() -> None:
     init_db()
     app.state.tool_diagnostics = build_tool_diagnostics()
     _set_ocr_state(_checking_ocr_state())
-    app.state.job_manager = JobManager()
+    app.state.job_manager = JobManager(max_concurrent_runs=server_config.max_concurrent_runs)
     fail_interrupted_runs(INTERRUPTED_RUN_MESSAGE)
     _start_background_ocr_probe()
 
@@ -527,6 +527,18 @@ def _run_detection_job(run_id: str) -> None:
     manager = _job_manager()
     temp_root: Path | None = None
     try:
+        if not manager.has_free_slot():
+            ahead = manager.runs_ahead(run_id)
+            _set_run_state(
+                run_id,
+                status="queued",
+                phase="queued",
+                progress=0.0,
+                message="Waiting for a free analysis slot" + (f" ({ahead} queued ahead)" if ahead else ""),
+                level="info",
+            )
+        if not manager.wait_for_slot(run_id):
+            raise CancellationRequested("Run ended before it started")
         project, recording, run = _run_context(run_id)
         settings = RunSettings(
             analysis_engine=run.get("analysis_engine") or "scene_v1",
@@ -653,8 +665,10 @@ def _run_detection_job(run_id: str) -> None:
         manager.finish(run_id)
 
 
-@app.get("/")
-def root() -> dict[str, str]:
+@app.get("/", include_in_schema=False, response_model=None)
+def root() -> dict[str, str] | FileResponse:
+    if server_config.frontend_dir is not None:
+        return FileResponse(server_config.frontend_dir / "index.html", headers={"Cache-Control": "no-cache"})
     return {"app": "stepthrough", "status": "ok"}
 
 
@@ -687,7 +701,7 @@ def admin_reset_db(confirm: str | None = Header(default=None, alias=ADMIN_CONFIR
     if confirm != "reset-database":
         raise HTTPException(status_code=400, detail=f"Send the `{ADMIN_CONFIRM_HEADER}: reset-database` header to confirm.")
     reset_db()
-    app.state.job_manager = JobManager()
+    app.state.job_manager = JobManager(max_concurrent_runs=server_config.max_concurrent_runs)
     return Response(status_code=204)
 
 
@@ -857,7 +871,9 @@ def runs_cancel(run_id: str) -> DetectionRunSummary:
         raise HTTPException(status_code=404, detail="Run not found")
     if run["status"] not in ACTIVE_RUN_STATUSES:
         raise HTTPException(status_code=409, detail="Only queued or running jobs can be aborted")
-    _job_manager().request_cancel(run_id)
+    # Record the request before signalling it: a queued run ends at once, and its final message must not be
+    # overwritten by this one afterwards.
+    update_run(run_id, message="Abort requested")
     _emit_run_event(
         run_id,
         phase=run.get("phase") or "queued",
@@ -865,7 +881,7 @@ def runs_cancel(run_id: str) -> DetectionRunSummary:
         message="Abort requested",
         progress=run.get("progress"),
     )
-    update_run(run_id, message="Abort requested")
+    _job_manager().request_cancel(run_id)
     return _serialize_run_summary(get_run(run_id))
 
 
@@ -1038,3 +1054,23 @@ def exports_download(bundle_id: str) -> FileResponse:
     if not zip_path.exists():
         raise HTTPException(status_code=404, detail="Export archive missing on disk")
     return FileResponse(zip_path, media_type="application/zip", filename=zip_path.name)
+
+
+class FrontendFiles(StaticFiles):
+    """The built frontend. Vite puts a content hash in every asset name, so those can be cached for good;
+    everything else (index.html, the icon) is revalidated so a new release shows up on the next load."""
+
+    async def get_response(self, path: str, scope) -> Response:
+        response = await super().get_response(path, scope)
+        immutable = path.startswith("assets/") and response.status_code == 200
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable" if immutable else "no-cache"
+        return response
+
+
+def mount_frontend(target: FastAPI, directory: Path) -> None:
+    # Mounted last, so every API route and the `/assets/projects` media mount above take precedence.
+    target.mount("/", FrontendFiles(directory=str(directory), html=True), name="frontend")
+
+
+if server_config.frontend_dir is not None:
+    mount_frontend(app, server_config.frontend_dir)

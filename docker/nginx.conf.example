@@ -1,0 +1,57 @@
+# nginx in front of the Stepthrough container, on its own subdomain (as DMI hosts its other tools).
+# Copy to /etc/nginx/sites-available/stepthrough.example.org, adjust the names and paths, enable it and reload.
+# Stepthrough must be served at the root of its domain; a sub-path such as /stepthrough/ is not supported.
+
+# WebSocket upgrades for live run progress. This `map` belongs to the http context: if another site on this
+# server already defines $connection_upgrade, delete this block rather than defining it twice.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name stepthrough.example.org;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;  # nginx 1.25.1 and later; on older versions write `listen 443 ssl http2;` above instead
+    server_name stepthrough.example.org;
+
+    ssl_certificate     /etc/letsencrypt/live/stepthrough.example.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/stepthrough.example.org/privkey.pem;
+
+    # At least STEPTHROUGH_MAX_UPLOAD_MB from .env, plus a little for the rest of the form.
+    client_max_body_size 1100m;
+
+    # Stepthrough has no accounts yet: everyone who can open this address sees every project. Until it does,
+    # limit who can reach it, for example with a shared course password (`htpasswd -c /etc/nginx/stepthrough.htpasswd
+    # course`, from apache2-utils) or to the university network.
+    # auth_basic           "Stepthrough";
+    # auth_basic_user_file /etc/nginx/stepthrough.htpasswd;
+    # allow 192.0.2.0/24;  # placeholder; use your institution's address ranges
+    # deny  all;
+
+    location / {
+        # STEPTHROUGH_BIND_ADDRESS and STEPTHROUGH_PORT from .env.
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $connection_upgrade;
+
+        # Pass uploads through as they arrive instead of storing each one in nginx first.
+        proxy_request_buffering off;
+        # Long uploads, downloads of large exports, and progress sockets that stay open through a run.
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+}

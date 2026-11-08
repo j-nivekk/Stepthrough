@@ -1,0 +1,47 @@
+# Stepthrough on a server, or to try the server version locally. See DEPLOY.md.
+#
+#   docker compose up -d            # pull the published image and start it
+#   docker compose up -d --build    # build the image from this checkout instead
+#
+# Settings come from a `.env` file next to this one (copy `.env.example`); every setting has a default.
+
+name: stepthrough
+
+services:
+  stepthrough:
+    image: ghcr.io/j-nivekk/stepthrough:${STEPTHROUGH_TAG:-stable}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: runtime
+      args:
+        WITH_OCR: ${STEPTHROUGH_WITH_OCR:-false}
+    restart: unless-stopped
+    # Bound to the loopback address by default: the host's nginx (or another proxy) handles TLS and the domain.
+    ports:
+      - "${STEPTHROUGH_BIND_ADDRESS:-127.0.0.1}:${STEPTHROUGH_PORT:-8080}:8000"
+    environment:
+      STEPTHROUGH_MAX_CONCURRENT_RUNS: ${STEPTHROUGH_MAX_CONCURRENT_RUNS:-2}
+      STEPTHROUGH_MAX_UPLOAD_MB: ${STEPTHROUGH_MAX_UPLOAD_MB:-1024}
+      STEPTHROUGH_OCR_MODEL_SOURCE: ${STEPTHROUGH_OCR_MODEL_SOURCE:-auto}
+    volumes:
+      - data:/data
+    # A heavy analysis must not starve other tools on the same host. 0 means no limit.
+    cpus: ${STEPTHROUGH_CPUS:-0}
+    mem_limit: ${STEPTHROUGH_MEMORY:-0}
+    init: true
+    # Runs still going when the container stops are marked as interrupted on the next start.
+    stop_grace_period: 30s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  data:
+    name: ${STEPTHROUGH_VOLUME:-stepthrough_data}

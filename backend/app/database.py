@@ -105,9 +105,14 @@ CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id, created_a
 """
 
 
+# Runs write progress from their own threads while requests read and write too. A writer waits this long for
+# another to finish instead of failing at once with "database is locked" (sqlite3's default is 5 s).
+BUSY_TIMEOUT_SECONDS = 30
+
+
 def get_connection() -> sqlite3.Connection:
     ensure_app_dirs()
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=BUSY_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -170,6 +175,9 @@ def init_db() -> None:
     ensure_app_dirs()
     Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
     with connect() as conn:
+        # Write-ahead logging lets readers carry on while a run writes, and is a property of the file, so set once
+        # here. Back the database up with SQLite's backup API (`python -m app.backup`), not by copying the file.
+        conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
         _ensure_column(conn, "detection_runs", "phase", "TEXT NOT NULL DEFAULT 'queued'")
         _ensure_column(conn, "detection_runs", "analysis_engine", "TEXT NOT NULL DEFAULT 'scene_v1'")

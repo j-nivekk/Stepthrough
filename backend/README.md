@@ -36,6 +36,25 @@ export (their stored settings and field notes are kept), but `POST /recordings/{
 OCR (`enable_ocr`) needs the optional PaddleOCR packages: `uv sync --group ocr`. Note that a plain `uv sync`,
 `uv add` or `uv remove` uninstalls them again unless `--group ocr` is passed.
 
+### PaddlePaddle version bugs
+
+OCR is pinned to `paddlepaddle==3.3.0` with `paddleocr==3.3.0`. Change the two together, and test on an x86
+machine before bumping either (CI's `test-ocr` job does this for the Docker image).
+
+- **oneDNN fails in 3.3.0 on x86 CPUs** (Linux servers, and Windows machines running the desktop app). The first
+  prediction stops with `(Unimplemented) ConvertPirAttribute2RuntimeAttribute not support
+  [pir::ArrayAttribute<pir::DoubleAttribute>]` from `onednn_instruction.cc`, a regression in that release
+  ([Paddle#77340](https://github.com/PaddlePaddle/Paddle/issues/77340)). Stepthrough therefore turns oneDNN off
+  (`enable_mkldnn=False` in `app/services/ocr.py`), so x86 recognition runs on plain CPU kernels and is slower.
+  Apple silicon never uses oneDNN and is unaffected. If the error comes back, the fix reported upstream is
+  `paddlepaddle==3.2.2`.
+- **Mismatched versions** of `paddleocr` and `paddlepaddle` cause similar errors
+  ([PaddleOCR discussion #17350](https://github.com/PaddlePaddle/PaddleOCR/discussions/17350)).
+- **No Linux ARM packages** exist for 3.3.0, so the `-ocr` Docker image is x86-64 only.
+- **No emulation.** The x86-64 build crashes (segmentation fault) under Docker Desktop's emulation on an ARM Mac
+  as soon as recognition starts, even with oneDNN off, so it can only be tested on real x86 hardware. Even
+  building it under emulation needs `--build-arg COMPILE_BYTECODE=0`.
+
 Settings (`RunSettings.stable`; `null` means the recording type's default):
 
 | setting | meaning | phone / computer default |
@@ -75,10 +94,16 @@ breakdown, revisit links and the timing columns `transition_type`, `change_start
 | `STEPTHROUGH_CORS_ORIGINS` | the Vite dev and preview origins in `local`; none in `server` | comma-separated origins allowed to call the API from a browser |
 | `STEPTHROUGH_MAX_UPLOAD_MB` | `2048` | largest accepted upload; also enforce it in the reverse proxy (`client_max_body_size`) |
 | `STEPTHROUGH_ALLOW_ADMIN_RESET` | on in `local`, off in `server` | whether `POST /admin/reset-db` is available (it also requires the `X-Stepthrough-Confirm: reset-database` header) |
+| `STEPTHROUGH_MAX_CONCURRENT_RUNS` | no limit in `local`, `2` in `server` | analyses that may run at once; later runs wait as `queued`, first come first served, and can be ended while they wait. `0` lifts the limit |
+| `STEPTHROUGH_FRONTEND_DIR` | unset | a built frontend (`frontend/dist`) to serve from the API's own origin, as the Docker image does; it must contain `index.html` |
 
 Only `data/projects/` is served under `/assets/projects/`; the database, OCR models and other files in
 the data root are not reachable over HTTP. Runs that were queued or running when the backend stopped are
 marked failed at the next start-up.
+
+Run the API with a single worker process: run progress, cancel requests and the run queue live in that process's
+memory. The database uses SQLite's write-ahead log; copy it with `python -m app.backup` (SQLite's backup API)
+rather than copying the file. For the Docker image, see [`DEPLOY.md`](../DEPLOY.md).
 
 Not yet in place for a shared server: user accounts and per-user access checks (planned behind SURFconext
 login at the reverse proxy), and a job queue that bounds concurrent runs.

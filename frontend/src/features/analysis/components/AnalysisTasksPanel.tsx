@@ -181,7 +181,9 @@ export function AnalysisTasksPanel({
         ? 'error'
         : run.status === 'cancelled'
           ? 'ended'
-          : formatPercent(run.progress);
+          : run.status === 'queued'
+            ? 'queued' // waiting for a free analysis slot on a shared server
+            : formatPercent(run.progress);
     const elapsedSource = activeRunStatuses.includes(run.status) ? run.started_at ?? run.created_at : null;
     const elapsedLabel = elapsedSource ? formatElapsedDuration(taskClockMs - new Date(elapsedSource).getTime()) : null;
     const isLive = liveRunStatuses.includes(run.status);

@@ -172,9 +172,15 @@ def write_hdr_lut(path: Path, hdr_kind: str, reference_white_nits: float, size: 
     return path
 
 
+# swscale's default fast rounding converts colours differently from one ffmpeg release to the next: ffmpeg 7.1 (the
+# Docker image's Debian) made working copies up to two levels darker than 8 and later (the Mac). With these flags
+# every version gives the same pixels, so a run on the server matches the same run on the desktop.
+ACCURATE_SCALE = "flags=accurate_rnd+full_chroma_int"
+
+
 def _yuv_to_rgb48(info: SourceInfo) -> str:
     in_range = "pc" if info.color_range == "pc" else "tv"
-    return f"scale=in_color_matrix=bt2020:in_range={in_range}:out_range=pc,format=rgb48le"
+    return f"scale=in_color_matrix=bt2020:in_range={in_range}:out_range=pc:{ACCURATE_SCALE},format=rgb48le"
 
 
 def estimate_reference_white(source: Path, info: SourceInfo) -> float:
@@ -203,7 +209,7 @@ def _video_filter(info: SourceInfo, lut_name: str | None, fps: str) -> str:
     # Output-side `-fps_mode cfr -r` was measured to shift changes by up to 0.5 s on VFR input.
     # The scale directly before `format` performs the final conversion, so it carries the BT.709 matrix.
     to_bt709 = (
-        "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
+        f"scale=out_color_matrix=bt709:out_range=tv:{ACCURATE_SCALE},format=yuv420p,"
         "setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv"
     )
     even = f"fps={fps},scale=trunc(iw/2)*2:trunc(ih/2)*2"

@@ -137,3 +137,24 @@ def test_cancelled_working_copy_leaves_no_partial_file(tmp_path: Path) -> None:
         build_working_copy(source, working, cancellation_callback=lambda: True)
     assert not working.exists()
     assert not list(working.parent.glob('*.partial.mp4'))
+
+
+
+def test_working_copy_keeps_light_screens_light(tmp_path: Path) -> None:
+    # With swscale's default rounding, ffmpeg 7.1 (the Docker image) made this untagged near-white screen two levels
+    # darker in the working copy than ffmpeg 8 and later (the Mac) did; the conversion is now exact on both.
+    source = tmp_path / 'light.mp4'
+    _ffmpeg('-f', 'lavfi', '-i', 'color=c=0xF6F4EE:s=320x240:d=1', '-f', 'lavfi', '-i', 'color=c=0x9A9A9A:s=320x240:d=1',
+            '-filter_complex', '[0:v][1:v]concat=n=2:v=1:a=0', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(source))
+    working = tmp_path / 'working.mp4'
+    build_working_copy(source, working)
+
+    def frame_at(path: Path, index: int) -> np.ndarray:
+        capture = cv2.VideoCapture(str(path))
+        capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+        ok, frame = capture.read()
+        assert ok
+        return frame.astype(np.float32)
+
+    for index in (5, 40):  # the near-white screen, then a mid grey
+        assert float(np.abs(frame_at(working, index) - frame_at(source, index)).mean()) < 1.0

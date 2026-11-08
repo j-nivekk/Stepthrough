@@ -3,6 +3,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 
 import {
   abortRun,
+  apiSocketUrl,
   createManualCandidate,
   createManualRun,
   createProject,
@@ -304,9 +305,7 @@ function App() {
 
     const runId = selectedRunId;
     const recordingId = selectedRunRecordingId;
-    const socketUrl = new URL(`/runs/${runId}/events`, import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000')
-      .toString()
-      .replace(/^http/, 'ws');
+    const socketUrl = apiSocketUrl(`/runs/${runId}/events`);
     const socket = new WebSocket(socketUrl);
 
     // A run sends several progress events a second; refresh the task list and run at most once a second.
