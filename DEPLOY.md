@@ -23,8 +23,8 @@ a published image that is updated with `docker compose pull`.
 
 ```bash
 mkdir stepthrough && cd stepthrough
-curl -fsSLO https://raw.githubusercontent.com/j-nivekk/Stepthrough/docker/compose.yaml
-curl -fsSL -o .env https://raw.githubusercontent.com/j-nivekk/Stepthrough/docker/.env.example
+curl -fsSLO https://raw.githubusercontent.com/j-nivekk/Stepthrough/main/compose.yaml
+curl -fsSL -o .env https://raw.githubusercontent.com/j-nivekk/Stepthrough/main/.env.example
 docker compose up -d --wait
 curl -fsS http://127.0.0.1:8080/health
 ```
@@ -38,7 +38,7 @@ Edit `.env`, then apply it with `docker compose up -d --wait`. Every setting is 
 
 | setting | default | meaning |
 |---|---|---|
-| `STEPTHROUGH_TAG` | `stable` | image version: `stable` (latest release), a release such as `0.2.0`, or `edge` (latest from the `docker` branch) |
+| `STEPTHROUGH_TAG` | `stable` | image version: `stable` (latest release), a release such as `0.2.0`, or `edge` (latest from `main`) |
 | `STEPTHROUGH_BIND_ADDRESS` | `127.0.0.1` | host address to listen on; keep `127.0.0.1` behind a web server |
 | `STEPTHROUGH_PORT` | `8080` | host port |
 | `STEPTHROUGH_MAX_CONCURRENT_RUNS` | `2` | analyses that run at once; `0` is no limit |
@@ -60,7 +60,7 @@ Then check the whole chain from outside, using the smoke test from the repositor
 recording, analyses it, exports it and deletes it again:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/j-nivekk/Stepthrough/docker/docker/smoke_test.py
+curl -fsSLO https://raw.githubusercontent.com/j-nivekk/Stepthrough/main/docker/smoke_test.py
 python3 smoke_test.py https://stepthrough.example.org   # needs ffmpeg on the machine you run it from
 docker compose exec -T stepthrough python - < smoke_test.py   # or inside the container, without the web server
 ```
@@ -119,7 +119,7 @@ Stepthrough switches it off. The known PaddlePaddle version bugs are listed in
 ## Build the image yourself
 
 ```bash
-git clone -b docker https://github.com/j-nivekk/Stepthrough.git && cd Stepthrough
+git clone https://github.com/j-nivekk/Stepthrough.git && cd Stepthrough
 docker compose up -d --build --wait                                  # build and run this checkout
 STEPTHROUGH_WITH_OCR=true docker compose build                       # the text recognition variant
 docker build -f docker/Dockerfile --target test -t stepthrough:test . && docker run --rm stepthrough:test   # backend tests

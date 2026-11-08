@@ -1,7 +1,7 @@
 # Builds the Docker image, runs the backend tests and an end-to-end smoke test inside it, and publishes it to the
 # GitHub Container Registry (ghcr.io/j-nivekk/stepthrough).
 #
-#   push to the `docker` branch  -> :edge and :sha-<commit>   (plus -ocr variants)
+#   push to `main`               -> :edge and :sha-<commit>   (plus -ocr variants)
 #   push a tag such as v0.2.0    -> :0.2.0, :0.2 and :stable  (plus -ocr variants)
 #   pull requests                -> test only, nothing published
 #
@@ -11,7 +11,7 @@ name: Docker image
 
 on:
   push:
-    branches: [docker]
+    branches: [main]
     tags: ["v*"]
   pull_request:
     paths:
@@ -153,8 +153,8 @@ jobs:
             latest=false
             suffix=${{ matrix.variant }}
           tags: |
-            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/docker' }}
-            type=sha,prefix=sha-,enable=${{ github.ref == 'refs/heads/docker' }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
