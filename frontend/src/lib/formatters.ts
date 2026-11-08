@@ -72,8 +72,11 @@ function formatProjectActivity(lastActivityAt: string): string {
   if (diffMs <= 0) {
     return 'now';
   }
+  if (diffMs < hourMs) {
+    return '<1h';
+  }
   if (diffMs < dayMs) {
-    return `${Math.max(1, Math.floor(diffMs / hourMs))}h`;
+    return `${Math.floor(diffMs / hourMs)}h`;
   }
   if (diffMs < monthMs) {
     return `${Math.max(1, Math.floor(diffMs / dayMs))}d`;
