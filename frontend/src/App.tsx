@@ -27,7 +27,7 @@ import {
   updateRecording,
 } from './api';
 import { AppSettings } from './components/AppSettings';
-import { AppWatermark } from './components/AppWatermark';
+import { AppWatermark, type CornerPanel } from './components/AppWatermark';
 import { AccountPanel } from './features/account/AccountPanel';
 import { UsersScreen } from './features/account/UsersScreen';
 import { PerformanceMonitor } from './components/PerformanceMonitor';
@@ -128,8 +128,10 @@ function App({ session, onSessionChange }: AppProps) {
   const [bulkDeletePending, setBulkDeletePending] = useState(false);
   const [bulkExportPending, setBulkExportPending] = useState(false);
   const [appPrefs, setAppPrefs] = useState<AppPreferences>(() => loadAppPreferences());
-  const [showSettings, setShowSettings] = useState(false);
-  const [showAccount, setShowAccount] = useState(false);
+  // The account, settings and about panels share the bottom-right corner: one at a time.
+  const [cornerPanel, setCornerPanel] = useState<CornerPanel | null>(null);
+  const closeCornerPanel = (panel: CornerPanel) =>
+    setCornerPanel((current) => (current === panel ? null : current));
   const [showUsers, setShowUsers] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const sessionUser = session?.user ?? null;
@@ -1392,7 +1394,7 @@ function App({ session, onSessionChange }: AppProps) {
     } finally {
       setIsLoggingOut(false);
     }
-    setShowAccount(false);
+    setCornerPanel(null);
     onSessionChange({ mode: 'password', user: null });
   }
 
@@ -1400,35 +1402,33 @@ function App({ session, onSessionChange }: AppProps) {
   const chrome = (
     <>
       <AppWatermark
-        account={
-          accountUser
-            ? { label: accountUser.display_name ?? accountUser.name, active: showAccount, onOpen: () => setShowAccount(true) }
-            : null
-        }
-        onOpenSettings={() => setShowSettings(true)}
+        accountLabel={accountUser ? accountUser.display_name ?? accountUser.name : null}
+        onOpenPanel={setCornerPanel}
+        openPanel={cornerPanel}
+        withSettings
       />
       <AppSettings
         healthData={healthQuery.data}
         isAdmin={isAdmin}
         isRecheckingOcr={recheckOcrMutation.isPending}
         isResettingDatabase={resetDatabaseMutation.isPending}
-        open={showSettings}
+        open={cornerPanel === 'settings'}
         prefs={appPrefs}
         onChangePref={updateAppPref}
-        onClose={() => setShowSettings(false)}
+        onClose={() => closeCornerPanel('settings')}
         onRecheckOcr={() => recheckOcrMutation.mutate()}
         onResetDatabase={() => resetDatabaseMutation.mutate()}
       />
       {accountUser && (
         <AccountPanel
           isLoggingOut={isLoggingOut}
-          onClose={() => setShowAccount(false)}
+          onClose={() => closeCornerPanel('account')}
           onLogOut={() => void handleLogOut()}
           onOpenUsers={() => {
-            setShowAccount(false);
+            setCornerPanel(null);
             setShowUsers(true);
           }}
-          open={showAccount}
+          open={cornerPanel === 'account'}
           user={accountUser}
         />
       )}
