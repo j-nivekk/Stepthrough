@@ -166,6 +166,8 @@ class UserImportResponse(BaseModel):
     created: list[UserImportCreated] = []
     existing: list[str] = []
     errors: list[UserImportProblem] = []
+    # Passwords from the list are kept as given; these would be refused as new passwords.
+    weak_passwords: list[str] = []
 
 
 class UserDeletedResponse(BaseModel):

@@ -135,6 +135,7 @@ export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
                 a <code className="app-settings-code">name</code> column, as 4cat uses; optionally{' '}
                 <code className="app-settings-code">expires</code>, <code className="app-settings-code">tags</code>,{' '}
                 <code className="app-settings-code">password</code> and <code className="app-settings-code">notes</code>.
+                passwords in the list are kept as given.
               </span>
               <input
                 accept=".csv,.tsv,.txt,text/csv"
@@ -245,6 +246,13 @@ export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
           )}
           {imported.existing.length > 0 && (
             <p className="analysis-guidance-copy">left as they were: {imported.existing.join(', ')}.</p>
+          )}
+          {imported.weak_passwords.length > 0 && (
+            <p className="analysis-guidance-copy warning">
+              kept the passwords from the list for {plural(imported.weak_passwords.length, 'person', 'people')}, although
+              they would not be allowed as new ones (common, short or containing the name):{' '}
+              {imported.weak_passwords.join(', ')}. they can change them in their account.
+            </p>
           )}
           {imported.errors.map((problem) => (
             <p className="analysis-guidance-copy users-error" key={problem.row}>

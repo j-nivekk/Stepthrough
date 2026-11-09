@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
@@ -15,6 +16,7 @@ from .accounts import (
     UserLink,
     auth_mode,
     clear_session_cookie,
+    client_address,
     end_session,
     find_link,
     new_user_link,
@@ -61,8 +63,16 @@ from .user_admin import (
 
 router = APIRouter()
 login_limiter = LoginLimiter()
+# Failed and refused attempts go to the server log, so administrators can see guessing as it happens.
+logger = logging.getLogger("stepthrough.accounts")
 
 WRONG_LOGIN = "That name and password do not match."
+TOO_MANY = "Too many attempts. Wait a few minutes and try again."
+REFUSAL_REASONS = {
+    "pair": "too many wrong passwords for this name from this address",
+    "name": "too many wrong passwords for this name",
+    "address": "too many wrong passwords from this address",
+}
 EXPIRED_LINK = "This link has expired or was already used. Ask for a new one."
 
 
@@ -102,17 +112,21 @@ def auth_session(request: Request, user: MaybeUser) -> SessionResponse:
 def auth_login(payload: LoginRequest, request: Request, response: Response) -> SessionResponse:
     _require_passwords(request)
     name = payload.name.strip()
-    address = request.client.host if request.client else "unknown"
-    if not login_limiter.allowed(name, address):
-        raise HTTPException(status_code=429, detail="Too many attempts. Wait a few minutes and try again.")
+    address = client_address(request)
+    if refusal := login_limiter.refusal(name, address):
+        logger.warning("Refused a login as %r from %s: %s.", name, address, REFUSAL_REASONS[refusal])
+        raise HTTPException(status_code=429, detail=TOO_MANY)
     row = find_user_by_name(name) if name else None
     stored = get_password_hash(row["id"]) if row and row["id"] != LOCAL_USER_ID else None
     if not password_matches(payload.password, stored):
         login_limiter.failed(name, address)
+        logger.warning("Wrong password for %r from %s%s.", name, address, "" if row else " (no such account)")
         raise HTTPException(status_code=401, detail=WRONG_LOGIN)
     if row["is_disabled"]:
+        logger.warning("Login as %r from %s refused: the account is switched off.", name, address)
         raise HTTPException(status_code=403, detail="This account is switched off. Ask an administrator.")
-    login_limiter.succeeded(name)
+    login_limiter.succeeded(name, address)
+    logger.info("%r logged in from %s.", row["name"], address)
     end_session(request.cookies.get(SESSION_COOKIE))
     set_session_cookie(response, request, start_session(row["id"]))
     return _session_response(request, User.from_row(row))
@@ -144,9 +158,10 @@ def auth_link_password(payload: LinkPasswordRequest, request: Request, response:
     link = find_link(payload.token)
     if link is None:
         raise HTTPException(status_code=404, detail=EXPIRED_LINK)
-    if problem := password_problem(payload.password):
+    if problem := password_problem(payload.password, link["name"]):
         raise HTTPException(status_code=422, detail=problem)
     set_password(link["user_id"], payload.password)
+    logger.info("%r set a password with a %s link from %s.", link["name"], link["purpose"], client_address(request))
     end_session(request.cookies.get(SESSION_COOKIE))
     set_session_cookie(response, request, start_session(link["user_id"]))
     return _session_response(request, User.from_row(link))
@@ -156,9 +171,16 @@ def auth_link_password(payload: LinkPasswordRequest, request: Request, response:
 def me_change_password(payload: PasswordChangeRequest, request: Request, user: CurrentUser) -> Response:
     """Change your own password. Other browsers logged in to the account are logged out; this one stays in."""
     _require_passwords(request)
+    # Someone holding a stolen session must not be able to guess the password at leisure.
+    address = client_address(request)
+    if refusal := login_limiter.refusal(user.name, address):
+        logger.warning("Refused a password change for %r from %s: %s.", user.name, address, REFUSAL_REASONS[refusal])
+        raise HTTPException(status_code=429, detail=TOO_MANY)
     if not password_matches(payload.current_password, get_password_hash(user.id)):
+        login_limiter.failed(user.name, address)
+        logger.warning("Wrong current password in a password change for %r from %s.", user.name, address)
         raise HTTPException(status_code=403, detail="That is not your current password.")
-    if problem := password_problem(payload.new_password):
+    if problem := password_problem(payload.new_password, user.name):
         raise HTTPException(status_code=422, detail=problem)
     set_password(user.id, payload.new_password, keep_session_token=request.cookies.get(SESSION_COOKIE))
     return Response(status_code=204)
@@ -247,6 +269,7 @@ def admin_users_import(
         ],
         existing=result.existing,
         errors=[UserImportProblem(row=row, name=name, message=message) for row, name, message in result.errors],
+        weak_passwords=result.weak_passwords,
     )
 
 

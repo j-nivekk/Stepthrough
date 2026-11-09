@@ -329,4 +329,6 @@ export interface UserImportResult {
   created: { name: string; link: UserLink | null }[];
   existing: string[];
   errors: { row: number; name: string | null; message: string }[];
+  /** People whose password from the list was kept although it would be refused as a new one. */
+  weak_passwords: string[];
 }

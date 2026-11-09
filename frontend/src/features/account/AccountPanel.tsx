@@ -138,7 +138,7 @@ export function AccountPanel({ isLoggingOut, open, user, onClose, onLogOut, onOp
           </button>
         </div>
         <p className={`app-settings-hint ${message?.tone === 'error' ? 'account-panel-error' : ''}`}>
-          {message?.text ?? `at least ${MIN_PASSWORD_LENGTH} characters. other browsers are logged out.`}
+          {message?.text ?? `at least ${MIN_PASSWORD_LENGTH} characters, not a common password. other browsers are logged out.`}
         </p>
       </form>
 

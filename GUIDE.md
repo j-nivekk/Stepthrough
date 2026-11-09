@@ -59,7 +59,9 @@ To see this as an animation, open Stepthrough and choose **about → how it work
 If someone has set up a Stepthrough server for your group, you do not need to install anything. They send you a
 link with which you choose a password; after that, open the server's address, log in with your name and that
 password, and go on to [section 4](#4-tutorial-your-first-walkthrough). Your name at the bottom right opens your
-account: change your password or log out there. If you forget your password, ask them for a new link.
+account: change your password or log out there. If you forget your password, ask them for a new link. A password
+needs at least 8 characters; very common ones, and ones containing your name, are refused. You stay logged in
+for up to 30 days, or until you have not used Stepthrough for a week.
 
 Otherwise, there are two ways to run Stepthrough on your own computer:
 

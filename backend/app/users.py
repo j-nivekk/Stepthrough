@@ -14,7 +14,7 @@ In Docker, run it inside the container: ``docker compose exec stepthrough python
   transfer FROM TO             hand FROM's projects to TO (FROM may be `local`, the built-in account)
   expire                       delete the accounts whose deletion date has come (the server does this hourly)
 
-People without a password get a one-time link, valid for 14 days, with which they choose their own. Set
+People without a password get a one-time link (valid for 14 days; a reset link for 3) to choose their own. Set
 STEPTHROUGH_PUBLIC_URL (for example https://stepthrough.example.org) to print whole addresses.
 """
 
@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .accounts import LINK_LIFETIME, User, UserLink, link_url, new_user_link, password_problem
+from .accounts import User, UserLink, link_url, new_user_link, password_problem
 from .config import public_url
 from .database import ADMIN_TAG, LOCAL_USER_ID, init_db
 from .repository import find_user_by_name, list_users, projects_owned_only_by, transfer_projects, update_user
@@ -56,7 +56,7 @@ def _link_text(link: UserLink) -> str:
 
 def _show_link(name: str, link: UserLink) -> None:
     what = "Invitation" if link.purpose == "invite" else "Password reset"
-    _out(f"{what} for {name}, valid for {LINK_LIFETIME.days} days and usable once:")
+    _out(f"{what} for {name}, usable once, until {link.expires_at[:16].replace('T', ' ')} UTC:")
     _out(f"  {_link_text(link)}")
     if public_url() is None:
         _out("  (Put the server's address in front, or set STEPTHROUGH_PUBLIC_URL to print it whole.)")
@@ -71,20 +71,23 @@ def _user(name: str) -> dict[str, Any]:
     return row
 
 
-def _read_password(from_stdin: bool) -> str:
+def _read_password(from_stdin: bool, name: str) -> str:
     if from_stdin:
         password = sys.stdin.readline().rstrip("\n")
     else:
         password = getpass.getpass("Password: ")
         if getpass.getpass("Again: ") != password:
             raise AccountError("The two passwords differ.")
-    if problem := password_problem(password):
-        raise AccountError(problem)
+    if not password:
+        raise AccountError("The password is empty.")
+    # An administrator's password is kept as given (see app.user_admin); only say when it is a weak one.
+    if problem := password_problem(password, name):
+        _say(f"Note: {problem} It is kept, because an administrator set it; {name} can change it in the app.")
     return password
 
 
 def cmd_add(args: argparse.Namespace) -> None:
-    password = _read_password(args.password_stdin) if args.password or args.password_stdin else None
+    password = _read_password(args.password_stdin, args.name) if args.password or args.password_stdin else None
     tags = [*args.tag, *([ADMIN_TAG] if args.admin else [])]
     row, link = create_account(
         args.name, display_name=args.display_name, tags=tags, delete_after=args.delete_after, password=password
@@ -106,6 +109,11 @@ def cmd_import(args: argparse.Namespace) -> None:
         _say(f"Left {len(result.existing)} existing accounts as they were: {', '.join(result.existing)}.")
     for number, name, message in result.errors:
         _say(f"Row {number}" + (f" ({name})" if name else "") + f" skipped: {message}")
+    if result.weak_passwords:
+        _say(
+            f"Kept the passwords from the list for {len(result.weak_passwords)} people although they would be refused "
+            f"as new ones (common, short or containing the name): {', '.join(result.weak_passwords)}."
+        )
 
 
 def cmd_list(args: argparse.Namespace) -> None:

@@ -95,7 +95,7 @@ export function SetPasswordScreen({ token, onDone }: SetPasswordScreenProps) {
         </button>
         {error && <p className="entry-notice error account-gate-message">{error}</p>}
         <p className={`account-gate-hint ${tooShort ? 'warning' : ''}`}>
-          at least {MIN_PASSWORD_LENGTH} characters. after this, you log in with{' '}
+          at least {MIN_PASSWORD_LENGTH} characters, and not a common password. after this, you log in with{' '}
           {link ? <strong>{link.name}</strong> : 'your name'} and this password.
         </p>
       </form>

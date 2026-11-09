@@ -4,6 +4,10 @@ A list of people can be imported from a CSV file in the same layout as 4CAT's bu
 column, and optionally ``expires`` (the date the account is deleted), ``tags`` (separated by commas), ``password``
 and ``notes``. Commas, semicolons or tabs may separate the columns. People without a password in the list get a
 one-time link with which they set one.
+
+A password an administrator supplies (in a list, or with ``python -m app.users add --password``) is kept as given,
+even one that would be refused as a new password: it usually comes from another system, such as 4CAT, where people
+already use it. The rules for new passwords apply to the ones people choose themselves.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
 
-from .accounts import UserLink, new_user_link, password_problem, set_password
+from .accounts import MAX_PASSWORD_LENGTH, UserLink, new_user_link, password_problem, set_password
 from .database import LOCAL_USER_ID
 from .repository import (
     create_user,
@@ -33,6 +37,8 @@ from .storage import project_dir
 from .utils import utc_now
 
 NAME_RE = re.compile(r"^[^\s\x00-\x1f\x7f]{1,200}$")
+# A spreadsheet runs a cell starting with one of these as a formula, and names end up in CSV files of links.
+FORMULA_STARTS = ("=", "+", "-", "@")
 TAG_RE = re.compile(r"^[\w.-]{1,60}$")
 MAX_IMPORT_BYTES = 2 * 1024 * 1024
 MAX_IMPORT_ROWS = 5000
@@ -52,6 +58,8 @@ def clean_name(raw: str | None) -> str:
         raise AccountError("Give the name the person will log in with.")
     if not NAME_RE.match(name):
         raise AccountError("A name has no spaces and at most 200 characters.")
+    if name.startswith(FORMULA_STARTS):
+        raise AccountError("A name cannot start with =, +, - or @, which spreadsheets read as a formula.")
     return name
 
 
@@ -101,12 +109,13 @@ def create_account(
     notes: str | None = None,
     password: str | None = None,
 ) -> tuple[dict[str, Any], UserLink | None]:
-    """Make an account. Without a password it gets an invitation link, which is returned with it."""
+    """Make an account. Without a password it gets an invitation link, which is returned with it. A password given
+    here comes from an administrator and is kept as given (see the module's description)."""
     name = clean_name(name)
     if find_user_by_name(name):
         raise AccountError(f"There is already an account called {name}.")
-    if password is not None and (problem := password_problem(password)):
-        raise AccountError(f"Password for {name}: {problem}")
+    if password is not None and len(password) > MAX_PASSWORD_LENGTH:
+        raise AccountError(f"Password for {name}: use at most {MAX_PASSWORD_LENGTH} characters.")
     row = create_user(
         name,
         display_name=clean_display_name(display_name),
@@ -126,6 +135,8 @@ class ImportResult:
     existing: list[str] = field(default_factory=list)
     # (row number counting the header as 1, name if there was one, what was wrong)
     errors: list[tuple[int, str | None, str]] = field(default_factory=list)
+    # People whose password from the list was kept although it would be refused as a new one.
+    weak_passwords: list[str] = field(default_factory=list)
 
 
 def read_user_list(data: bytes) -> list[dict[str, str]]:
@@ -175,6 +186,8 @@ def import_accounts(data: bytes, *, tags: Iterable[str] = (), delete_after: str 
             result.errors.append((number, name, str(error)))
             continue
         result.created.append(account)
+        if row.get("password") and password_problem(row["password"], account[0]["name"]):
+            result.weak_passwords.append(account[0]["name"])
     return result
 
 

@@ -24,6 +24,8 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from functools import cache
+from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
@@ -54,7 +56,11 @@ TAG_PREFIX = "tag:"
 
 SESSION_COOKIE = "stepthrough_session"
 SESSION_LIFETIME = timedelta(days=30)
+# A session not used for this long ends early, for browsers left logged in on shared computers.
+SESSION_IDLE_LIMIT = timedelta(days=7)
+# Invitations wait for people to get round to them; a reset is asked for and used straight away.
 LINK_LIFETIME = timedelta(days=14)
+RESET_LINK_LIFETIME = timedelta(days=3)
 # The web page reads the token from the part after `#`, which browsers never send to the server, so links do not
 # end up in the web server's logs.
 LINK_FRAGMENT = "#link="
@@ -103,12 +109,30 @@ class User:
 # ── passwords and tokens ─────────────────────────────────────────────────────────────────────────────────────
 
 
-def password_problem(password: str) -> str | None:
-    """Why a new password cannot be used, or ``None``. Length is the only rule (as NIST advises)."""
+COMMON_PASSWORDS_FILE = Path(__file__).with_name("wordlists") / "common-passwords.txt"
+
+
+@cache
+def common_passwords() -> frozenset[str]:
+    lines = COMMON_PASSWORDS_FILE.read_text(encoding="utf-8").splitlines()
+    return frozenset(line for line in lines if line and not line.startswith("#"))
+
+
+def password_problem(password: str, name: str | None = None) -> str | None:
+    """Why a new password cannot be used, or ``None``. As NIST SP 800-63B advises: a minimum length and no
+    composition rules, but no password from breaches, and nothing built from the service or the person's name."""
     if len(password) < MIN_PASSWORD_LENGTH:
         return f"Use at least {MIN_PASSWORD_LENGTH} characters."
     if len(password) > MAX_PASSWORD_LENGTH:
         return f"Use at most {MAX_PASSWORD_LENGTH} characters."
+    lowered = password.lower()
+    if len(set(lowered)) == 1 or lowered in common_passwords():
+        return "That password is one of the most common ones, so it is easy to guess. Choose another."
+    names = {"stepthrough"}
+    if name:
+        names |= {name.lower(), name.lower().split("@")[0]}
+    if any(len(part) >= 3 and part in lowered for part in names):
+        return "A password cannot contain your name or the name of this app."
     return None
 
 
@@ -183,10 +207,11 @@ def session_user(token: str) -> User | None:
     if session is None or session["is_disabled"]:
         return None
     now = utc_now()
-    if session["expires_at"] <= now:
+    seen = datetime.fromisoformat(session["session_seen_at"])
+    if session["expires_at"] <= now or seen + SESSION_IDLE_LIMIT <= datetime.fromisoformat(now):
         delete_session(session["token_hash"])
         return None
-    if datetime.fromisoformat(session["session_seen_at"]) + SEEN_INTERVAL <= datetime.fromisoformat(now):
+    if seen + SEEN_INTERVAL <= datetime.fromisoformat(now):
         touch_session(session["token_hash"], session["user_id"], now)
     return User.from_row(session)
 
@@ -280,20 +305,51 @@ def is_cross_site(conn: HTTPConnection, allowed_origins: tuple[str, ...]) -> boo
     return urlsplit(origin).netloc != host
 
 
-class LoginLimiter:
-    """Slows down password guessing: after too many wrong passwords for one name, or from one address, within
-    the window, further attempts are refused until old ones age out. Kept in memory (the API runs as one process),
-    so a restart forgets it."""
+def client_address(conn: HTTPConnection) -> str:
+    """The address a request came from. Behind the web server this is the last ``X-Forwarded-For`` entry: the
+    one the web server added itself, whatever the client put before it. (uvicorn's own choice, the first entry,
+    can be written by the client.) Without a web server in front, it is the connection's address."""
+    forwarded = [part.strip() for part in conn.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+    if forwarded:
+        return forwarded[-1]
+    return conn.client.host if conn.client else "unknown"
 
-    def __init__(self, per_name: int = 10, per_address: int = 50, window_seconds: float = 15 * 60) -> None:
-        self.per_name = per_name
-        self.per_address = per_address
+
+class LoginLimiter:
+    """Slows down password guessing. Wrong passwords are counted for each name from each address, for each name
+    from anywhere, and for each address, over a moving window; once any count is full, further attempts are
+    refused until old ones age out.
+
+    - per name and address (10): one guesser stops quickly, but does not lock the real person out elsewhere;
+    - per name (100): guessing one account from many addresses also stops;
+    - per address (100): one address trying many names stops. Generous, as a class may share one address.
+
+    Kept in memory, as the API runs as one process (a restart forgets it), and at most ``max_keys`` counts at a
+    time, so a flood of made-up names cannot fill the memory."""
+
+    def __init__(
+        self,
+        per_pair: int = 10,
+        per_name: int = 100,
+        per_address: int = 100,
+        window_seconds: float = 15 * 60,
+        max_keys: int = 100_000,
+    ) -> None:
+        self.limits = {"pair": per_pair, "name": per_name, "address": per_address}
         self.window = window_seconds
+        self.max_keys = max_keys
         self._failures: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
 
+    @staticmethod
+    def _keys(name: str, address: str) -> dict[str, str]:
+        name = name.lower()
+        return {"pair": f"pair:{name}|{address}", "name": f"name:{name}", "address": f"address:{address}"}
+
     def _recent(self, key: str, now: float) -> int:
-        failures = self._failures[key]
+        failures = self._failures.get(key)
+        if failures is None:
+            return 0
         while failures and failures[0] <= now - self.window:
             failures.popleft()
         if not failures:
@@ -301,23 +357,39 @@ class LoginLimiter:
             return 0
         return len(failures)
 
-    def allowed(self, name: str, address: str) -> bool:
+    def refusal(self, name: str, address: str) -> str | None:
+        """Which count is full (``pair``, ``name`` or ``address``), or ``None`` if the attempt may go ahead."""
         now = time.monotonic()
         with self._lock:
-            return (
-                self._recent(f"name:{name.lower()}", now) < self.per_name
-                and self._recent(f"address:{address}", now) < self.per_address
-            )
+            for kind, key in self._keys(name, address).items():
+                if self._recent(key, now) >= self.limits[kind]:
+                    return kind
+        return None
+
+    def allowed(self, name: str, address: str) -> bool:
+        return self.refusal(name, address) is None
 
     def failed(self, name: str, address: str) -> None:
         now = time.monotonic()
         with self._lock:
-            self._failures[f"name:{name.lower()}"].append(now)
-            self._failures[f"address:{address}"].append(now)
+            for key in self._keys(name, address).values():
+                self._failures[key].append(now)
+            if len(self._failures) > self.max_keys:
+                self._prune(now)
 
-    def succeeded(self, name: str) -> None:
+    def _prune(self, now: float) -> None:
+        for key in list(self._failures):
+            self._recent(key, now)
+        # Still too many (a flood within one window): forget the oldest counts first.
+        while len(self._failures) > self.max_keys:
+            del self._failures[next(iter(self._failures))]
+
+    def succeeded(self, name: str, address: str) -> None:
         with self._lock:
-            self._failures.pop(f"name:{name.lower()}", None)
+            self._failures.pop(self._keys(name, address)["pair"], None)
+
+    def __len__(self) -> int:
+        return len(self._failures)
 
 
 # ── one-time links ───────────────────────────────────────────────────────────────────────────────────────────
@@ -335,7 +407,7 @@ def new_user_link(user_id: str) -> UserLink:
     any earlier link."""
     purpose: LinkPurpose = "reset" if get_password_hash(user_id) else "invite"
     token = new_token()
-    expires_at = _later(LINK_LIFETIME)
+    expires_at = _later(RESET_LINK_LIFETIME if purpose == "reset" else LINK_LIFETIME)
     replace_user_link(token_hash(token), user_id, purpose, expires_at)
     return UserLink(token=token, purpose=purpose, expires_at=expires_at)
 

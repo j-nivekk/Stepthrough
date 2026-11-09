@@ -2,12 +2,24 @@
 # Copy to /etc/nginx/sites-available/stepthrough.example.org, adjust the names and paths, enable it and reload.
 # Stepthrough must be served at the root of its domain; a sub-path such as /stepthrough/ is not supported.
 
-# WebSocket upgrades for live run progress. This `map` belongs to the http context: if another site on this
-# server already defines $connection_upgrade, delete this block rather than defining it twice.
+# The `map` and `limit_req_zone` blocks belong to the http context, which a file in sites-enabled is part of. If
+# another site on this server already defines one of these names, delete the block rather than defining it twice.
+
+# WebSocket upgrades for live run progress.
 map $http_upgrade $connection_upgrade {
     default upgrade;
     ''      close;
 }
+
+# Logging in, setting a password from a link and logging out are POST requests to /auth/. Limiting them per
+# address stops a flood of password guesses before Stepthrough spends time checking them; Stepthrough has its own,
+# finer limits behind this one. Other requests get an empty key, which nginx does not limit. If many people
+# share one address (a campus network behind NAT) and log in at the same moment, raise the rate and burst.
+map $request_method $stepthrough_login_key {
+    POST    $binary_remote_addr;
+    default "";
+}
+limit_req_zone $stepthrough_login_key zone=stepthrough_login:10m rate=60r/m;
 
 server {
     listen 80;
@@ -25,6 +37,10 @@ server {
     ssl_certificate     /etc/letsencrypt/live/stepthrough.example.org/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/stepthrough.example.org/privkey.pem;
 
+    # Browsers that have been here once only use HTTPS for this name for a year, so a login cannot be caught on
+    # plain HTTP. Stepthrough sends its other security headers itself.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
     # At least STEPTHROUGH_MAX_UPLOAD_MB from .env, plus a little for the rest of the form.
     client_max_body_size 1100m;
 
@@ -36,18 +52,25 @@ server {
     # allow 192.0.2.0/24;  # placeholder; use your own address ranges
     # deny  all;
 
-    location / {
-        # STEPTHROUGH_BIND_ADDRESS and STEPTHROUGH_PORT from .env.
+    # For both locations below. STEPTHROUGH_BIND_ADDRESS and STEPTHROUGH_PORT from .env.
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    # Replace whatever the browser sent rather than adding to it (the usual $proxy_add_x_forwarded_for): the
+    # container trusts this header for the visitor's address, and its login limits count by that address.
+    proxy_set_header X-Forwarded-For   $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade           $http_upgrade;
+    proxy_set_header Connection        $connection_upgrade;
+
+    location /auth/ {
+        limit_req zone=stepthrough_login burst=120 nodelay;
+        limit_req_status 429;
         proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
+    }
 
-        proxy_set_header Host              $host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Upgrade           $http_upgrade;
-        proxy_set_header Connection        $connection_upgrade;
-
+    location / {
+        proxy_pass http://127.0.0.1:8080;
         # Pass uploads through as they arrive instead of storing each one in nginx first.
         proxy_request_buffering off;
         # Long uploads, downloads of large exports, and progress sockets that stay open through a run.

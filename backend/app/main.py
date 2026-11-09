@@ -28,7 +28,16 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .account_routes import router as account_router, user_response
-from .accounts import CurrentUser, MaybeUser, ProjectRole, User, is_cross_site, project_role, require_admin
+from .accounts import (
+    CurrentUser,
+    MaybeUser,
+    ProjectRole,
+    User,
+    auth_mode,
+    is_cross_site,
+    project_role,
+    require_admin,
+)
 from .analysis_metadata import serialize_analysis_metadata
 from .config import DATA_ROOT, build_server_config, build_tool_diagnostics, ensure_app_dirs
 from .database import init_db, reset_db
@@ -118,6 +127,12 @@ TERMINAL_WEBSOCKET_STATES = {"completed", "failed", "cancelled"}
 INTERRUPTED_RUN_MESSAGE = "Interrupted: the backend restarted while this run was active. Start a new run."
 ADMIN_CONFIRM_HEADER = "X-Stepthrough-Confirm"
 logger = logging.getLogger("stepthrough")
+if not logger.handlers:
+    # uvicorn sets up only its own loggers; give ours a time and a source, so failed logins read well in the log.
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.INFO)
 server_config = build_server_config()
 
 
@@ -128,7 +143,15 @@ class OcrHealthState:
     message: str
     warnings: tuple[str, ...] = ()
 
-app = FastAPI(title="Stepthrough API", version="0.2.0")
+# A server does not publish its API description: it is no secret (the code is public), but nobody needs it there.
+_api_docs = server_config.deployment != "server"
+app = FastAPI(
+    title="Stepthrough API",
+    version="0.2.0",
+    docs_url="/docs" if _api_docs else None,
+    redoc_url="/redoc" if _api_docs else None,
+    openapi_url="/openapi.json" if _api_docs else None,
+)
 # Read through accounts.auth_mode, so tests can switch it on a running app.
 app.state.auth_mode = server_config.auth
 app.add_middleware(
@@ -141,6 +164,17 @@ app.add_middleware(
 )
 app.include_router(account_router)
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+SECURITY_HEADERS = {
+    # Browsers must not guess another type for a file than the one it is served as.
+    "X-Content-Type-Options": "nosniff",
+    # Other websites must not show these pages inside a frame, where clicks could be steered.
+    "X-Frame-Options": "DENY",
+    "Content-Security-Policy": "frame-ancestors 'none'",
+    # Leaving for another site tells it nothing about the page that was open.
+    "Referrer-Policy": "no-referrer",
+}
 
 
 @app.middleware("http")
@@ -161,6 +195,15 @@ async def reject_oversized_uploads(request: Request, call_next):
             limit_mb = server_config.max_upload_bytes // (1024 * 1024)
             return JSONResponse(status_code=413, content={"detail": f"Recording is larger than the {limit_mb} MB upload limit."})
     return await call_next(request)
+
+
+# Added last, so it is the outermost middleware: refusals from the ones above carry the headers too.
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    return response
 
 
 def _checking_ocr_state() -> OcrHealthState:
@@ -756,10 +799,20 @@ def root() -> dict[str, str] | FileResponse:
     return {"app": "stepthrough", "status": "ok"}
 
 
+PUBLIC_OCR_MESSAGES = {
+    "checking": "Checking whether text recognition is available.",
+    "available": "Text recognition is available.",
+    "unavailable": "Text recognition is not available on this server.",
+}
+
+
 @app.get("/health", response_model=HealthResponse)
-def health() -> HealthResponse:
+def health(request: Request, user: MaybeUser) -> HealthResponse:
+    """Whether the server can work. Anyone may ask (the login page and container health checks do), but on a
+    server with logins only administrators get the details, which name folders and library versions."""
     diagnostics = app.state.tool_diagnostics
     ocr_state = _get_ocr_state()
+    detailed = auth_mode(request) == "none" or (user is not None and user.is_admin)
     return HealthResponse(
         ffmpeg_available=diagnostics.ffmpeg_available,
         ffprobe_available=diagnostics.ffprobe_available,
@@ -767,8 +820,8 @@ def health() -> HealthResponse:
         ocr_available=ocr_state.available,
         missing_tools=list(diagnostics.missing_tools),
         message=diagnostics.message,
-        ocr_message=ocr_state.message,
-        ocr_warnings=list(ocr_state.warnings),
+        ocr_message=ocr_state.message if detailed else PUBLIC_OCR_MESSAGES[ocr_state.status],
+        ocr_warnings=list(ocr_state.warnings) if detailed else [],
     )
 
 

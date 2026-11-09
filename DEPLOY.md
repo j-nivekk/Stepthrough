@@ -64,6 +64,11 @@ settings, Stepthrough needs three things from the web server:
 - WebSocket upgrades (the `Upgrade` and `Connection` headers), which carry live progress while a run works;
 - long timeouts and no request buffering, so large uploads and long runs are not cut off.
 
+The example also does three things for security. It **replaces** `X-Forwarded-For` with the visitor's address
+instead of adding to it, so login limits count real addresses (another web server must do the same). It limits
+login attempts per address before they reach Stepthrough (`limit_req`; raise it if many people share one
+address, as on a campus network). And it tells browsers to use only HTTPS for the address (HSTS).
+
 Then check the whole chain from outside, using the smoke test from the repository. It logs in, uploads a short
 generated recording, analyses it, exports it and deletes it again:
 
@@ -82,13 +87,18 @@ Administrators look after accounts on the users page: open the menu with your na
 
 - **Adding people.** Type the name they will log in with, optionally with tags and a deletion date, and give them
   the link that appears. With the link they choose their own password; it works once, for 14 days.
+  Common passwords, and passwords containing their name, are refused.
 - **Importing a list.** A CSV file in the layout of 4CAT's bulk user import works as it is: a `name` column, and
   optionally `expires` (a date as `2027-02-01`), `tags`, `password` and `notes`. Everyone without a password gets
-  a link, and the page offers all of them as a CSV, ready for a mail merge.
-- **Forgotten passwords.** Give the person a new link (**reset link** on their row). Earlier links stop working.
+  a link, and the page offers all of them as a CSV, ready for a mail merge. Passwords in the list are kept as
+  given, even weak ones (the result lists who has one); people's own new passwords follow the rules.
+- **Forgotten passwords.** Give the person a new link (**reset link** on their row). It works for 3 days, and
+  earlier links stop working.
 - **Deletion dates.** From an account's deletion date, the account and the projects only it owns are deleted.
   People see a notice in the month before. Accounts without a date are kept until an administrator deletes them.
 - **Switching off** an account logs it out at once and keeps its projects.
+- **Guessing.** After too many wrong passwords, further attempts wait 15 minutes; see the log for who and from
+  where: `docker compose logs stepthrough | grep -E "Wrong|Refused"`.
 
 The same can be done from the command line, which also lists accounts with when they were last seen:
 

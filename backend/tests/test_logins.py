@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import date
 import pytest
 from fastapi.testclient import TestClient
@@ -248,12 +249,13 @@ def test_a_list_in_4cat_layout_imports(passwords: TestClient) -> None:
         data={'tags': 'intake-2026', 'delete_after': '2027-09-01'},
     ).json()
     created = {row['name']: row for row in result['created']}
-    assert set(created) == {'11111111', '22222222'}
+    assert set(created) == {'11111111', '22222222', '44444444'}
     assert created['11111111']['link']['purpose'] == 'invite' and created['22222222']['link'] is None
     assert result['existing'] == ['existing']
-    assert [(error['row'], error['name']) for error in result['errors']] == [
-        (5, 'bad name'), (6, '33333333'), (7, '44444444'), (8, None)
-    ]
+    assert [(error['row'], error['name']) for error in result['errors']] == [(5, 'bad name'), (6, '33333333'), (8, None)]
+    # A password from the list is kept as given, even a short one; the result says which are weak.
+    assert created['44444444']['link'] is None and result['weak_passwords'] == ['44444444']
+    log_in(browser(), '44444444', 'short')
     users = {user['name']: user for user in passwords.get('/admin/users').json()}
     assert users['11111111']['tags'] == ['group-1', 'intake-2026', 'seminar-a']
     assert users['11111111']['delete_after'] == '2027-02-01' and users['11111111']['notes'] == 'first'
@@ -313,3 +315,184 @@ def test_projects_can_be_handed_over(passwords: TestClient) -> None:
     ]
     refused = passwords.post('/admin/users/local/transfer-projects', json={'to_user_id': 'local'})
     assert refused.status_code == 422
+
+
+# ── defences against guessing and other misuse ──────────────────────────────────────────────────────────────
+
+
+def from_address(address: str) -> dict[str, str]:
+    """What the web server in front adds: the visitor's address, after anything the browser sent itself."""
+    return {'X-Forwarded-For': address}
+
+
+@pytest.mark.parametrize('password, why', [
+    ('password1', 'common'),
+    ('QWERTYUIOP', 'common'),
+    ('aaaaaaaaaaaa', 'common'),
+    ('ivy-and-a-secret', 'name'),
+    ('my stepthrough login', 'name'),
+])
+def test_weak_passwords_are_refused(passwords: TestClient, password: str, why: str) -> None:
+    token = invite('ivy')
+    response = passwords.post('/auth/link/password', json={'token': token, 'password': password})
+    assert response.status_code == 422
+    expected = 'one of the most common ones' if why == 'common' else 'cannot contain your name'
+    assert expected in response.json()['detail']
+    # The link still works for a better password.
+    assert passwords.post('/auth/link/password', json={'token': token, 'password': PASSWORD}).status_code == 200
+
+
+def test_a_guesser_does_not_lock_the_real_person_out(passwords: TestClient) -> None:
+    make_admin()
+    for i in range(10):
+        login = passwords.post('/auth/login', json={'name': 'ada', 'password': f'guess {i}'}, headers=from_address('198.51.100.7'))
+        assert login.status_code == 401
+    guesser = passwords.post('/auth/login', json={'name': 'ada', 'password': ADMIN_PASSWORD}, headers=from_address('198.51.100.7'))
+    assert guesser.status_code == 429
+    real = browser().post('/auth/login', json={'name': 'ada', 'password': ADMIN_PASSWORD}, headers=from_address('203.0.113.5'))
+    assert real.status_code == 200
+
+
+def test_guessing_one_name_from_many_addresses_stops(passwords: TestClient) -> None:
+    make_admin()
+    for i in range(100):
+        passwords.post('/auth/login', json={'name': 'ada', 'password': f'guess {i}'}, headers=from_address(f'198.51.100.{i}'))
+    refused = passwords.post('/auth/login', json={'name': 'ada', 'password': ADMIN_PASSWORD}, headers=from_address('203.0.113.5'))
+    assert refused.status_code == 429
+
+
+def test_an_address_trying_many_names_stops_whatever_it_claims_to_be(passwords: TestClient) -> None:
+    for i in range(100):
+        # The browser may put anything before the web server's own entry; only the last one counts.
+        headers = from_address(f'10.9.{i}.{i}, 198.51.100.7')
+        assert passwords.post('/auth/login', json={'name': f'spray-{i}', 'password': 'Welcome2026'}, headers=headers).status_code == 401
+    refused = passwords.post('/auth/login', json={'name': 'someone-else', 'password': 'Welcome2026'}, headers=from_address('1.2.3.4, 198.51.100.7'))
+    assert refused.status_code == 429
+    other = passwords.post('/auth/login', json={'name': 'someone-else', 'password': 'Welcome2026'}, headers=from_address('203.0.113.5'))
+    assert other.status_code == 401
+
+
+def test_changing_a_password_cannot_be_used_to_guess_the_current_one(passwords: TestClient) -> None:
+    make_admin()
+    log_in(passwords, 'ada', ADMIN_PASSWORD)
+    for i in range(10):
+        wrong = passwords.post('/me/password', json={'current_password': f'guess {i}', 'new_password': 'a fine new password'})
+        assert wrong.status_code == 403
+    blocked = passwords.post('/me/password', json={'current_password': ADMIN_PASSWORD, 'new_password': 'a fine new password'})
+    assert blocked.status_code == 429
+
+
+def test_attempts_are_logged(passwords: TestClient, caplog: pytest.LogCaptureFixture) -> None:
+    make_admin()
+    with caplog.at_level('INFO', logger='stepthrough.accounts'):
+        passwords.post('/auth/login', json={'name': 'ada', 'password': 'nope'}, headers=from_address('198.51.100.7'))
+        passwords.post('/auth/login', json={'name': 'ghost', 'password': 'nope'}, headers=from_address('198.51.100.7'))
+        log_in(passwords, 'ada', ADMIN_PASSWORD)
+    messages = [record.getMessage() for record in caplog.records]
+    assert "Wrong password for 'ada' from 198.51.100.7." in messages
+    assert "Wrong password for 'ghost' from 198.51.100.7 (no such account)." in messages
+    assert any(message.startswith("'ada' logged in from") for message in messages)
+    assert not any('nope' in message or ADMIN_PASSWORD in message for message in messages)
+
+
+def test_the_limiter_forgets_old_counts_when_it_fills_up() -> None:
+    limiter = LoginLimiter(max_keys=50)
+    for i in range(200):
+        limiter.failed(f'name-{i}', f'198.51.100.{i % 7}')
+    assert len(limiter) <= 50
+    limiter = LoginLimiter(window_seconds=0.01, max_keys=10)
+    for i in range(20):
+        limiter.failed(f'name-{i}', '198.51.100.1')
+    time.sleep(0.02)
+    limiter.failed('last', '198.51.100.2')
+    assert len(limiter) == 3  # only the last attempt's counts remain
+
+
+def test_names_that_spreadsheets_would_run_are_refused(passwords: TestClient) -> None:
+    log_in(passwords, *_admin())
+    for name in ('=1+1', '+31612345678', '-cmd', '@SUM(A1)'):
+        response = passwords.post('/admin/users', json={'name': name})
+        assert response.status_code == 422, name
+        assert 'formula' in response.json()['detail']
+    listing = b'name\n=HYPERLINK("http://x")\nfine.name\n'
+    result = passwords.post('/admin/users/import', files={'file': ('x.csv', listing, 'text/csv')}).json()
+    assert [row['name'] for row in result['created']] == ['fine.name']
+    assert [error['row'] for error in result['errors']] == [2]
+
+
+def test_reset_links_are_short_lived_and_idle_sessions_end(passwords: TestClient) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from app.database import connect
+
+    invitation = accounts.new_user_link(create_account('jo')[0]['id'])
+    jo = find_user_by_name('jo')
+    passwords.post('/auth/link/password', json={'token': invitation.token, 'password': PASSWORD})
+    reset = accounts.new_user_link(jo['id'])
+    days = lambda link: (datetime.fromisoformat(link.expires_at) - datetime.now(timezone.utc)).days  # noqa: E731
+    assert (invitation.purpose, days(invitation)) == ('invite', 13)
+    assert (reset.purpose, days(reset)) == ('reset', 2)
+
+    assert passwords.get('/me').status_code == 200
+    eight_days_ago = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    with connect() as conn:
+        conn.execute('UPDATE sessions SET last_seen_at = ?', (eight_days_ago,))
+    assert passwords.get('/me').status_code == 401
+
+
+def test_answers_carry_security_headers(passwords: TestClient) -> None:
+    for response in (
+        passwords.get('/auth/session'),
+        passwords.get('/health'),
+        passwords.post('/projects', json={'name': 'x'}, headers={'Origin': 'https://evil.example', 'Sec-Fetch-Site': 'cross-site'}),
+    ):
+        assert response.headers['x-content-type-options'] == 'nosniff'
+        assert response.headers['x-frame-options'] == 'DENY'
+        assert response.headers['content-security-policy'] == "frame-ancestors 'none'"
+        assert response.headers['referrer-policy'] == 'no-referrer'
+
+
+def test_health_details_are_for_administrators(passwords: TestClient) -> None:
+    main._set_ocr_state(main.OcrHealthState(
+        status='available', available=True, message='Models live in /data/ocr-models.', warnings=('paddle 3.3.0 says hi',)
+    ))
+    anonymous = passwords.get('/health').json()
+    assert (anonymous['ocr_message'], anonymous['ocr_warnings']) == ('Text recognition is available.', [])
+    assert anonymous['ocr_available'] is True and anonymous['ffmpeg_available'] is True
+    person = browser()
+    person.post('/auth/link/password', json={'token': invite('kim'), 'password': PASSWORD})
+    assert person.get('/health').json()['ocr_warnings'] == []
+    log_in(passwords, *_admin())
+    admin = passwords.get('/health').json()
+    assert (admin['ocr_message'], admin['ocr_warnings']) == ('Models live in /data/ocr-models.', ['paddle 3.3.0 says hi'])
+
+
+def test_passwords_an_administrator_supplies_are_kept_as_given(
+    passwords: TestClient, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import io
+
+    from app.users import main as users_main
+
+    log_in(passwords, *_admin())
+    listing = b'name,password\nlee,12345678\nmona,mona-2026!\nnia,a long enough password\n'
+    result = passwords.post('/admin/users/import', files={'file': ('x.csv', listing, 'text/csv')}).json()
+    assert sorted(row['name'] for row in result['created']) == ['lee', 'mona', 'nia']
+    assert result['weak_passwords'] == ['lee', 'mona'] and result['errors'] == []
+    lee = browser()
+    log_in(lee, 'lee', '12345678')
+    log_in(browser(), 'mona', 'mona-2026!')
+    # What people choose themselves still follows the rules.
+    again = lee.post('/me/password', json={'current_password': '12345678', 'new_password': 'password1'})
+    assert again.status_code == 422
+    assert lee.post('/me/password', json={'current_password': '12345678', 'new_password': PASSWORD}).status_code == 204
+
+    # The same from the command line: kept, with a note.
+    monkeypatch.setattr('sys.stdin', io.StringIO('qwertyuiop\n'))
+    assert users_main(['add', 'pat', '--password-stdin']) == 0
+    assert 'It is kept, because an administrator set it' in capsys.readouterr().err
+    log_in(browser(), 'pat', 'qwertyuiop')
+    too_long = passwords.post(
+        '/admin/users/import', files={'file': ('x.csv', b'name,password\nroy,' + b'x' * 1025 + b'\n', 'text/csv')}
+    ).json()
+    assert too_long['created'] == [] and 'at most 1024' in too_long['errors'][0]['message']

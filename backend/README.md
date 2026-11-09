@@ -125,18 +125,29 @@ With `STEPTHROUGH_AUTH=password` people log in with a name and a password:
 
 - **Making accounts.** Administrators make them on the users page (account menu, then **manage users**) or with
   `python -m app.users`; nobody can sign up. The first administrator comes from the command line:
-  `python -m app.users add NAME --admin --password`. Names match in any case and have no spaces.
+  `python -m app.users add NAME --admin --password`. Names match in any case, have no spaces, and do not start
+  with `=`, `+`, `-` or `@` (spreadsheets would run them as formulas in a CSV of links).
 - **Passwords.** A new account gets a one-time link (`<address>/#link=<token>`, valid for 14 days) with which
-  its owner chooses a password; a forgotten password gets a new link the same way, and a new link replaces the
-  old one. The part after `#` never reaches the server, so links stay out of its logs. Passwords need at least
-  8 characters and are stored as PBKDF2-SHA256 hashes (600,000 iterations).
+  its owner chooses a password; a forgotten password gets a reset link the same way (valid for 3 days), and a new
+  link replaces the old one. The part after `#` never reaches the server, so links stay out of its logs. As NIST
+  SP 800-63B advises, passwords need at least 8 characters and have no composition rules, but the 20,000 most
+  common ones from breaches (`app/wordlists/common-passwords.txt`), one character repeated, and passwords
+  containing the person's name or "stepthrough" are refused. They are stored as PBKDF2-SHA256 hashes (600,000
+  iterations).
 - **Lists.** A CSV in 4CAT's bulk-user layout imports many people at once: a `name` column, and optionally
   `expires`, `tags`, `password` and `notes`, separated by commas, semicolons or tabs. People without a password
-  get a link; the page offers all links as a CSV, and `python -m app.users import` prints one.
-- **Sessions** last 30 days, in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` over HTTPS). Setting a new password
-  logs out the account's other browsers, and switching an account off logs it out at once. Only the SHA-256 of
-  session and link tokens is stored. After 10 wrong passwords for one name (or 50 from one address) within
-  15 minutes, further attempts are refused until older ones age out; this count is kept in memory.
+  get a link; the page offers all links as a CSV, and `python -m app.users import` prints one. A password from
+  the list (or from `python -m app.users add --password`) is kept as given, even one the rules above would
+  refuse, since it usually comes from another system where people already use it; the import names those people.
+- **Sessions** last 30 days, or end after 7 days unused, in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` over
+  HTTPS). Setting a new password logs out the account's other browsers, and switching an account off logs it out
+  at once. Only the SHA-256 of session and link tokens is stored.
+- **Guessing.** Wrong logins get one answer, in the same time, whether or not the name exists. Within 15 minutes,
+  further attempts are refused after 10 wrong passwords for a name from one address, 100 for a name from anywhere,
+  or 100 from one address (generous, since a class may share one address). Wrong current passwords when changing
+  a password count too. The counts live in memory, at most 100,000 of them. Failed and refused attempts are
+  logged with the name and address. The address is the last `X-Forwarded-For` entry, the one the web server
+  added, so a client cannot choose it.
 - **Deletion dates.** From an account's `delete_after` date, the account and the projects only it owns are
   deleted (the server checks every hour, and `python -m app.users expire` does it at once). In the month before,
   its owner sees a notice. Deleting an account by hand does the same; projects it shares as an owner stay.
@@ -144,5 +155,8 @@ With `STEPTHROUGH_AUTH=password` people log in with a name and a password:
   the users page or with `python -m app.users transfer local NAME`.
 
 In both modes, requests that change something are refused when the browser says they come from another website
-(`Sec-Fetch-Site`, `Origin`); the origins in `STEPTHROUGH_CORS_ORIGINS` are trusted. A database reset deletes
-projects but keeps accounts.
+(`Sec-Fetch-Site`, `Origin`); the origins in `STEPTHROUGH_CORS_ORIGINS` are trusted. Every answer carries
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and frame protection (`X-Frame-Options`,
+`frame-ancestors`). On a server (`STEPTHROUGH_DEPLOYMENT=server`) the API description (`/docs`, `/openapi.json`)
+is switched off, and `/health` gives its details (folders, library versions) only to administrators. A database
+reset deletes projects but keeps accounts.
