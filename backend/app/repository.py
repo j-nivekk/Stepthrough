@@ -153,19 +153,37 @@ def list_project_members(project_id: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+# Users. The password hash is only ever read by `get_password_hash`; every other query leaves it out.
+USER_COLUMNS = (
+    "u.id, u.name, u.display_name, u.tags, u.is_disabled, u.delete_after, u.notes, u.created_at, u.last_seen_at, "
+    "u.password_hash IS NOT NULL AS has_password"
+)
+
+
 def create_user(
-    name: str, *, display_name: str | None = None, tags: Iterable[str] = (), user_id: str | None = None
+    name: str,
+    *,
+    display_name: str | None = None,
+    tags: Iterable[str] = (),
+    user_id: str | None = None,
+    delete_after: str | None = None,
+    notes: str | None = None,
 ) -> dict[str, Any]:
     payload = {
         "id": user_id or uuid4().hex,
         "name": name.strip(),
         "display_name": display_name,
         "tags": json.dumps(sorted(set(tags))),
+        "delete_after": delete_after,
+        "notes": notes,
         "created_at": utc_now(),
     }
     with connect() as conn:
         conn.execute(
-            "INSERT INTO users (id, name, display_name, tags, created_at) VALUES (:id, :name, :display_name, :tags, :created_at)",
+            """
+            INSERT INTO users (id, name, display_name, tags, delete_after, notes, created_at)
+            VALUES (:id, :name, :display_name, :tags, :delete_after, :notes, :created_at)
+            """,
             payload,
         )
     return get_user(payload["id"])
@@ -173,8 +191,195 @@ def create_user(
 
 def get_user(user_id: str) -> dict[str, Any] | None:
     with connect() as conn:
-        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        row = conn.execute(f"SELECT {USER_COLUMNS} FROM users u WHERE u.id = ?", (user_id,)).fetchone()
     return _row_to_dict(row)
+
+
+def find_user_by_name(name: str) -> dict[str, Any] | None:
+    """The user who logs in as ``name``, in any case."""
+    with connect() as conn:
+        row = conn.execute(
+            f"SELECT {USER_COLUMNS} FROM users u WHERE u.name = ? COLLATE NOCASE", (name.strip(),)
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def list_users() -> list[dict[str, Any]]:
+    """Every user, with how many projects they own themselves and whether an unused link is waiting for them."""
+    with connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT {USER_COLUMNS},
+                (SELECT COUNT(*) FROM project_members m WHERE m.member = u.id AND m.role = 'owner') AS project_count,
+                (SELECT l.purpose FROM user_links l WHERE l.user_id = u.id) AS open_link
+            FROM users u
+            ORDER BY u.name COLLATE NOCASE
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_user(user_id: str, **fields: Any) -> dict[str, Any] | None:
+    """Change any of ``display_name``, ``tags`` (a list), ``is_disabled``, ``delete_after`` and ``notes``."""
+    allowed = {"display_name", "tags", "is_disabled", "delete_after", "notes"}
+    unknown = set(fields) - allowed
+    if unknown:
+        raise ValueError(f"Cannot update user fields: {', '.join(sorted(unknown))}")
+    if "tags" in fields:
+        fields["tags"] = json.dumps(sorted(set(fields["tags"])))
+    if "is_disabled" in fields:
+        fields["is_disabled"] = int(bool(fields["is_disabled"]))
+    if fields:
+        assignments = ", ".join(f"{key} = :{key}" for key in fields)
+        with connect() as conn:
+            conn.execute(f"UPDATE users SET {assignments} WHERE id = :id", {**fields, "id": user_id})
+    return get_user(user_id)
+
+
+def delete_user_record(user_id: str) -> None:
+    """Remove a user, their sessions and link, and their project memberships (not the projects themselves)."""
+    with connect() as conn:
+        conn.execute("DELETE FROM project_members WHERE member = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
+def get_password_hash(user_id: str) -> str | None:
+    with connect() as conn:
+        row = conn.execute("SELECT password_hash FROM users WHERE id = ?", (user_id,)).fetchone()
+    return row["password_hash"] if row else None
+
+
+def set_password_hash(user_id: str, password_hash: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+
+
+def projects_owned_only_by(user_id: str) -> list[dict[str, Any]]:
+    """Projects this user owns and nobody else does (no other user, and no tag, has the owner role)."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT p.id, p.name, p.slug FROM projects p
+            JOIN project_members mine ON mine.project_id = p.id AND mine.member = ? AND mine.role = 'owner'
+            WHERE NOT EXISTS (
+                SELECT 1 FROM project_members other
+                WHERE other.project_id = p.id AND other.role = 'owner' AND other.member != ?
+            )
+            ORDER BY p.created_at
+            """,
+            (user_id, user_id),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def transfer_projects(from_member: str, to_member: str) -> int:
+    """Hand every project ``from_member`` belongs to over to ``to_member``, with the same role (an owner role is
+    never lowered); ``from_member`` leaves them. Returns how many projects were handed over."""
+    now = utc_now()
+    with connect() as conn:
+        moved = conn.execute("SELECT COUNT(*) FROM project_members WHERE member = ?", (from_member,)).fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO project_members (project_id, member, role, created_at)
+            SELECT project_id, ?, role, ? FROM project_members WHERE member = ?
+            ON CONFLICT (project_id, member) DO UPDATE
+            SET role = CASE WHEN excluded.role = 'owner' THEN 'owner' ELSE project_members.role END
+            """,
+            (to_member, now, from_member),
+        )
+        conn.execute("DELETE FROM project_members WHERE member = ?", (from_member,))
+    return moved
+
+
+def users_due_for_deletion(today: str) -> list[dict[str, Any]]:
+    """Users whose ``delete_after`` date (YYYY-MM-DD) is ``today`` or earlier."""
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT {USER_COLUMNS} FROM users u WHERE u.delete_after IS NOT NULL AND u.delete_after <= ?",
+            (today,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# Sessions and one-time links store only the SHA-256 of their token (see accounts.token_hash).
+
+
+def create_session(token_hash: str, user_id: str, expires_at: str) -> None:
+    now = utc_now()
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO sessions (token_hash, user_id, created_at, last_seen_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+            (token_hash, user_id, now, now, expires_at),
+        )
+        conn.execute("UPDATE users SET last_seen_at = ? WHERE id = ?", (now, user_id))
+
+
+def get_session(token_hash: str) -> dict[str, Any] | None:
+    """The session and its user's columns (``user_id``, ``name``, ``tags``, ``is_disabled``, ...)."""
+    with connect() as conn:
+        row = conn.execute(
+            f"""
+            SELECT s.token_hash, s.user_id, s.last_seen_at AS session_seen_at, s.expires_at, {USER_COLUMNS}
+            FROM sessions s JOIN users u ON u.id = s.user_id
+            WHERE s.token_hash = ?
+            """,
+            (token_hash,),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def touch_session(token_hash: str, user_id: str, now: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ?", (now, token_hash))
+        conn.execute("UPDATE users SET last_seen_at = ? WHERE id = ?", (now, user_id))
+
+
+def delete_session(token_hash: str) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+
+
+def delete_user_sessions(user_id: str, keep_token_hash: str | None = None) -> None:
+    """Log a user out everywhere, except (optionally) in the browser with ``keep_token_hash``."""
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?", (user_id, keep_token_hash or "")
+        )
+
+
+def replace_user_link(token_hash: str, user_id: str, purpose: str, expires_at: str) -> None:
+    """Make this the user's only link; an earlier one stops working."""
+    with connect() as conn:
+        conn.execute("DELETE FROM user_links WHERE user_id = ?", (user_id,))
+        conn.execute(
+            "INSERT INTO user_links (token_hash, user_id, purpose, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+            (token_hash, user_id, purpose, utc_now(), expires_at),
+        )
+
+
+def get_user_link(token_hash: str) -> dict[str, Any] | None:
+    """The link and its user's columns (``user_id``, ``purpose``, ``expires_at``, ``name``, ...)."""
+    with connect() as conn:
+        row = conn.execute(
+            f"""
+            SELECT l.token_hash, l.user_id, l.purpose, l.expires_at, {USER_COLUMNS}
+            FROM user_links l JOIN users u ON u.id = l.user_id
+            WHERE l.token_hash = ?
+            """,
+            (token_hash,),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def delete_user_links(user_id: str) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM user_links WHERE user_id = ?", (user_id,))
+
+
+def delete_expired_sessions_and_links(now: str) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
+        conn.execute("DELETE FROM user_links WHERE expires_at <= ?", (now,))
 
 
 def get_project(project_id: str) -> dict[str, Any] | None:

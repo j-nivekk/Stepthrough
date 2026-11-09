@@ -4,23 +4,67 @@ Every project lists its members in ``project_members``: a user, or everyone with
 ``owner`` (may change it) or a ``viewer`` (may only look). Recordings, runs, steps and exports follow their
 project. Users with the ``admin`` tag may open and change every project.
 
-There is no login yet: every request comes from the built-in local user, an administrator, which is how the
-standalone app works. Accounts with passwords will replace ``current_user`` without changing the checks.
+How people are recognised depends on the server's ``auth`` setting (``STEPTHROUGH_AUTH``):
+
+- ``none``, the standalone app: every request comes from the built-in local user, an administrator.
+- ``password``, a shared server: people log in with their name and password, and the browser keeps a session
+  cookie. Accounts are made by an administrator, who hands out a one-time link with which each person sets their
+  own password. Nobody can sign themselves up.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
+import secrets
+import threading
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException
+from starlette.requests import HTTPConnection
 
+from .config import AuthMode
 from .database import ADMIN_TAG, LOCAL_USER_ID
-from .repository import get_user, project_member_roles
+from .repository import (
+    create_session,
+    delete_session,
+    delete_user_links,
+    delete_user_sessions,
+    get_password_hash,
+    get_session,
+    get_user,
+    get_user_link,
+    project_member_roles,
+    replace_user_link,
+    set_password_hash,
+    touch_session,
+)
+from .utils import utc_now
 
 ProjectRole = Literal["viewer", "owner"]
+LinkPurpose = Literal["invite", "reset"]
 TAG_PREFIX = "tag:"
+
+SESSION_COOKIE = "stepthrough_session"
+SESSION_LIFETIME = timedelta(days=30)
+LINK_LIFETIME = timedelta(days=14)
+# The web page reads the token from the part after `#`, which browsers never send to the server, so links do not
+# end up in the web server's logs.
+LINK_FRAGMENT = "#link="
+MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 1024
+# PBKDF2-SHA256 at OWASP's recommended work factor: in the standard library, and light on memory when a whole
+# lot of people log in at once. The count is stored with each hash, so it can be raised later.
+PASSWORD_ITERATIONS = 600_000
+# How often a session's (and its user's) "last seen" time is written while it is in use.
+SEEN_INTERVAL = timedelta(hours=1)
 
 
 @dataclass(frozen=True)
@@ -29,15 +73,17 @@ class User:
     name: str
     display_name: str | None = None
     tags: tuple[str, ...] = ()
+    delete_after: str | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> User:
         tags = row.get("tags") or "[]"
         return cls(
-            id=row["id"],
+            id=row.get("user_id") or row["id"],
             name=row["name"],
             display_name=row.get("display_name"),
             tags=tuple(json.loads(tags) if isinstance(tags, str) else tags),
+            delete_after=row.get("delete_after"),
         )
 
     @property
@@ -45,21 +91,160 @@ class User:
         return ADMIN_TAG in self.tags
 
     @property
+    def is_builtin(self) -> bool:
+        return self.id == LOCAL_USER_ID
+
+    @property
     def memberships(self) -> tuple[str, ...]:
         """The ``project_members.member`` values that stand for this user: their id and each of their tags."""
         return (self.id, *(f"{TAG_PREFIX}{tag}" for tag in self.tags))
 
 
-def current_user() -> User:
-    """The user making the request (a FastAPI dependency). For now always the built-in local user."""
+# ── passwords and tokens ─────────────────────────────────────────────────────────────────────────────────────
+
+
+def password_problem(password: str) -> str | None:
+    """Why a new password cannot be used, or ``None``. Length is the only rule (as NIST advises)."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"Use at least {MIN_PASSWORD_LENGTH} characters."
+    if len(password) > MAX_PASSWORD_LENGTH:
+        return f"Use at most {MAX_PASSWORD_LENGTH} characters."
+    return None
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    iterations = PASSWORD_ITERATIONS
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+    return f"pbkdf2_sha256${iterations}${_b64(salt)}${_b64(digest)}"
+
+
+def password_matches(password: str, stored: str | None) -> bool:
+    """Whether ``password`` is the one ``stored`` was made from. Takes as long when there is no stored hash, so
+    the answer's timing does not tell whether a name exists."""
+    try:
+        scheme, iterations, salt, expected = (stored or _missing_hash()).split("$")
+        if scheme != "pbkdf2_sha256":
+            return False
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode(), _unb64(salt), int(iterations))
+    except (ValueError, TypeError):
+        return False
+    return stored is not None and hmac.compare_digest(digest, _unb64(expected))
+
+
+_MISSING_HASH: str | None = None
+
+
+def _missing_hash() -> str:
+    global _MISSING_HASH
+    if _MISSING_HASH is None:
+        _MISSING_HASH = hash_password(secrets.token_urlsafe(16))
+    return _MISSING_HASH
+
+
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+
+def _unb64(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+
+
+def new_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _later(delta: timedelta) -> str:
+    return (datetime.now(timezone.utc) + delta).isoformat()
+
+
+# ── sessions ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def start_session(user_id: str) -> str:
+    """Log a user in; returns the token for the cookie."""
+    token = new_token()
+    create_session(token_hash(token), user_id, _later(SESSION_LIFETIME))
+    return token
+
+
+def end_session(token: str | None) -> None:
+    if token:
+        delete_session(token_hash(token))
+
+
+def session_user(token: str) -> User | None:
+    """The user a session cookie belongs to, if the session is still valid and the account is switched on."""
+    session = get_session(token_hash(token))
+    if session is None or session["is_disabled"]:
+        return None
+    now = utc_now()
+    if session["expires_at"] <= now:
+        delete_session(session["token_hash"])
+        return None
+    if datetime.fromisoformat(session["session_seen_at"]) + SEEN_INTERVAL <= datetime.fromisoformat(now):
+        touch_session(session["token_hash"], session["user_id"], now)
+    return User.from_row(session)
+
+
+def set_session_cookie(response: Any, conn: HTTPConnection, token: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=int(SESSION_LIFETIME.total_seconds()),
+        httponly=True,
+        samesite="lax",
+        # Behind the web server, uvicorn's --proxy-headers makes the scheme the one the browser used.
+        secure=conn.url.scheme == "https",
+        path="/",
+    )
+
+
+def clear_session_cookie(response: Any, conn: HTTPConnection) -> None:
+    response.delete_cookie(SESSION_COOKIE, httponly=True, samesite="lax", secure=conn.url.scheme == "https", path="/")
+
+
+# ── who is asking (FastAPI dependencies) ─────────────────────────────────────────────────────────────────────
+
+
+def auth_mode(conn: HTTPConnection) -> AuthMode:
+    return getattr(conn.app.state, "auth_mode", "none")
+
+
+def builtin_user() -> User:
     row = get_user(LOCAL_USER_ID)
     if row is None:  # pragma: no cover - init_db creates it on every start
         raise RuntimeError("The built-in local user is missing; restart the backend to recreate it.")
     return User.from_row(row)
 
 
-# Use as a parameter type in endpoints: ``def show(..., user: CurrentUser)``.
-CurrentUser = Annotated[User, Depends(current_user)]
+def current_user(conn: HTTPConnection) -> User | None:
+    """Who is making the request, or ``None`` if nobody is logged in (only possible with password logins)."""
+    if auth_mode(conn) == "none":
+        return builtin_user()
+    token = conn.cookies.get(SESSION_COOKIE)
+    return session_user(token) if token else None
+
+
+def logged_in_user(user: Annotated[User | None, Depends(current_user)]) -> User:
+    if user is None:
+        raise HTTPException(status_code=401, detail="Log in to continue.")
+    return user
+
+
+# Use as a parameter type in endpoints: ``def show(..., user: CurrentUser)``. Answers 401 if nobody is logged in.
+CurrentUser = Annotated[User, Depends(logged_in_user)]
+# The same, but ``None`` instead of 401 (for the session check and the progress socket).
+MaybeUser = Annotated[User | None, Depends(current_user)]
+
+
+def require_admin(user: User) -> None:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Only administrators can do this.")
 
 
 def project_role(project_id: str, user: User) -> ProjectRole | None:
@@ -72,3 +257,103 @@ def project_role(project_id: str, user: User) -> ProjectRole | None:
     if "viewer" in roles:
         return "viewer"
     return None
+
+
+# ── requests from other websites ─────────────────────────────────────────────────────────────────────────────
+
+
+def is_cross_site(conn: HTTPConnection, allowed_origins: tuple[str, ...]) -> bool:
+    """Whether a browser sent this request from another website (which must not act with the visitor's login).
+
+    Browsers say where a request comes from in ``Sec-Fetch-Site`` and ``Origin``. Origins in
+    ``STEPTHROUGH_CORS_ORIGINS`` (the development frontend) are trusted; programs that send neither header, such
+    as scripts and the smoke test, are not browsers and carry no one else's cookie."""
+    origin = conn.headers.get("origin")
+    if origin and origin.rstrip("/") in allowed_origins:
+        return False
+    site = conn.headers.get("sec-fetch-site")
+    if site is not None:
+        return site not in ("same-origin", "none")
+    if origin is None:
+        return False
+    host = conn.headers.get("x-forwarded-host") or conn.headers.get("host")
+    return urlsplit(origin).netloc != host
+
+
+class LoginLimiter:
+    """Slows down password guessing: after too many wrong passwords for one name, or from one address, within
+    the window, further attempts are refused until old ones age out. Kept in memory (the API runs as one process),
+    so a restart forgets it."""
+
+    def __init__(self, per_name: int = 10, per_address: int = 50, window_seconds: float = 15 * 60) -> None:
+        self.per_name = per_name
+        self.per_address = per_address
+        self.window = window_seconds
+        self._failures: dict[str, deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def _recent(self, key: str, now: float) -> int:
+        failures = self._failures[key]
+        while failures and failures[0] <= now - self.window:
+            failures.popleft()
+        if not failures:
+            del self._failures[key]
+            return 0
+        return len(failures)
+
+    def allowed(self, name: str, address: str) -> bool:
+        now = time.monotonic()
+        with self._lock:
+            return (
+                self._recent(f"name:{name.lower()}", now) < self.per_name
+                and self._recent(f"address:{address}", now) < self.per_address
+            )
+
+    def failed(self, name: str, address: str) -> None:
+        now = time.monotonic()
+        with self._lock:
+            self._failures[f"name:{name.lower()}"].append(now)
+            self._failures[f"address:{address}"].append(now)
+
+    def succeeded(self, name: str) -> None:
+        with self._lock:
+            self._failures.pop(f"name:{name.lower()}", None)
+
+
+# ── one-time links ───────────────────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class UserLink:
+    token: str
+    purpose: LinkPurpose
+    expires_at: str
+
+
+def new_user_link(user_id: str) -> UserLink:
+    """A link with which the user sets a password: an invitation if they have none yet, else a reset. It replaces
+    any earlier link."""
+    purpose: LinkPurpose = "reset" if get_password_hash(user_id) else "invite"
+    token = new_token()
+    expires_at = _later(LINK_LIFETIME)
+    replace_user_link(token_hash(token), user_id, purpose, expires_at)
+    return UserLink(token=token, purpose=purpose, expires_at=expires_at)
+
+
+def link_url(token: str, base_url: str | None) -> str:
+    return f"{base_url or ''}/{LINK_FRAGMENT}{token}"
+
+
+def find_link(token: str) -> dict[str, Any] | None:
+    """The link's details and its user's columns, if it exists, has not expired and the account is switched on."""
+    link = get_user_link(token_hash(token))
+    if link is None or link["is_disabled"] or link["expires_at"] <= utc_now():
+        return None
+    return link
+
+
+def set_password(user_id: str, password: str, *, keep_session_token: str | None = None) -> None:
+    """Store a new password and log the user out everywhere else; any open link stops working."""
+    set_password_hash(user_id, hash_password(password))
+    delete_user_links(user_id)
+    delete_user_sessions(user_id, token_hash(keep_session_token) if keep_session_token else None)

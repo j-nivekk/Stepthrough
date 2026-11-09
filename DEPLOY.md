@@ -7,9 +7,8 @@ Settings go in a `.env` file next to `compose.yaml`, and new versions come as a 
 
 To run Stepthrough on your own computer instead, see section 3 of [`GUIDE.md`](GUIDE.md#3-installing-and-starting-stepthrough).
 
-> **Before you share the address.** Stepthrough has no user accounts yet. Everyone who can open the address can see,
-> and delete, every project. Until accounts arrive, limit who can reach it (with a shared password or by network
-> address; see the nginx example), and do not use it for recordings that show other people.
+People log in with accounts that administrators make (see [Accounts](#accounts)). Each person's projects are
+theirs: others cannot see them, except the server's administrators.
 
 ## What you need
 
@@ -34,6 +33,12 @@ curl -fsS http://127.0.0.1:8080/health
 `--wait` returns once the container reports itself healthy. The app now listens on `127.0.0.1:8080`, reachable only
 from the server itself, until the web server is set up.
 
+Then make yourself the first administrator. It asks for your password twice:
+
+```bash
+docker compose exec stepthrough python -m app.users add yourname --admin --password
+```
+
 ## Settings
 
 Edit `.env`, then apply it with `docker compose up -d --wait`. Every setting is optional.
@@ -48,6 +53,7 @@ Edit `.env`, then apply it with `docker compose up -d --wait`. Every setting is 
 | `STEPTHROUGH_CPUS`, `STEPTHROUGH_MEMORY` | `0` (no limit) | caps for the container, for example `4` and `8g`, so analyses cannot starve other tools on the host |
 | `STEPTHROUGH_VOLUME` | `stepthrough_data` | name of the Docker volume with all data |
 | `STEPTHROUGH_OCR_MODEL_SOURCE` | `auto` | where the text recognition image downloads its models (`auto`, `huggingface`, `bos`) |
+| `STEPTHROUGH_PUBLIC_URL` | unset | the address people open, such as `https://stepthrough.example.org`; the command line prints password links with it |
 
 ## Web server
 
@@ -58,14 +64,44 @@ settings, Stepthrough needs three things from the web server:
 - WebSocket upgrades (the `Upgrade` and `Connection` headers), which carry live progress while a run works;
 - long timeouts and no request buffering, so large uploads and long runs are not cut off.
 
-Then check the whole chain from outside, using the smoke test from the repository. It uploads a short generated
-recording, analyses it, exports it and deletes it again:
+Then check the whole chain from outside, using the smoke test from the repository. It logs in, uploads a short
+generated recording, analyses it, exports it and deletes it again:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/j-nivekk/Stepthrough/main/docker/smoke_test.py
-python3 smoke_test.py https://stepthrough.example.org   # needs ffmpeg on the machine you run it from
+python3 smoke_test.py https://stepthrough.example.org --user yourname   # asks for your password; needs ffmpeg
 docker compose exec -T stepthrough python - < smoke_test.py   # or inside the container, without the web server
 ```
+
+Inside the container, the smoke test makes a throwaway account for itself and deletes it at the end.
+
+## Accounts
+
+Administrators look after accounts on the users page: open the menu with your name at the bottom right, then
+**manage users**. Nobody can sign up on their own.
+
+- **Adding people.** Type the name they will log in with, optionally with tags and a deletion date, and give them
+  the link that appears. With the link they choose their own password; it works once, for 14 days.
+- **Importing a list.** A CSV file in the layout of 4CAT's bulk user import works as it is: a `name` column, and
+  optionally `expires` (a date as `2027-02-01`), `tags`, `password` and `notes`. Everyone without a password gets
+  a link, and the page offers all of them as a CSV, ready for a mail merge.
+- **Forgotten passwords.** Give the person a new link (**reset link** on their row). Earlier links stop working.
+- **Deletion dates.** From an account's deletion date, the account and the projects only it owns are deleted.
+  People see a notice in the month before. Accounts without a date are kept until an administrator deletes them.
+- **Switching off** an account logs it out at once and keeps its projects.
+
+The same can be done from the command line, which also lists accounts with when they were last seen:
+
+```bash
+docker compose exec stepthrough python -m app.users list
+docker compose exec stepthrough python -m app.users link yourname          # a new password link
+docker compose exec -T stepthrough python -m app.users import /dev/stdin --tag group-a < people.csv > links.csv
+docker compose exec stepthrough python -m app.users --help                 # everything else
+```
+
+**Upgrading from a version without accounts.** Projects made before then belong to a built-in account that nobody
+logs in with, so they appear in nobody's list. Take them over with **take over its projects** on the built-in
+account's row, or `docker compose exec stepthrough python -m app.users transfer local yourname`.
 
 ## Upgrade
 
@@ -133,11 +169,12 @@ in it.
 ## How the Docker image differs from running Stepthrough from source
 
 - It serves the interface and the API from one address, so no cross-origin settings are needed.
+- People log in (`STEPTHROUGH_AUTH=password`); from source, the app has no logins unless that is set.
 - The database reset in **settings** is switched off.
 - At most `STEPTHROUGH_MAX_CONCURRENT_RUNS` analyses run at once; later ones show as `queued` and start in order.
 - It runs as one process, because live progress and the run queue are kept in memory. Restarting ends active runs.
 - The container runs as an unprivileged user with no extra Linux capabilities. Logs go to Docker
   (`docker compose logs -f`), rotated at 5 × 10 MB.
 
-Still to come: accounts and private projects, analysis in a separate worker that survives restarts, and automatic
-deletion of old projects.
+Still to come: sharing a project with other people from the app, and analysis in a separate worker that survives
+restarts.

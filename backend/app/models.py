@@ -68,6 +68,116 @@ class UserResponse(BaseModel):
     display_name: str | None = None
     tags: list[str] = []
     is_admin: bool = False
+    # The date (YYYY-MM-DD) from which this account and the projects only it owns are deleted.
+    delete_after: str | None = None
+
+
+AuthModeName = Literal["none", "password"]
+LinkPurpose = Literal["invite", "reset"]
+
+
+class SessionResponse(BaseModel):
+    """How this server recognises people, and who is logged in (``None``: nobody, so show the login page)."""
+
+    mode: AuthModeName
+    user: UserResponse | None = None
+
+
+class LoginRequest(BaseModel):
+    name: str = Field(max_length=200)
+    password: str = Field(max_length=1024)
+
+
+class LinkRequest(BaseModel):
+    token: str = Field(max_length=200)
+
+
+class LinkDetailsResponse(BaseModel):
+    name: str
+    display_name: str | None = None
+    purpose: LinkPurpose
+
+
+class LinkPasswordRequest(BaseModel):
+    token: str = Field(max_length=200)
+    password: str = Field(max_length=1024)
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str = Field(max_length=1024)
+    new_password: str = Field(max_length=1024)
+
+
+class UserLinkResponse(BaseModel):
+    """A one-time link to set a password. The page builds the address as ``<its own origin>/#link=<token>``."""
+
+    token: str
+    purpose: LinkPurpose
+    expires_at: str
+
+
+class AdminUserResponse(UserResponse):
+    is_builtin: bool = False
+    is_disabled: bool = False
+    has_password: bool = False
+    # An unused link is waiting for this person (``invite`` or ``reset``), or ``None``.
+    open_link: LinkPurpose | None = None
+    notes: str | None = None
+    project_count: int = 0
+    created_at: str
+    last_seen_at: str | None = None
+
+
+class AdminUserCreate(BaseModel):
+    name: str = Field(max_length=200)
+    display_name: str | None = Field(default=None, max_length=200)
+    tags: list[str] = []
+    delete_after: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class AdminUserCreated(BaseModel):
+    user: AdminUserResponse
+    link: UserLinkResponse
+
+
+class AdminUserUpdate(BaseModel):
+    """Only the fields that are sent change; send ``delete_after: null`` to keep an account for good."""
+
+    display_name: str | None = Field(default=None, max_length=200)
+    tags: list[str] | None = None
+    is_disabled: bool | None = None
+    delete_after: str | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class UserImportCreated(BaseModel):
+    name: str
+    link: UserLinkResponse | None = None
+
+
+class UserImportProblem(BaseModel):
+    row: int
+    name: str | None = None
+    message: str
+
+
+class UserImportResponse(BaseModel):
+    created: list[UserImportCreated] = []
+    existing: list[str] = []
+    errors: list[UserImportProblem] = []
+
+
+class UserDeletedResponse(BaseModel):
+    deleted_projects: list[str] = []
+
+
+class ProjectTransferRequest(BaseModel):
+    to_user_id: str
+
+
+class ProjectTransferResponse(BaseModel):
+    moved: int
 
 
 class ProjectResponse(BaseModel):

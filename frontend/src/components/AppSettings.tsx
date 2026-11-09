@@ -4,6 +4,8 @@ import type { HealthResponse } from '../types';
 
 export interface AppSettingsProps {
   healthData: HealthResponse | undefined;
+  /** Rechecking OCR and resetting the database are for administrators only. */
+  isAdmin: boolean;
   isRecheckingOcr: boolean;
   isResettingDatabase: boolean;
   open: boolean;
@@ -16,6 +18,7 @@ export interface AppSettingsProps {
 
 export function AppSettings({
   healthData,
+  isAdmin,
   isRecheckingOcr,
   isResettingDatabase,
   open,
@@ -126,7 +129,7 @@ export function AppSettings({
         <div className="app-settings-tool-row">
           <span>ocr (paddleocr)</span>
           <span className={`app-settings-status ${ocrStatusClass}`}>{ocrStatusLabel}</span>
-          {ocrStatus !== 'available' && (
+          {isAdmin && ocrStatus !== 'available' && (
             <button
               className="app-settings-action-btn"
               disabled={isRecheckingOcr || ocrStatus === 'checking'}
@@ -137,7 +140,7 @@ export function AppSettings({
             </button>
           )}
         </div>
-        {ocrStatus === 'unavailable' && (
+        {isAdmin && ocrStatus === 'unavailable' && (
           <p className="app-settings-hint">
             {'to install: '}
             <code className="app-settings-code">pip install paddlepaddle paddleocr</code>
@@ -146,51 +149,53 @@ export function AppSettings({
         )}
       </div>
 
-      <div className="app-settings-section">
-        <p className="app-settings-section-label">database</p>
-        <div className="app-settings-action-row">
-          <span>reset all data</span>
-          {awaitingResetConfirm ? (
-            <div className="app-settings-reset-confirm">
-              <input
-                aria-label="type reset to confirm"
-                autoComplete="off"
-                className="app-settings-reset-input"
-                disabled={isResettingDatabase}
-                onChange={(e) => setResetConfirmValue(e.target.value)}
-                onKeyDown={handleResetConfirmKey}
-                placeholder="type reset"
-                ref={resetInputRef}
-                spellCheck={false}
-                type="text"
-                value={resetConfirmValue}
-              />
+      {isAdmin && (
+        <div className="app-settings-section">
+          <p className="app-settings-section-label">database</p>
+          <div className="app-settings-action-row">
+            <span>reset all data</span>
+            {awaitingResetConfirm ? (
+              <div className="app-settings-reset-confirm">
+                <input
+                  aria-label="type reset to confirm"
+                  autoComplete="off"
+                  className="app-settings-reset-input"
+                  disabled={isResettingDatabase}
+                  onChange={(e) => setResetConfirmValue(e.target.value)}
+                  onKeyDown={handleResetConfirmKey}
+                  placeholder="type reset"
+                  ref={resetInputRef}
+                  spellCheck={false}
+                  type="text"
+                  value={resetConfirmValue}
+                />
+                <button
+                  aria-label="cancel reset"
+                  className="app-settings-reset-cancel"
+                  onClick={cancelResetConfirm}
+                  type="button"
+                >
+                  ×
+                </button>
+              </div>
+            ) : (
               <button
-                aria-label="cancel reset"
-                className="app-settings-reset-cancel"
-                onClick={cancelResetConfirm}
+                className="app-settings-danger-btn"
+                disabled={isResettingDatabase}
+                onClick={handleResetClick}
                 type="button"
               >
-                ×
+                {isResettingDatabase ? 'resetting…' : 'reset'}
               </button>
-            </div>
-          ) : (
-            <button
-              className="app-settings-danger-btn"
-              disabled={isResettingDatabase}
-              onClick={handleResetClick}
-              type="button"
-            >
-              {isResettingDatabase ? 'resetting…' : 'reset'}
-            </button>
-          )}
+            )}
+          </div>
+          <p className="app-settings-hint">
+            {awaitingResetConfirm
+              ? 'press enter to confirm, or escape to cancel.'
+              : 'permanently deletes all projects, recordings, runs, and candidates. cannot be undone.'}
+          </p>
         </div>
-        <p className="app-settings-hint">
-          {awaitingResetConfirm
-            ? 'press enter to confirm, or escape to cancel.'
-            : 'permanently deletes all projects, recordings, runs, and candidates. cannot be undone.'}
-        </p>
-      </div>
+      )}
     </div>
   );
 }

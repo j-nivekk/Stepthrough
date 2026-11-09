@@ -92,7 +92,7 @@ async function triggerNamedDownload(url: string, filename: string): Promise<void
     return;
   }
 
-  const response = await fetch(url);
+  const response = await fetch(url, { credentials: 'include' });
   if (!response.ok) {
     throw new Error('Could not download the export bundle.');
   }

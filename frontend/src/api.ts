@@ -1,9 +1,12 @@
 import type {
+  AdminUser,
+  AdminUserChanges,
   AnalysisMetadata,
   CandidateFrame,
   ExportBundle,
   ExportMode,
   HealthResponse,
+  LinkDetails,
   Project,
   ProjectDetail,
   RecordingDetail,
@@ -11,6 +14,9 @@ import type {
   RunDetail,
   RunSettings,
   RunSummary,
+  SessionInfo,
+  UserImportResult,
+  UserLink,
 } from './types';
 
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL;
@@ -27,7 +33,7 @@ export function apiSocketUrl(path: string): string {
   return new URL(path, API_BASE).toString().replace(/^http/, 'ws');
 }
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number;
 
   constructor(status: number, message: string) {
@@ -36,18 +42,31 @@ class ApiError extends Error {
   }
 }
 
+/** Sent on the window when a request finds that nobody is logged in (any more), so the login page can show. */
+export const SIGNED_OUT_EVENT = 'stepthrough:signed-out';
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(new URL(path, API_BASE), init);
+  // `include`: the session cookie also goes along when the development frontend runs on another port.
+  const response = await fetch(new URL(path, API_BASE), { credentials: 'include', ...init });
   if (response.status === 204) {
     return undefined as T;
   }
   if (!response.ok) {
     const contentType = response.headers.get('content-type') ?? '';
     const payload = contentType.includes('application/json') ? await response.json() : await response.text();
-    const message = typeof payload === 'string' ? payload : payload.detail ?? 'Request failed';
+    const detail = typeof payload === 'string' ? payload : payload.detail;
+    const message = typeof detail === 'string' ? detail : 'Request failed';
+    // A wrong password at login is not a lost session.
+    if (response.status === 401 && !path.startsWith('/auth/')) {
+      window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+    }
     throw new ApiError(response.status, message);
   }
   return response.json() as Promise<T>;
+}
+
+function jsonBody(method: string, payload: unknown): RequestInit {
+  return { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
 }
 
 export function absoluteApiUrl(path: string): string {
@@ -181,4 +200,68 @@ export function resetDatabase(): Promise<void> {
 
 export function recheckOcr(): Promise<void> {
   return request<void>('/admin/recheck-ocr', { method: 'POST' });
+}
+
+export function getSession(): Promise<SessionInfo> {
+  return request<SessionInfo>('/auth/session');
+}
+
+export function logIn(name: string, password: string): Promise<SessionInfo> {
+  return request<SessionInfo>('/auth/login', jsonBody('POST', { name, password }));
+}
+
+export function logOut(): Promise<void> {
+  return request<void>('/auth/logout', { method: 'POST' });
+}
+
+export function getLinkDetails(token: string): Promise<LinkDetails> {
+  return request<LinkDetails>('/auth/link', jsonBody('POST', { token }));
+}
+
+export function setPasswordWithLink(token: string, password: string): Promise<SessionInfo> {
+  return request<SessionInfo>('/auth/link/password', jsonBody('POST', { token, password }));
+}
+
+export function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  return request<void>(
+    '/me/password',
+    jsonBody('POST', { current_password: currentPassword, new_password: newPassword }),
+  );
+}
+
+export function listUsers(): Promise<AdminUser[]> {
+  return request<AdminUser[]>('/admin/users');
+}
+
+export function createUser(payload: {
+  name: string;
+  tags: string[];
+  delete_after: string | null;
+}): Promise<{ user: AdminUser; link: UserLink }> {
+  return request('/admin/users', jsonBody('POST', payload));
+}
+
+export function importUsers(file: File, tags: string, deleteAfter: string): Promise<UserImportResult> {
+  const formData = new FormData();
+  formData.set('file', file);
+  formData.set('tags', tags);
+  formData.set('delete_after', deleteAfter);
+  return request<UserImportResult>('/admin/users/import', { method: 'POST', body: formData });
+}
+
+export function updateUser(userId: string, changes: AdminUserChanges): Promise<AdminUser> {
+  return request<AdminUser>(`/admin/users/${userId}`, jsonBody('PATCH', changes));
+}
+
+export function newUserLink(userId: string): Promise<UserLink> {
+  return request<UserLink>(`/admin/users/${userId}/link`, { method: 'POST' });
+}
+
+export function deleteUser(userId: string): Promise<{ deleted_projects: string[] }> {
+  return request(`/admin/users/${userId}`, { method: 'DELETE' });
+}
+
+/** Hand all of one account's projects to another (keeping each role). */
+export function transferProjects(userId: string, toUserId: string): Promise<{ moved: number }> {
+  return request(`/admin/users/${userId}/transfer-projects`, jsonBody('POST', { to_user_id: toUserId }));
 }

@@ -6,6 +6,8 @@ import type { Project } from '../../types';
 import type { ProjectEntryTarget, WorkflowStage } from '../../lib/workflow';
 
 export interface EntryScreenProps {
+  /** About the logged-in account, such as its coming deletion. */
+  accountNotice?: string | null;
   appError: string;
   deletingProjectId?: string | null;
   healthMessage: string | null;
@@ -33,6 +35,7 @@ export interface EntryScreenProps {
 }
 
 export function EntryScreen({
+  accountNotice,
   appError,
   deletingProjectId,
   healthMessage,
@@ -114,8 +117,13 @@ export function EntryScreen({
         </div>
 
         <div className="entry-stage">
-          {(healthMessage || ocrStatusMessage || (ocrWarnings.length > 0 && ocrWarningsExpanded) || appError) && (
+          {(accountNotice ||
+            healthMessage ||
+            ocrStatusMessage ||
+            (ocrWarnings.length > 0 && ocrWarningsExpanded) ||
+            appError) && (
             <div className="entry-notices">
+              {accountNotice && <p className="entry-notice warning">{accountNotice}</p>}
               {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
               {ocrStatusMessage && (
                 <p className={ocrStatusTone === 'warning' ? 'entry-notice warning' : 'entry-notice'}>

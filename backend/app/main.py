@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import json
 import logging
 import shutil
+import time
 from pathlib import Path
 from threading import Thread
 from typing import Any, Callable, Literal
@@ -26,7 +27,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .accounts import CurrentUser, ProjectRole, User, project_role
+from .account_routes import router as account_router, user_response
+from .accounts import CurrentUser, MaybeUser, ProjectRole, User, is_cross_site, project_role, require_admin
 from .analysis_metadata import serialize_analysis_metadata
 from .config import DATA_ROOT, build_server_config, build_tool_diagnostics, ensure_app_dirs
 from .database import init_db, reset_db
@@ -73,6 +75,7 @@ from .repository import (
     list_recordings,
     list_run_events,
     list_runs,
+    list_users,
     project_has_active_runs,
     recording_has_active_runs,
     replace_candidates,
@@ -108,6 +111,7 @@ from .storage import (
     relative_data_path,
     run_dir,
 )
+from .user_admin import delete_expired_accounts
 from .utils import sanitize_filename, utc_now
 
 TERMINAL_WEBSOCKET_STATES = {"completed", "failed", "cancelled"}
@@ -125,13 +129,27 @@ class OcrHealthState:
     warnings: tuple[str, ...] = ()
 
 app = FastAPI(title="Stepthrough API", version="0.2.0")
+# Read through accounts.auth_mode, so tests can switch it on a running app.
+app.state.auth_mode = server_config.auth
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(server_config.cors_origins),
-    allow_credentials=False,
+    # The development frontend runs on another port and sends the session cookie along.
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(account_router)
+UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+
+@app.middleware("http")
+async def reject_cross_site_changes(request: Request, call_next):
+    # Another website open in the same browser must not change anything with the visitor's login (or, in the
+    # desktop app, at all: anything on the computer can reach the local backend). Reading is left to CORS.
+    if request.method in UNSAFE_METHODS and is_cross_site(request, server_config.cors_origins):
+        return JSONResponse(status_code=403, content={"detail": "Requests from other websites are not accepted."})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -194,10 +212,30 @@ def _start_background_ocr_probe() -> None:
     worker.start()
 
 
+def _delete_expired_accounts_hourly() -> None:
+    while True:
+        try:
+            for name in delete_expired_accounts():
+                logger.info("Deleted the account %s and the projects only it owned: its deletion date has come.", name)
+        except Exception:  # pragma: no cover - keep trying every hour
+            logger.exception("Could not delete expired accounts.")
+        time.sleep(3600)
+
+
+def _start_account_cleanup() -> None:
+    Thread(target=_delete_expired_accounts_hourly, name="stepthrough-account-cleanup", daemon=True).start()
+
+
 @app.on_event("startup")
 def startup() -> None:
     ensure_app_dirs()
     init_db()
+    if server_config.auth == "password" and not any(row["has_password"] for row in list_users()):
+        logger.warning(
+            "Nobody can log in yet. Make the first administrator with `python -m app.users add NAME --admin` "
+            "(in Docker: `docker compose exec stepthrough python -m app.users add NAME --admin`)."
+        )
+    _start_account_cleanup()
     app.state.tool_diagnostics = build_tool_diagnostics()
     _set_ocr_state(_checking_ocr_state())
     app.state.job_manager = JobManager(max_concurrent_runs=server_config.max_concurrent_runs)
@@ -440,11 +478,6 @@ def _run_for(run_id: str, user: User, need: ProjectRole, not_found: str = "Run n
     project, recording = _recording_context(run["recording_id"])
     _check_project_role(project["id"], user, need, not_found)
     return project, recording, run
-
-
-def _require_admin(user: User) -> None:
-    if not user.is_admin:
-        raise HTTPException(status_code=403, detail="Only administrators can do this.")
 
 
 def _build_run_detail(run_id: str) -> DetectionRunDetail:
@@ -748,7 +781,7 @@ def analysis_metadata() -> AnalysisMetadataResponse:
 def admin_reset_db(
     user: CurrentUser, confirm: str | None = Header(default=None, alias=ADMIN_CONFIRM_HEADER)
 ) -> Response:
-    _require_admin(user)
+    require_admin(user)
     if not server_config.allow_admin_reset:
         raise HTTPException(status_code=403, detail="Database reset is disabled on this server.")
     # A custom header forces a CORS preflight, so other websites cannot trigger this from a browser.
@@ -761,7 +794,7 @@ def admin_reset_db(
 
 @app.post("/admin/recheck-ocr", status_code=204)
 def admin_recheck_ocr(user: CurrentUser) -> Response:
-    _require_admin(user)
+    require_admin(user)
     _set_ocr_state(_checking_ocr_state())
     _start_background_ocr_probe()
     return Response(status_code=204)
@@ -769,9 +802,7 @@ def admin_recheck_ocr(user: CurrentUser) -> Response:
 
 @app.get("/me", response_model=UserResponse)
 def me(user: CurrentUser) -> UserResponse:
-    return UserResponse(
-        id=user.id, name=user.name, display_name=user.display_name, tags=list(user.tags), is_admin=user.is_admin
-    )
+    return user_response(user)
 
 
 @app.get("/projects", response_model=list[ProjectResponse])
@@ -946,8 +977,10 @@ def runs_delete(run_id: str, user: CurrentUser) -> Response:
 
 
 @app.websocket("/runs/{run_id}/events")
-async def runs_events(run_id: str, websocket: WebSocket, user: CurrentUser) -> None:
+async def runs_events(run_id: str, websocket: WebSocket, user: MaybeUser) -> None:
     try:
+        if user is None or is_cross_site(websocket, server_config.cors_origins):
+            raise HTTPException(status_code=403)
         _run_for(run_id, user, "viewer")
     except HTTPException:
         # Closing before accepting refuses the handshake (HTTP 403), whether or not the run exists.

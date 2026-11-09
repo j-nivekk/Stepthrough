@@ -175,3 +175,14 @@ export function formatRelativeTime(timestamp: string, nowMs: number): string {
   }
   return formatRunShortTimestamp(timestamp);
 }
+
+/** A calendar date (YYYY-MM-DD) as `1 feb 2027`. */
+export function formatCalendarDate(isoDate: string): string {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  if (!year || !month || !day) {
+    return isoDate;
+  }
+  return formatLowercaseLocaleText(
+    new Date(year, month - 1, day).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }),
+  );
+}

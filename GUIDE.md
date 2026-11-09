@@ -56,8 +56,10 @@ To see this as an animation, open Stepthrough and choose **about → how it work
 
 ## 3. Installing and starting Stepthrough
 
-If someone has set up a Stepthrough server for your group, you do not need to install anything: open the web
-address they gave you and go on to [section 4](#4-tutorial-your-first-walkthrough).
+If someone has set up a Stepthrough server for your group, you do not need to install anything. They send you a
+link with which you choose a password; after that, open the server's address, log in with your name and that
+password, and go on to [section 4](#4-tutorial-your-first-walkthrough). Your name at the bottom right opens your
+account: change your password or log out there. If you forget your password, ask them for a new link.
 
 Otherwise, there are two ways to run Stepthrough on your own computer:
 
@@ -556,10 +558,11 @@ When you run Stepthrough yourself, everything stays in its own data storage: the
 `stepthrough_data` volume with Docker. Deleting a project in the app deletes its recordings, screenshots and
 exports from there (but not copies you downloaded).
 
-On a shared Stepthrough server, your recordings are stored on that server. Stepthrough does not have user
-accounts yet, so everyone who can open the server's address can see every project. Ask the people who run it
-who can reach it and how long recordings are kept, and do not upload recordings that show other people
-without their consent.
+On a shared Stepthrough server, your recordings are stored on that server. Your projects are visible only to you
+and to the server's administrators. Your account may have a deletion date: from then on, the account and your
+projects are deleted from the server, and you see a notice in the month before, so download your exports in
+time. Ask the people who run the server how long recordings are kept, and do not upload recordings that show
+other people without their consent.
 
 ## 12. Credits and references
 

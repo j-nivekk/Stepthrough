@@ -19,6 +19,7 @@ import {
   health,
   importRecording,
   listProjects,
+  logOut,
   recheckOcr,
   resetDatabase,
   updateCandidate,
@@ -27,6 +28,8 @@ import {
 } from './api';
 import { AppSettings } from './components/AppSettings';
 import { AppWatermark } from './components/AppWatermark';
+import { AccountPanel } from './features/account/AccountPanel';
+import { UsersScreen } from './features/account/UsersScreen';
 import { PerformanceMonitor } from './components/PerformanceMonitor';
 import { ViewportWarning } from './components/ViewportWarning';
 import { AnalysisScreen } from './features/analysis/AnalysisScreen';
@@ -39,6 +42,7 @@ import {
   type SimilarLink,
 } from './lib/analysis';
 import { downloadExportBundle, jumpToAnchor, sleep } from './lib/utils';
+import { formatCalendarDate } from './lib/formatters';
 import {
   collectImportQueueItems,
   createImportQueueItemFromFile,
@@ -74,6 +78,7 @@ import type {
   RunDetail,
   RunSettings,
   RunSummary,
+  SessionInfo,
 } from './types';
 
 type PendingTaskNavigation = {
@@ -81,7 +86,24 @@ type PendingTaskNavigation = {
   runId: string;
 };
 
-function App() {
+// Logged-in people are reminded this many days before their account is deleted.
+const DELETION_NOTICE_DAYS = 30;
+
+function deletionNotice(deleteAfter: string | null | undefined): string | null {
+  if (!deleteAfter) return null;
+  const daysLeft = (new Date(`${deleteAfter}T00:00:00`).getTime() - Date.now()) / 86_400_000;
+  if (daysLeft > DELETION_NOTICE_DAYS) return null;
+  return `your account and the projects only it owns are deleted on ${formatCalendarDate(deleteAfter)}. export what you want to keep before then.`;
+}
+
+export interface AppProps {
+  /** Who is logged in and how this server recognises people; null if the backend did not answer. */
+  session: SessionInfo | null;
+  /** Called after logging out, with the new (logged-out) session. */
+  onSessionChange: (session: SessionInfo) => void;
+}
+
+function App({ session, onSessionChange }: AppProps) {
   const queryClient = useQueryClient();
   const [projectName, setProjectName] = useState('');
   const [projectSearch, setProjectSearch] = useState('');
@@ -107,6 +129,13 @@ function App() {
   const [bulkExportPending, setBulkExportPending] = useState(false);
   const [appPrefs, setAppPrefs] = useState<AppPreferences>(() => loadAppPreferences());
   const [showSettings, setShowSettings] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
+  const [showUsers, setShowUsers] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const sessionUser = session?.user ?? null;
+  // With password logins, who is logged in shows next to settings; the desktop app has one built-in user.
+  const accountUser = session?.mode === 'password' ? sessionUser : null;
+  const isAdmin = sessionUser?.is_admin ?? true;
   const [viewportSize, setViewportSize] = useState(() => ({
     height: typeof window === 'undefined' ? 900 : window.innerHeight,
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
@@ -134,7 +163,9 @@ function App() {
   const ocrStatusMessage = backendReady ? healthQuery.data?.ocr_message ?? null : null;
   const ocrWarnings = healthQuery.data?.ocr_warnings ?? [];
   const ocrWarningsKey = ocrWarnings.join('\n');
-  const visibleOcrWarnings = ocrWarningsKey && dismissedOcrWarningsKey === ocrWarningsKey ? [] : ocrWarnings;
+  // OCR's diagnostics are about the server's set-up, so only administrators (who can act on them) see them.
+  const visibleOcrWarnings =
+    !isAdmin || (ocrWarningsKey && dismissedOcrWarningsKey === ocrWarningsKey) ? [] : ocrWarnings;
   const ocrAvailable = ocrAvailability !== false;
   const applyLocalOcrAvailability = (settings: RunSettings) =>
     enforceLocalOcrAvailability(settings, ocrAvailability);
@@ -1352,10 +1383,74 @@ function App() {
     }
   }
 
+  async function handleLogOut() {
+    setIsLoggingOut(true);
+    try {
+      await logOut();
+    } catch {
+      // Already logged out (or the backend is gone): the login page is still the right place.
+    } finally {
+      setIsLoggingOut(false);
+    }
+    setShowAccount(false);
+    onSessionChange({ mode: 'password', user: null });
+  }
+
+  // The watermark, the settings and account panels, and the overlays: the same on every page.
+  const chrome = (
+    <>
+      <AppWatermark
+        account={
+          accountUser
+            ? { label: accountUser.display_name ?? accountUser.name, active: showAccount, onOpen: () => setShowAccount(true) }
+            : null
+        }
+        onOpenSettings={() => setShowSettings(true)}
+      />
+      <AppSettings
+        healthData={healthQuery.data}
+        isAdmin={isAdmin}
+        isRecheckingOcr={recheckOcrMutation.isPending}
+        isResettingDatabase={resetDatabaseMutation.isPending}
+        open={showSettings}
+        prefs={appPrefs}
+        onChangePref={updateAppPref}
+        onClose={() => setShowSettings(false)}
+        onRecheckOcr={() => recheckOcrMutation.mutate()}
+        onResetDatabase={() => resetDatabaseMutation.mutate()}
+      />
+      {accountUser && (
+        <AccountPanel
+          isLoggingOut={isLoggingOut}
+          onClose={() => setShowAccount(false)}
+          onLogOut={() => void handleLogOut()}
+          onOpenUsers={() => {
+            setShowAccount(false);
+            setShowUsers(true);
+          }}
+          open={showAccount}
+          user={accountUser}
+        />
+      )}
+      {appPrefs.showPerfMonitor && <PerformanceMonitor />}
+      {viewportWarning}
+    </>
+  );
+
+  if (showUsers && accountUser?.is_admin) {
+    return (
+      <>
+        <UsersScreen currentUserId={accountUser.id} onBack={() => setShowUsers(false)} />
+        {chrome}
+      </>
+    );
+  }
+
   if (workflowStage === 'projects' || !hasSelectedProject) {
     return (
       <>
         <EntryScreen
+          accountNotice={deletionNotice(accountUser?.delete_after)}
           appError={appError}
           healthMessage={healthWarning ? healthQuery.data?.message ?? 'Video tools are not ready.' : null}
           isCreating={createProjectMutation.isPending}
@@ -1381,20 +1476,7 @@ function App() {
           selectedProjectCanJumpToAnalysis={selectedProjectCanJumpToAnalysis}
           selectedProjectId={selectedProjectId}
         />
-        <AppWatermark onOpenSettings={() => setShowSettings(true)} />
-        <AppSettings
-          healthData={healthQuery.data}
-          isRecheckingOcr={recheckOcrMutation.isPending}
-          isResettingDatabase={resetDatabaseMutation.isPending}
-          open={showSettings}
-          prefs={appPrefs}
-          onChangePref={updateAppPref}
-          onClose={() => setShowSettings(false)}
-          onRecheckOcr={() => recheckOcrMutation.mutate()}
-          onResetDatabase={() => resetDatabaseMutation.mutate()}
-        />
-        {appPrefs.showPerfMonitor && <PerformanceMonitor />}
-        {viewportWarning}
+        {chrome}
       </>
     );
   }
@@ -1423,20 +1505,7 @@ function App() {
           rows={importQueue}
           selectionFeedback={importSelectionFeedback}
         />
-        <AppWatermark onOpenSettings={() => setShowSettings(true)} />
-        <AppSettings
-          healthData={healthQuery.data}
-          isRecheckingOcr={recheckOcrMutation.isPending}
-          isResettingDatabase={resetDatabaseMutation.isPending}
-          open={showSettings}
-          prefs={appPrefs}
-          onChangePref={updateAppPref}
-          onClose={() => setShowSettings(false)}
-          onRecheckOcr={() => recheckOcrMutation.mutate()}
-          onResetDatabase={() => resetDatabaseMutation.mutate()}
-        />
-        {appPrefs.showPerfMonitor && <PerformanceMonitor />}
-        {viewportWarning}
+        {chrome}
       </>
     );
   }
@@ -1505,20 +1574,7 @@ function App() {
         settingsFeedback={settingsFeedback}
         showPresetText={presetText}
       />
-      <AppWatermark onOpenSettings={() => setShowSettings(true)} />
-      <AppSettings
-        healthData={healthQuery.data}
-        isRecheckingOcr={recheckOcrMutation.isPending}
-        isResettingDatabase={resetDatabaseMutation.isPending}
-        open={showSettings}
-        prefs={appPrefs}
-        onChangePref={updateAppPref}
-        onClose={() => setShowSettings(false)}
-        onRecheckOcr={() => recheckOcrMutation.mutate()}
-        onResetDatabase={() => resetDatabaseMutation.mutate()}
-      />
-      {appPrefs.showPerfMonitor && <PerformanceMonitor />}
-      {viewportWarning}
+      {chrome}
     </>
   );
 }

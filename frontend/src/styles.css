@@ -36,6 +36,10 @@
   --analysis-surface-muted: rgba(217, 217, 217, 0.58);
   --analysis-surface-soft: rgba(217, 217, 217, 0.34);
   --analysis-surface-overlay: rgba(255, 255, 255, 0.74);
+  /* The administrators' pages: the page and panel greys above at the same lightness, turned towards slate blue. */
+  --admin-page: #f0f5fa;
+  --admin-surface: #d2dae4;
+  --admin-rule: #7b8795;
   background: var(--bg);
   color: var(--text);
 }
@@ -6351,4 +6355,423 @@ button:disabled {
   gap: 8px;
   font-size: 12px;
   color: var(--muted);
+}
+
+/* ── accounts: login and link pages, account panel, users page ───────────────────────────────────────────
+   Built from the entry screen's parts: grey fields, the green button, underlined text links. */
+
+.account-gate {
+  display: grid;
+  grid-template-columns: 282px max-content;
+  column-gap: 36px;
+  row-gap: 12px;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.account-gate > input {
+  grid-column: 1;
+}
+
+.account-gate-heading,
+.account-gate-message,
+.account-gate-hint {
+  grid-column: 1 / 3;
+  margin: 0;
+}
+
+.account-gate-heading {
+  margin-bottom: 8px;
+  font-size: 20px;
+  line-height: 1.2;
+  color: #000;
+}
+
+.account-gate-name {
+  color: #48af7c;
+}
+
+.account-gate-submit {
+  grid-column: 2;
+  grid-row: 3;
+  width: auto;
+  min-width: 82px;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+.account-gate-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.account-gate-hint.warning {
+  color: #8c6624;
+}
+
+
+.account-gate-link {
+  justify-self: start;
+}
+
+.app-watermark-account {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-panel-name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-panel-warning {
+  color: #8c6624;
+}
+
+.account-panel-error {
+  color: #a24b44;
+}
+
+.app-settings-field {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.45);
+  color: var(--text);
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.6;
+  outline: none;
+}
+
+.app-settings-field:focus-visible {
+  border-color: rgba(72, 175, 124, 0.7);
+}
+
+.app-settings-action-row .app-settings-field {
+  flex: 1 1 auto;
+}
+
+/* The users page is a control panel of its own, so it is tinted: the same lightness as the rest of the app (text and
+   the green buttons keep their contrast exactly), with the hue turned about 105 degrees away from the green so the
+   buttons keep their weight. Panels inherit the tint through --analysis-surface. */
+.admin-tint {
+  --analysis-surface: var(--admin-surface);
+  background: var(--admin-page);
+}
+
+.admin-tint .analysis-divider {
+  background: var(--admin-rule);
+}
+
+.admin-tint .entry-project-search {
+  background: var(--admin-surface);
+}
+
+/* The users page uses the analysis page's parts: columns under a heading and a dark rule, a grey box of rows with
+   the label on the left and the control on the right, and one full-width green button. Fields inside grey boxes
+   are light, like the preset text field, so a box reads as one area rather than a stack of grey blocks. */
+
+.users-grid {
+  display: grid;
+  grid-template-columns: minmax(380px, 1fr) minmax(0, 2fr);
+  margin-inline: -43px;
+  margin-top: 16px;
+  align-items: start;
+}
+
+.users-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* One width for every control in a box, so their left and right edges line up. */
+.users-control {
+  flex: 0 0 auto;
+  width: 200px;
+  height: 24px;
+  border: none;
+  border-radius: 0;
+  padding: 0 8px;
+  background: var(--analysis-surface-overlay);
+  color: #000;
+  font-size: 12px;
+  line-height: 24px;
+  outline: none;
+}
+
+.users-control::placeholder {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.users-control:focus-visible {
+  outline: 2px solid rgba(72, 175, 124, 0.32);
+  outline-offset: 1px;
+}
+
+.users-file-button {
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+}
+
+.users-file-input {
+  display: none;
+}
+
+.analysis-task-link.users-inline-link {
+  font-size: inherit;
+}
+
+.users-error {
+  color: #a24b44;
+}
+
+.users-result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.users-result-summary {
+  margin: 0;
+  color: #000;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.users-result-close {
+  margin-top: 2px;
+}
+
+.users-link-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--analysis-surface);
+}
+
+.users-link-copy strong,
+.account-gate-hint strong {
+  font-weight: 500;
+  color: #000;
+}
+
+.users-link-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.users-link-row .users-link-field {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.users-people-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.users-count {
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.users-notice {
+  color: #000;
+}
+
+/* The people column fills the window down to just above the watermark, and its list scrolls inside it, whatever
+   the select mode's bar above the list takes. */
+.users-people-column {
+  height: calc(100dvh - 76px - 72px);
+}
+
+.users-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  padding-right: 8px;
+  scrollbar-gutter: stable;
+}
+
+.users-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.users-row-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.users-row-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.users-row-name {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  color: #000;
+  font-size: 14px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.users-row-you {
+  color: #48af7c;
+  font-size: 12px;
+}
+
+.users-row-meta {
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.users-row.switched-off .users-row-name {
+  color: rgba(0, 0, 0, 0.4);
+}
+
+/* Like the project list: a row's actions show when it is hovered, focused or open. */
+.users-row-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.users-row:hover .users-row-actions,
+.users-row:focus-within .users-row-actions,
+.users-row.open .users-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.users-editor {
+  max-width: 440px;
+}
+
+.users-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  padding-top: 2px;
+}
+
+.users-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.users-confirm-input {
+  width: 160px;
+  height: 24px;
+  border: 1px solid var(--danger);
+  border-radius: 0;
+  padding: 0 8px;
+  background: rgba(177, 69, 60, 0.08);
+  color: var(--danger);
+  font-size: 12px;
+  outline: none;
+}
+
+.users-confirm-input::placeholder {
+  color: rgba(177, 69, 60, 0.45);
+}
+
+/* Selecting several people: the search keeps its place, "select" and its companions sit beside it, and the
+   actions for the selection sit above the list instead of on each row. */
+.users-search-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.users-batch {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.users-batch-actions {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.users-batch-label {
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+/* An open delete stays red (other open actions turn black, as everywhere in the app). */
+.users-batch-actions .analysis-task-link.danger.active {
+  color: #bf2725;
+  text-decoration-color: currentColor;
+}
+
+.users-batch-box {
+  max-width: 440px;
+}
+
+.users-batch-copy {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.users-row.selecting .users-row-line {
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.users-row.selecting:not(.builtin) .users-row-copy {
+  cursor: pointer;
+}
+
+.users-row-check {
+  margin-top: 1px;
+}
+
+.users-row.selected .users-row-name {
+  color: #2d7a5a;
 }

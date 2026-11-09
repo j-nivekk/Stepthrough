@@ -9,15 +9,23 @@ or against any address: python docker/smoke_test.py https://stepthrough.example.
 It makes a throwaway project, uploads a two-screen recording, runs the analysis, opens a screenshot, checks the live
 progress socket, exports the run, and deletes the project again. It exits non-zero at the first thing that fails.
 
+If the server uses password logins, it logs in. Inside the container it makes a throwaway account for that (with
+`python -m app.users`) and deletes it at the end; against an address, pass --user NAME and give the password in
+the STEPTHROUGH_PASSWORD environment variable (or type it when asked).
+
 With --ocr (for the `-ocr` image) the two screens carry words, the run reads them, and the test checks the text that
 comes back. Drawing the words needs Pillow, which the image has.
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
+import getpass
+import http.cookiejar
 import io
 import json
+import os
 import socket
 import ssl
 import subprocess
@@ -28,19 +36,25 @@ import uuid
 import zipfile
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
-ARGS = [arg for arg in sys.argv[1:] if not arg.startswith("--")]
-OCR = "--ocr" in sys.argv[1:]
-BASE = (ARGS[0] if ARGS else "http://127.0.0.1:8000").rstrip("/") + "/"
+PARSER = argparse.ArgumentParser(description="End-to-end check of a running Stepthrough server.")
+PARSER.add_argument("base", nargs="?", default="http://127.0.0.1:8000", help="the server's address")
+PARSER.add_argument("--ocr", action="store_true", help="also check text recognition (the -ocr image)")
+PARSER.add_argument("--user", help="log in as this account (password from STEPTHROUGH_PASSWORD, or asked)")
+OPTIONS = PARSER.parse_args()
+OCR = OPTIONS.ocr
+BASE = OPTIONS.base.rstrip("/") + "/"
 OCR_WORDS = ("Inbox", "Settings")
+COOKIES = http.cookiejar.CookieJar()
+OPENER = build_opener(HTTPCookieProcessor(COOKIES))
 
 
 def call(method: str, path: str, body: bytes | None = None, content_type: str | None = None) -> tuple[int, dict, bytes]:
     request = Request(urljoin(BASE, path.lstrip("/")), data=body, method=method)
     if content_type:
         request.add_header("Content-Type", content_type)
-    with urlopen(request, timeout=60) as response:
+    with OPENER.open(request, timeout=60) as response:
         return response.status, dict(response.headers), response.read()
 
 
@@ -98,13 +112,39 @@ def websocket_upgrades(path: str) -> bool:
     port = url.port or (443 if secure else 80)
     with socket.create_connection((url.hostname, port), timeout=10) as raw:
         conn = ssl.create_default_context().wrap_socket(raw, server_hostname=url.hostname) if secure else raw
+        cookie = "; ".join(f"{c.name}={c.value}" for c in COOKIES)
         conn.sendall(
             (
                 f"GET {url.path} HTTP/1.1\r\nHost: {url.netloc}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+                + (f"Cookie: {cookie}\r\n" if cookie else "")
+                + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
             ).encode()
         )
         return conn.recv(1024).split(b"\r\n", 1)[0].startswith(b"HTTP/1.1 101")
+
+
+def users_command(*args: str, password: str | None = None) -> None:
+    """`python -m app.users` in this container (only works when run inside it)."""
+    subprocess.run([sys.executable, "-m", "app.users", *args], input=password, text=True, check=True, capture_output=True)
+
+
+def log_in() -> str | None:
+    """Log in if the server needs it; returns the name of a throwaway account made for this run, if one was."""
+    if call_json("GET", "/auth/session")["mode"] != "password":
+        return None
+    throwaway = None
+    if OPTIONS.user:
+        name = OPTIONS.user
+        password = os.environ.get("STEPTHROUGH_PASSWORD") or getpass.getpass(f"Password for {name}: ")
+    elif urlsplit(BASE).hostname in ("127.0.0.1", "localhost"):
+        name = throwaway = f"smoke-test-{uuid.uuid4().hex[:8]}"
+        password = uuid.uuid4().hex
+        users_command("add", name, "--password-stdin", password=password + "\n")
+    else:
+        raise SystemExit("This server uses logins: pass --user NAME, with the password in STEPTHROUGH_PASSWORD.")
+    session = call_json("POST", "/auth/login", {"name": name, "password": password})
+    check(session["user"]["name"].lower() == name.lower(), f"logs in as {name}")
+    return throwaway
 
 
 def main() -> None:
@@ -115,6 +155,17 @@ def main() -> None:
     health = call_json("GET", "/health")
     check(health["ffmpeg_available"] and health["ffprobe_available"], "ffmpeg and ffprobe are available")
 
+    throwaway = log_in()
+    try:
+        check_a_project()
+    finally:
+        if throwaway:
+            users_command("delete", throwaway, "--yes")
+    print("all checks passed")
+
+
+def check_a_project() -> None:
+    health = call_json("GET", "/health")
     project = call_json("POST", "/projects", {"name": f"smoke test {time.strftime('%Y-%m-%d %H:%M')}"})
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -155,7 +206,6 @@ def main() -> None:
             check(all(word.lower() in text for word in OCR_WORDS), f"text recognition reads both screens ({text!r})")
     finally:
         call("DELETE", f"/projects/{project['id']}")
-    print("all checks passed")
 
 
 if __name__ == "__main__":

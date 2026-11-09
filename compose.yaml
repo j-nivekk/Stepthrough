@@ -24,6 +24,7 @@ services:
       STEPTHROUGH_MAX_CONCURRENT_RUNS: ${STEPTHROUGH_MAX_CONCURRENT_RUNS:-2}
       STEPTHROUGH_MAX_UPLOAD_MB: ${STEPTHROUGH_MAX_UPLOAD_MB:-1024}
       STEPTHROUGH_OCR_MODEL_SOURCE: ${STEPTHROUGH_OCR_MODEL_SOURCE:-auto}
+      STEPTHROUGH_PUBLIC_URL: ${STEPTHROUGH_PUBLIC_URL:-}
     volumes:
       - data:/data
     # A heavy analysis must not starve other tools on the same host. 0 means no limit.

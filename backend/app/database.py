@@ -100,17 +100,41 @@ CREATE TABLE IF NOT EXISTS run_events (
     created_at TEXT NOT NULL
 );
 
--- People who use the app. `name` is what they log in with; `tags` is a JSON list, and the `admin` tag makes an
--- administrator. The standalone app has one built-in user (LOCAL_USER_ID) and no login.
+-- People who use the app. `name` is what they log in with (any case); `tags` is a JSON list, and the `admin` tag
+-- makes an administrator. `password_hash` is empty until they set a password from their invitation link.
+-- `delete_after` is a date (YYYY-MM-DD) from which the account and the projects only it owns are deleted.
+-- The standalone app has one built-in user (LOCAL_USER_ID) and no login.
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE,
     display_name TEXT,
     tags TEXT NOT NULL DEFAULT '[]',
     is_disabled INTEGER NOT NULL DEFAULT 0,
     delete_after TEXT,
+    notes TEXT,
+    password_hash TEXT,
     created_at TEXT NOT NULL,
     last_seen_at TEXT
+);
+
+-- Logged-in browsers. The cookie holds a random token; only its SHA-256 is stored, so a copy of the database
+-- cannot be used to log in.
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+-- One-time links to set a password: `invite` for a new account, `reset` for a forgotten password. At most one per
+-- user; like sessions, only the token's SHA-256 is stored.
+CREATE TABLE IF NOT EXISTS user_links (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    purpose TEXT NOT NULL CHECK (purpose IN ('invite', 'reset')),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
 );
 
 -- Who may open a project. `member` is a user id, or `tag:<name>` for everyone with that tag; `role` is `owner`
@@ -124,6 +148,7 @@ CREATE TABLE IF NOT EXISTS project_members (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_members_member ON project_members(member);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_recordings_project_id ON recordings(project_id);
 CREATE INDEX IF NOT EXISTS idx_runs_recording_id ON detection_runs(recording_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_run_id ON candidate_frames(run_id);
@@ -209,13 +234,13 @@ def _adopt_projects_without_members(conn: sqlite3.Connection) -> None:
 
 
 def reset_db() -> None:
-    """Drop all application tables and reinitialise the schema."""
+    """Drop all projects and what is in them, and reinitialise the schema. Accounts and logins are kept, so an
+    administrator who resets a shared server can still log in afterwards."""
     ensure_app_dirs()
     with connect() as conn:
         conn.executescript("""
             PRAGMA foreign_keys = OFF;
             DROP TABLE IF EXISTS project_members;
-            DROP TABLE IF EXISTS users;
             DROP TABLE IF EXISTS export_bundles;
             DROP TABLE IF EXISTS run_events;
             DROP TABLE IF EXISTS candidate_frames;
@@ -247,6 +272,8 @@ def init_db() -> None:
         _ensure_column(conn, "candidate_frames", "ocr_text", "TEXT")
         _ensure_column(conn, "candidate_frames", "score_breakdown", "TEXT")
         _ensure_column(conn, "recordings", "working_path", "TEXT")
+        _ensure_column(conn, "users", "notes", "TEXT")
+        _ensure_column(conn, "users", "password_hash", "TEXT")
         _backfill_detection_run_phase(conn)
         _ensure_local_user(conn)
         _adopt_projects_without_members(conn)

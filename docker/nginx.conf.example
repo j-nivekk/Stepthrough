@@ -28,9 +28,9 @@ server {
     # At least STEPTHROUGH_MAX_UPLOAD_MB from .env, plus a little for the rest of the form.
     client_max_body_size 1100m;
 
-    # Stepthrough has no accounts yet: everyone who can open this address sees every project. Until it does,
-    # limit who can reach it, for example with a shared password (`htpasswd -c /etc/nginx/stepthrough.htpasswd
-    # stepthrough`, from apache2-utils) or to your own network's address ranges.
+    # People log in to Stepthrough itself. To also limit who can reach the address at all, add a shared password
+    # (`htpasswd -c /etc/nginx/stepthrough.htpasswd stepthrough`, from apache2-utils) or allow only your own
+    # network's address ranges.
     # auth_basic           "Stepthrough";
     # auth_basic_user_file /etc/nginx/stepthrough.htpasswd;
     # allow 192.0.2.0/24;  # placeholder; use your own address ranges

@@ -24,6 +24,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(storage, 'DATA_ROOT', data_root)
     monkeypatch.setattr(main, 'DATA_ROOT', data_root)
     monkeypatch.setattr(main, '_start_background_ocr_probe', lambda: None)
+    monkeypatch.setattr(main, '_start_account_cleanup', lambda: None)
     # Runs build the working copy themselves; a background transcode would outlive the test's tmp dir.
     monkeypatch.setattr(main, '_start_background_ingest', lambda recording_id: None)
 

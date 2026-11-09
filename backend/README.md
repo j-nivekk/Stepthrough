@@ -96,20 +96,53 @@ breakdown, revisit links and the timing columns `transition_type`, `change_start
 | `STEPTHROUGH_ALLOW_ADMIN_RESET` | on in `local`, off in `server` | whether `POST /admin/reset-db` is available (it also requires the `X-Stepthrough-Confirm: reset-database` header) |
 | `STEPTHROUGH_MAX_CONCURRENT_RUNS` | no limit in `local`, `2` in `server` | analyses that may run at once; later runs wait as `queued`, first come first served, and can be ended while they wait. `0` lifts the limit |
 | `STEPTHROUGH_FRONTEND_DIR` | unset | a built frontend (`frontend/dist`) to serve from the API's own origin, as the Docker image does; it must contain `index.html` |
+| `STEPTHROUGH_AUTH` | `none` in `local`, `password` in `server` | `none`: no logins, every request comes from the built-in user; `password`: people log in (see [Accounts](#accounts)) |
+| `STEPTHROUGH_PUBLIC_URL` | unset | the address people open, such as `https://stepthrough.example.org`, so `python -m app.users` prints whole links |
 
 Project media (recordings, screenshots, exports) is served under `/assets/projects/` only to people who may
 open that project; the database, OCR models and other files in the data root are not reachable over HTTP.
 Runs that were queued or running when the backend stopped are marked failed at the next start-up.
 
-Each project has members (`project_members`): a user, or everyone with a tag (`tag:<name>`), as an owner (may
-change it) or a viewer (may only look). Recordings, runs, steps and exports follow their project, and every
-endpoint checks the role. People who may not open a project get the same 404 as for one that does not exist.
-Users with the `admin` tag may open every project. There is no login yet: every request comes from the
-built-in user `local`, an administrator, who also owns every project made before users existed.
-
 Run the API with a single worker process: run progress, cancel requests and the run queue live in that process's
 memory. The database uses SQLite's write-ahead log; copy it with `python -m app.backup` (SQLite's backup API)
 rather than copying the file. For the Docker image, see [`DEPLOY.md`](../DEPLOY.md).
 
-Not yet in place for a shared server: logging in with an account and password, and analysis in a separate
-worker that survives restarts.
+Not yet in place for a shared server: a page for sharing projects (see below), and analysis in a separate worker
+that survives restarts.
+
+## Accounts
+
+Each project has members (`project_members`): a user, or everyone with a tag (`tag:<name>`), as an owner (may
+change it) or a viewer (may only look). Recordings, runs, steps and exports follow their project, and every
+endpoint checks the role. People who may not open a project get the same 404 as for one that does not exist.
+Users with the `admin` tag may open every project, though their project list shows only their own. Sharing a
+project with other people or a tag works in the data model but has no page yet.
+
+With `STEPTHROUGH_AUTH=none` (the desktop app) there are no logins: every request comes from the built-in user
+`local`, an administrator, who also owns every project made before users existed.
+
+With `STEPTHROUGH_AUTH=password` people log in with a name and a password:
+
+- **Making accounts.** Administrators make them on the users page (account menu, then **manage users**) or with
+  `python -m app.users`; nobody can sign up. The first administrator comes from the command line:
+  `python -m app.users add NAME --admin --password`. Names match in any case and have no spaces.
+- **Passwords.** A new account gets a one-time link (`<address>/#link=<token>`, valid for 14 days) with which
+  its owner chooses a password; a forgotten password gets a new link the same way, and a new link replaces the
+  old one. The part after `#` never reaches the server, so links stay out of its logs. Passwords need at least
+  8 characters and are stored as PBKDF2-SHA256 hashes (600,000 iterations).
+- **Lists.** A CSV in 4CAT's bulk-user layout imports many people at once: a `name` column, and optionally
+  `expires`, `tags`, `password` and `notes`, separated by commas, semicolons or tabs. People without a password
+  get a link; the page offers all links as a CSV, and `python -m app.users import` prints one.
+- **Sessions** last 30 days, in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` over HTTPS). Setting a new password
+  logs out the account's other browsers, and switching an account off logs it out at once. Only the SHA-256 of
+  session and link tokens is stored. After 10 wrong passwords for one name (or 50 from one address) within
+  15 minutes, further attempts are refused until older ones age out; this count is kept in memory.
+- **Deletion dates.** From an account's `delete_after` date, the account and the projects only it owns are
+  deleted (the server checks every hour, and `python -m app.users expire` does it at once). In the month before,
+  its owner sees a notice. Deleting an account by hand does the same; projects it shares as an owner stay.
+- **Projects from before logins** belong to `local`, which cannot log in. An administrator takes them over on
+  the users page or with `python -m app.users transfer local NAME`.
+
+In both modes, requests that change something are refused when the browser says they come from another website
+(`Sec-Fetch-Site`, `Origin`); the origins in `STEPTHROUGH_CORS_ORIGINS` are trusted. A database reset deletes
+projects but keeps accounts.

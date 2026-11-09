@@ -274,3 +274,59 @@ export interface ProjectRunPreset {
   settings: RunSettings;
   saved_at: string;
 }
+
+export type AuthMode = 'none' | 'password';
+export type LinkPurpose = 'invite' | 'reset';
+
+export interface SessionUser {
+  id: string;
+  name: string;
+  display_name: string | null;
+  tags: string[];
+  is_admin: boolean;
+  /** The date (YYYY-MM-DD) from which this account and the projects only it owns are deleted. */
+  delete_after: string | null;
+}
+
+/** How the server recognises people. `user` is null when logins are on and nobody is logged in. */
+export interface SessionInfo {
+  mode: AuthMode;
+  user: SessionUser | null;
+}
+
+export interface LinkDetails {
+  name: string;
+  display_name: string | null;
+  purpose: LinkPurpose;
+}
+
+export interface UserLink {
+  token: string;
+  purpose: LinkPurpose;
+  expires_at: string;
+}
+
+export interface AdminUser extends SessionUser {
+  is_builtin: boolean;
+  is_disabled: boolean;
+  has_password: boolean;
+  open_link: LinkPurpose | null;
+  notes: string | null;
+  project_count: number;
+  created_at: string;
+  last_seen_at: string | null;
+}
+
+export interface AdminUserChanges {
+  display_name?: string | null;
+  tags?: string[];
+  is_disabled?: boolean;
+  delete_after?: string | null;
+  notes?: string | null;
+}
+
+export interface UserImportResult {
+  created: { name: string; link: UserLink | null }[];
+  existing: string[];
+  errors: { row: number; name: string | null; message: string }[];
+}

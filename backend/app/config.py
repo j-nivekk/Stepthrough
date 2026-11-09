@@ -42,6 +42,8 @@ class OcrRuntimeConfig:
 
 
 DeploymentMode = Literal["local", "server"]
+# `none`: every request comes from the built-in local user (the desktop app). `password`: people log in.
+AuthMode = Literal["none", "password"]
 LOCAL_DEV_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -62,6 +64,7 @@ class ServerConfig:
     max_concurrent_runs: int | None = None
     # A built frontend (`npm run build` output) to serve from the API's own origin, as the Docker image does.
     frontend_dir: Path | None = None
+    auth: AuthMode = "none"
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -90,7 +93,24 @@ def build_server_config() -> ServerConfig:
         allow_admin_reset=_env_flag("STEPTHROUGH_ALLOW_ADMIN_RESET", deployment == "local"),
         max_concurrent_runs=_max_concurrent_runs(deployment),
         frontend_dir=_frontend_dir(),
+        auth=_auth_mode(deployment),
     )
+
+
+def _auth_mode(deployment: str) -> AuthMode:
+    """Whether people log in. A shared server always should; the desktop app has one user and no logins."""
+    raw = (os.environ.get("STEPTHROUGH_AUTH") or "").strip().lower()
+    if not raw:
+        return "password" if deployment == "server" else "none"
+    if raw not in ("none", "password"):
+        raise ValueError(f"Invalid STEPTHROUGH_AUTH `{raw}`. Use `none` or `password`.")
+    return raw  # type: ignore[return-value]
+
+
+def public_url() -> str | None:
+    """The address people open, for links printed by `python -m app.users` (the web pages know their own)."""
+    raw = (os.environ.get("STEPTHROUGH_PUBLIC_URL") or "").strip().rstrip("/")
+    return raw or None
 
 
 def _max_concurrent_runs(deployment: str) -> int | None:
