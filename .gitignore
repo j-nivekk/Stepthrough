@@ -8,6 +8,7 @@ data/
 .DS_Store
 backend/tests/eval/results/*.json
 backend/tests/eval/results/demos/
+backend/tests/eval/results/videos/
 # Leftover build of an old project website: packages, build output and cache only, no source.
 website/
 TODO.md

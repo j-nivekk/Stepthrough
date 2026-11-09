@@ -26,7 +26,10 @@ tests/eval/
 ├── step_scenarios.py     ← scenarios about what a step should be (typing, form fields, toggles)
 ├── evaluator.py          ← matching algorithm and metrics
 ├── stress.py             ← uploads as they really arrive (H.264, phone-style VFR, overlays); CLI
-├── test_eval_stress.py   ← pytest regression gates
+├── cards.py              ← test cards: countdowns, colour-only change, size sweep, colour accuracy, long recording
+├── wide.py               ← device sizes, upload formats and test cards; CLI
+├── test_eval_stress.py   ← pytest regression gates for the stress matrix
+├── test_eval_wide.py     ← pytest regression gates for the wider evaluation
 └── results/              ← JSON summaries written with --json (gitignored except .gitkeep)
 ```
 
@@ -132,6 +135,38 @@ step must be a return to an earlier screen.
 The retired hybrid v2 engine and its scenario runner (`runner.py`, realistic matrices, stored results)
 are at the git tag `last-with-hybrid-v2`. The current engine's results on this matrix, and its known limits, are
 in `docs/evaluation.md`.
+
+## Wider evaluation (`wide.py`, `cards.py`)
+
+Everything is generated, so every result has exact ground truth and needs no real recordings. `wide.py`
+has three sections:
+
+| section | what it runs |
+|---|---|
+| `devices` | the device-aware scenarios at the sizes devices record at: iPhone (1180x2556), Android phone (1080x2400), tablet (1640x2360), Retina laptop (2560x1600) and 1080p desktop, both with and without a moving pointer, and full-screen video in both orientations |
+| `formats` | the phone scenarios at 780x1688 in every upload format the app meets: H.264 and HEVC with variable frame rate, 60 and 120 fps sources, WebM (VP9), rotated, BT.709-tagged, full range, HDR PQ and HDR HLG |
+| `cards` | the test cards in `cards.py`: a countdown over colour bars (with and without a dial that keeps turning), a change to a colour of the same brightness, a sweep of squares of growing size, the colour accuracy of the working copy per format, and a 5 min 40 s recording that the engine has to decode twice |
+
+The device profiles are in `scenarios.PROFILES`; `scenarios.device_scenario()` builds one scenario for a
+profile and size. Frames are streamed from the rendered file, never held at full size, so Retina-sized
+scenarios fit in memory. The colour-accuracy card compares every bar and grey step of the working copy with
+the original, in 8-bit levels.
+
+```bash
+python -m tests.eval.wide                       # everything, about ten minutes
+python -m tests.eval.wide --section cards       # one section
+python -m tests.eval.wide --json results.json   # also write the numbers
+python -m tests.eval.wide --save-videos tests/eval/results/videos   # keep every generated video
+```
+
+The videos are made in a temporary folder and deleted after the run. With `--save-videos DIR`, every upload
+the app was given (about 130 for a full run) is copied into `DIR/devices`, `DIR/formats` and `DIR/cards`.
+Each comes with a `.json` file of the same name. It lists the changes the video contains (the ground truth,
+in seconds) and what the engine found when the video was made. `DIR/index.csv` lists every video with its
+numbers, and `DIR/README.txt` explains the layout. Saving into an existing folder adds to it, and the index
+covers everything there. `tests/eval/results/videos/` is ignored by git.
+
+`test_eval_wide.py` gates a fast part of each section in `pytest`.
 
 ## Adding a new scenario
 

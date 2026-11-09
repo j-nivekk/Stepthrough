@@ -113,7 +113,37 @@ PROFILES: dict[str, ViewportProfile] = {
         logical_height=800,
         resolution_tiers={
             "1280x800": (1280, 800),
+            "2560x1600": (2560, 1600),  # a Retina laptop screen recording
         },
+    ),
+    # Native recording sizes of common devices, used by the wider evaluation (wide.py).
+    "iphone": ViewportProfile(
+        profile_id="iphone",
+        shell="mobile_app",
+        logical_width=393,
+        logical_height=852,
+        resolution_tiers={"1180x2556": (1180, 2556)},
+    ),
+    "android_phone": ViewportProfile(
+        profile_id="android_phone",
+        shell="mobile_app",
+        logical_width=412,
+        logical_height=915,
+        resolution_tiers={"1080x2400": (1080, 2400)},
+    ),
+    "tablet_portrait": ViewportProfile(
+        profile_id="tablet_portrait",
+        shell="mobile_app",
+        logical_width=820,
+        logical_height=1180,
+        resolution_tiers={"1640x2360": (1640, 2360)},
+    ),
+    "desktop_1080p": ViewportProfile(
+        profile_id="desktop_1080p",
+        shell="desktop_browser",
+        logical_width=1920,
+        logical_height=1080,
+        resolution_tiers={"1920x1080": (1920, 1080)},
     ),
     "fullscreen_vertical": ViewportProfile(
         profile_id="fullscreen_vertical",
@@ -1619,6 +1649,23 @@ def _build_variant_factories(specs: Iterable[VariantSpec]) -> list[tuple[str, Sc
         )
         scenarios.append((context.variant_id, _bind_context(spec.factory, context)))
     return scenarios
+
+
+def device_scenario(
+    builder: ScenarioBuilder | str,
+    profile_id: str,
+    resolution_tier: str,
+    source_fps: float = r.DEFAULT_FPS,
+    *,
+    base_name: str | None = None,
+) -> tuple[str, ScenarioFactory]:
+    """One device-aware scenario (a ``VARIANT_BUILDERS`` name or any builder taking a context)."""
+    name = builder if isinstance(builder, str) else (base_name or builder.__name__.lstrip("_"))
+    factory = VARIANT_BUILDERS[builder] if isinstance(builder, str) else builder
+    context = _make_context(
+        base_name=name, profile_id=profile_id, resolution_tier=resolution_tier, source_fps=source_fps, sample_fps=None,
+    )
+    return context.variant_id, _bind_context(factory, context)
 
 
 def all_scenarios(

@@ -14,7 +14,7 @@ import pytest
 
 from .scenarios import BASELINE_SCENARIOS
 from .step_scenarios import STEP_SCENARIOS
-from .stress import read_frames, run_variant
+from .stress import load_reference, run_variant
 
 GATED_SCENARIOS = (
     "nav_basic",
@@ -33,8 +33,7 @@ pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg i
 def test_vfr_upload_matches_cfr_upload(scenario_name: str, tmp_path: Path) -> None:
     factory = dict(BASELINE_SCENARIOS)[scenario_name]
     scenario = factory(tmp_path, 30)
-    frames, fps = read_frames(scenario.video_path)
-    reference = (frames, fps, scenario.video_path)
+    reference = load_reference(scenario.video_path)
 
     cfr = run_variant(scenario_name, tmp_path, reference, scenario.ground_truth, "h264_cfr", None)
     vfr = run_variant(scenario_name, tmp_path, reference, scenario.ground_truth, "h264_vfr", None)
@@ -66,9 +65,8 @@ def test_stable_engine_on_phone_style_upload(scenario_name: str, tmp_path: Path)
     and typing bursts grouped (one step per typed message or field)."""
     factory = dict([*BASELINE_SCENARIOS, *STEP_SCENARIOS])[scenario_name]
     scenario = factory(tmp_path, 30)
-    frames, fps = read_frames(scenario.video_path)
     result = run_variant(
-        scenario_name, tmp_path, (frames, fps, scenario.video_path), scenario.ground_truth, "h264_vfr", None
+        scenario_name, tmp_path, load_reference(scenario.video_path), scenario.ground_truth, "h264_vfr", None
     )
     assert result.metrics.missed_events == 0, f"missed {result.metrics.missed_events} event(s)"
     assert result.screenshots_correct == result.screenshots_matched

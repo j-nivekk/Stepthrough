@@ -7,7 +7,7 @@ measure. Run them from `backend/` with the project venv.
 |---|---|
 | `vfr_drift.py` | estimates, from ffprobe timestamps, how far a constant-frame-rate frame mapping drifts on each recording |
 | `plateau.py` | prototype stable-interval detector (timestamp-accurate decode, measured noise floor, dynamic-region masking, one screenshot per settled interval) |
-| `real_stable.py` | phase 1: runs `stable_v3` on real recordings through cached working copies, prints the measured values and writes labelled contact sheets: `real_stable.py <out_dir> <cache_dir> <videos...> [--type desktop] [--no-typing]` |
+| `real_stable.py` | runs `stable_v3` on recordings you supply (not part of the published evaluation) through cached working copies, prints the measured values and writes labelled contact sheets: `real_stable.py <out_dir> <cache_dir> <videos...> [--type desktop] [--no-typing]` |
 
 `out/` is ignored by git: contact sheets of real recordings show real people.
 
