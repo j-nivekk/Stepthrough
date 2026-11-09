@@ -10,11 +10,23 @@ from threading import Thread
 from typing import Any, Callable, Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .accounts import CurrentUser, ProjectRole, User, project_role
 from .analysis_metadata import serialize_analysis_metadata
 from .config import DATA_ROOT, build_server_config, build_tool_diagnostics, ensure_app_dirs
 from .database import init_db, reset_db
@@ -35,6 +47,7 @@ from .models import (
     RecordingUpdate,
     RunEventResponse,
     RunSettings,
+    UserResponse,
 )
 from .repository import (
     ACTIVE_RUN_STATUSES,
@@ -48,6 +61,7 @@ from .repository import (
     delete_recording_record,
     delete_run_record,
     fail_interrupted_runs,
+    find_projects_by_folder,
     get_candidate,
     get_export_bundle,
     get_export_bundle_for_run,
@@ -189,10 +203,6 @@ def startup() -> None:
     app.state.job_manager = JobManager(max_concurrent_runs=server_config.max_concurrent_runs)
     fail_interrupted_runs(INTERRUPTED_RUN_MESSAGE)
     _start_background_ocr_probe()
-
-
-# Only project media is public; the database, OCR models and caches under DATA_ROOT are not.
-app.mount("/assets/projects", StaticFiles(directory=str(DATA_ROOT / "projects"), check_dir=False), name="assets")
 
 
 def _job_manager() -> JobManager:
@@ -394,6 +404,47 @@ def _run_context(run_id: str) -> tuple[dict, dict, dict]:
         raise HTTPException(status_code=404, detail="Run not found")
     project, recording = _recording_context(run["recording_id"])
     return project, recording, run
+
+
+# The checked lookups below are for requests; the *_context ones above are for the app's own background work.
+# Someone who may not open a project gets the same 404 as for one that does not exist, so they cannot tell
+# which projects there are.
+
+
+def _check_project_role(project_id: str, user: User, need: ProjectRole, not_found: str) -> None:
+    role = project_role(project_id, user)
+    if role is None:
+        raise HTTPException(status_code=404, detail=not_found)
+    if need == "owner" and role != "owner":
+        raise HTTPException(status_code=403, detail="You can view this project but not change it.")
+
+
+def _project_for(project_id: str, user: User, need: ProjectRole) -> dict:
+    project = get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    _check_project_role(project_id, user, need, "Project not found")
+    return project
+
+
+def _recording_for(recording_id: str, user: User, need: ProjectRole) -> tuple[dict, dict]:
+    project, recording = _recording_context(recording_id)
+    _check_project_role(project["id"], user, need, "Recording not found")
+    return project, recording
+
+
+def _run_for(run_id: str, user: User, need: ProjectRole, not_found: str = "Run not found") -> tuple[dict, dict, dict]:
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=not_found)
+    project, recording = _recording_context(run["recording_id"])
+    _check_project_role(project["id"], user, need, not_found)
+    return project, recording, run
+
+
+def _require_admin(user: User) -> None:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Only administrators can do this.")
 
 
 def _build_run_detail(run_id: str) -> DetectionRunDetail:
@@ -694,7 +745,10 @@ def analysis_metadata() -> AnalysisMetadataResponse:
 
 
 @app.post("/admin/reset-db", status_code=204)
-def admin_reset_db(confirm: str | None = Header(default=None, alias=ADMIN_CONFIRM_HEADER)) -> Response:
+def admin_reset_db(
+    user: CurrentUser, confirm: str | None = Header(default=None, alias=ADMIN_CONFIRM_HEADER)
+) -> Response:
+    _require_admin(user)
     if not server_config.allow_admin_reset:
         raise HTTPException(status_code=403, detail="Database reset is disabled on this server.")
     # A custom header forces a CORS preflight, so other websites cannot trigger this from a browser.
@@ -706,36 +760,41 @@ def admin_reset_db(confirm: str | None = Header(default=None, alias=ADMIN_CONFIR
 
 
 @app.post("/admin/recheck-ocr", status_code=204)
-def admin_recheck_ocr() -> Response:
+def admin_recheck_ocr(user: CurrentUser) -> Response:
+    _require_admin(user)
     _set_ocr_state(_checking_ocr_state())
     _start_background_ocr_probe()
     return Response(status_code=204)
 
 
+@app.get("/me", response_model=UserResponse)
+def me(user: CurrentUser) -> UserResponse:
+    return UserResponse(
+        id=user.id, name=user.name, display_name=user.display_name, tags=list(user.tags), is_admin=user.is_admin
+    )
+
+
 @app.get("/projects", response_model=list[ProjectResponse])
-def projects_index() -> list[ProjectResponse]:
-    return [_serialize_project(project) for project in list_projects()]
+def projects_index(user: CurrentUser) -> list[ProjectResponse]:
+    # Administrators may open every project, but their list shows only the ones they belong to.
+    return [_serialize_project(project) for project in list_projects(user.memberships)]
 
 
 @app.post("/projects", response_model=ProjectResponse)
-def projects_create(payload: ProjectCreate) -> ProjectResponse:
-    project = create_project(payload.name)
+def projects_create(payload: ProjectCreate, user: CurrentUser) -> ProjectResponse:
+    project = create_project(payload.name, owner_id=user.id)
     return _serialize_project(project)
 
 
 @app.patch("/projects/{project_id}", response_model=ProjectResponse)
-def projects_update(project_id: str, payload: ProjectUpdate) -> ProjectResponse:
-    project = get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+def projects_update(project_id: str, payload: ProjectUpdate, user: CurrentUser) -> ProjectResponse:
+    _project_for(project_id, user, "owner")
     return _serialize_project(update_project_name(project_id, payload.name))
 
 
 @app.get("/projects/{project_id}")
-def projects_show(project_id: str) -> dict:
-    project = get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+def projects_show(project_id: str, user: CurrentUser) -> dict:
+    project = _project_for(project_id, user, "viewer")
     return {
         "project": _serialize_project(project),
         "recordings": [_serialize_recording(recording) for recording in list_recordings(project_id)],
@@ -743,10 +802,8 @@ def projects_show(project_id: str) -> dict:
 
 
 @app.delete("/projects/{project_id}", status_code=204)
-def projects_delete(project_id: str) -> Response:
-    project = get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+def projects_delete(project_id: str, user: CurrentUser) -> Response:
+    project = _project_for(project_id, user, "owner")
     if project_has_active_runs(project_id):
         raise HTTPException(status_code=409, detail="Abort active runs before deleting this project")
     project_path = project_dir(project["slug"], project["id"])
@@ -757,14 +814,13 @@ def projects_delete(project_id: str) -> Response:
 
 @app.post("/recordings/import", response_model=RecordingImportResponse)
 async def recordings_import(
+    user: CurrentUser,
     project_id: str = Form(...),
     filename: str | None = Form(default=None),
     file: UploadFile = File(...),
 ) -> RecordingImportResponse:
     _require_tools()
-    project = get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = _project_for(project_id, user, "owner")
 
     preferred_name = filename.strip() if filename else file.filename or "recording.mp4"
     sanitized_name = sanitize_filename(preferred_name)
@@ -804,10 +860,8 @@ async def recordings_import(
 
 
 @app.get("/recordings/{recording_id}", response_model=RecordingDetailResponse)
-def recordings_show(recording_id: str) -> RecordingDetailResponse:
-    recording = get_recording(recording_id)
-    if not recording:
-        raise HTTPException(status_code=404, detail="Recording not found")
+def recordings_show(recording_id: str, user: CurrentUser) -> RecordingDetailResponse:
+    _project, recording = _recording_for(recording_id, user, "viewer")
     return RecordingDetailResponse(
         **_serialize_recording(recording).model_dump(),
         runs=[_serialize_run_summary(run) for run in list_runs(recording_id)],
@@ -815,16 +869,16 @@ def recordings_show(recording_id: str) -> RecordingDetailResponse:
 
 
 @app.patch("/recordings/{recording_id}", response_model=RecordingImportResponse)
-def recordings_update(recording_id: str, payload: RecordingUpdate) -> RecordingImportResponse:
-    recording = get_recording(recording_id)
-    if not recording:
-        raise HTTPException(status_code=404, detail="Recording not found")
+def recordings_update(
+    recording_id: str, payload: RecordingUpdate, user: CurrentUser
+) -> RecordingImportResponse:
+    _recording_for(recording_id, user, "owner")
     return _serialize_recording(update_recording_filename(recording_id, sanitize_filename(payload.filename)))
 
 
 @app.delete("/recordings/{recording_id}", status_code=204)
-def recordings_delete(recording_id: str) -> Response:
-    project, recording = _recording_context(recording_id)
+def recordings_delete(recording_id: str, user: CurrentUser) -> Response:
+    project, recording = _recording_for(recording_id, user, "owner")
     if recording_has_active_runs(recording_id):
         raise HTTPException(status_code=409, detail="Abort active runs before deleting this recording")
     recording_path = recording_dir(project["slug"], project["id"], recording["slug"], recording["id"])
@@ -834,10 +888,8 @@ def recordings_delete(recording_id: str) -> Response:
 
 
 @app.post("/recordings/{recording_id}/runs/manual", response_model=DetectionRunSummary)
-def runs_create_manual(recording_id: str) -> DetectionRunSummary:
-    recording = get_recording(recording_id)
-    if not recording:
-        raise HTTPException(status_code=404, detail="Recording not found")
+def runs_create_manual(recording_id: str, user: CurrentUser) -> DetectionRunSummary:
+    _recording_for(recording_id, user, "owner")
     settings = RunSettings()
     run = create_run(recording_id, settings)
     update_run(run["id"], status="completed", phase="completed", progress=1.0, message="Manual run")
@@ -846,11 +898,9 @@ def runs_create_manual(recording_id: str) -> DetectionRunSummary:
 
 
 @app.post("/recordings/{recording_id}/runs", response_model=DetectionRunSummary)
-def runs_create(recording_id: str, settings: RunSettings) -> DetectionRunSummary:
+def runs_create(recording_id: str, settings: RunSettings, user: CurrentUser) -> DetectionRunSummary:
     _require_tools()
-    recording = get_recording(recording_id)
-    if not recording:
-        raise HTTPException(status_code=404, detail="Recording not found")
+    _project, recording = _recording_for(recording_id, user, "owner")
     settings = _lock_unavailable_ocr(settings)
     _validate_run_settings_for_recording(recording, settings)
     run = create_run(recording_id, settings)
@@ -860,15 +910,14 @@ def runs_create(recording_id: str, settings: RunSettings) -> DetectionRunSummary
 
 
 @app.get("/runs/{run_id}", response_model=DetectionRunDetail)
-def runs_show(run_id: str) -> DetectionRunDetail:
+def runs_show(run_id: str, user: CurrentUser) -> DetectionRunDetail:
+    _run_for(run_id, user, "viewer")
     return _build_run_detail(run_id)
 
 
 @app.post("/runs/{run_id}/cancel", response_model=DetectionRunSummary)
-def runs_cancel(run_id: str) -> DetectionRunSummary:
-    run = get_run(run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Run not found")
+def runs_cancel(run_id: str, user: CurrentUser) -> DetectionRunSummary:
+    _project, _recording, run = _run_for(run_id, user, "owner")
     if run["status"] not in ACTIVE_RUN_STATUSES:
         raise HTTPException(status_code=409, detail="Only queued or running jobs can be aborted")
     # Record the request before signalling it: a queued run ends at once, and its final message must not be
@@ -885,12 +934,9 @@ def runs_cancel(run_id: str) -> DetectionRunSummary:
     return _serialize_run_summary(get_run(run_id))
 
 
-
-
-
 @app.delete("/runs/{run_id}", status_code=204)
-def runs_delete(run_id: str) -> Response:
-    project, recording, run = _run_context(run_id)
+def runs_delete(run_id: str, user: CurrentUser) -> Response:
+    project, recording, run = _run_for(run_id, user, "owner")
     if run["status"] in ACTIVE_RUN_STATUSES:
         raise HTTPException(status_code=409, detail="Abort the run before deleting it")
     run_path, _frames_path = _run_artifact_paths(project, recording, run_id)
@@ -900,7 +946,13 @@ def runs_delete(run_id: str) -> Response:
 
 
 @app.websocket("/runs/{run_id}/events")
-async def runs_events(run_id: str, websocket: WebSocket) -> None:
+async def runs_events(run_id: str, websocket: WebSocket, user: CurrentUser) -> None:
+    try:
+        _run_for(run_id, user, "viewer")
+    except HTTPException:
+        # Closing before accepting refuses the handshake (HTTP 403), whether or not the run exists.
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     offset = 0
     try:
@@ -917,10 +969,13 @@ async def runs_events(run_id: str, websocket: WebSocket) -> None:
 
 
 @app.patch("/candidates/{candidate_id}", response_model=CandidateFrameResponse)
-def candidates_update(candidate_id: str, payload: CandidateUpdate) -> CandidateFrameResponse:
+def candidates_update(
+    candidate_id: str, payload: CandidateUpdate, user: CurrentUser
+) -> CandidateFrameResponse:
     candidate = get_candidate(candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
+    _run_for(candidate["run_id"], user, "owner", not_found="Candidate not found")
     updates = payload.model_dump(exclude_none=True)
     if "title" in updates:
         updates["title"] = updates["title"].strip() or None
@@ -931,8 +986,10 @@ def candidates_update(candidate_id: str, payload: CandidateUpdate) -> CandidateF
 
 
 @app.post("/runs/{run_id}/candidates/manual", response_model=CandidateFrameResponse)
-def runs_add_manual_candidate(run_id: str, payload: ManualCandidateCreate) -> CandidateFrameResponse:
-    project, recording, run = _run_context(run_id)
+def runs_add_manual_candidate(
+    run_id: str, payload: ManualCandidateCreate, user: CurrentUser
+) -> CandidateFrameResponse:
+    project, recording, run = _run_for(run_id, user, "owner")
     if run["status"] not in {"completed", "failed", "cancelled"}:
         raise HTTPException(status_code=409, detail="Manual steps can only be added to completed, failed, or cancelled runs")
     if payload.timestamp_ms >= recording["duration_ms"]:
@@ -994,8 +1051,8 @@ def runs_add_manual_candidate(run_id: str, payload: ManualCandidateCreate) -> Ca
 
 
 @app.post("/runs/{run_id}/export")
-def runs_export(run_id: str, payload: ExportRequest) -> dict:
-    project, recording, run = _run_context(run_id)
+def runs_export(run_id: str, payload: ExportRequest, user: CurrentUser) -> dict:
+    project, recording, run = _run_for(run_id, user, "owner")
     if run["status"] != "completed":
         raise HTTPException(status_code=409, detail="Only completed runs can be exported")
     export_mode = payload.mode
@@ -1046,14 +1103,39 @@ def runs_export(run_id: str, payload: ExportRequest) -> dict:
 
 
 @app.get("/exports/{bundle_id}/download")
-def exports_download(bundle_id: str) -> FileResponse:
+def exports_download(bundle_id: str, user: CurrentUser) -> FileResponse:
     bundle = get_export_bundle(bundle_id)
     if not bundle:
         raise HTTPException(status_code=404, detail="Export bundle not found")
+    _run_for(bundle["run_id"], user, "viewer", not_found="Export bundle not found")
     zip_path = DATA_ROOT / bundle["zip_path"]
     if not zip_path.exists():
         raise HTTPException(status_code=404, detail="Export archive missing on disk")
     return FileResponse(zip_path, media_type="application/zip", filename=zip_path.name)
+
+
+@app.api_route("/assets/projects/{asset_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+def project_asset(asset_path: str, request: Request, user: CurrentUser) -> Response:
+    """A project's media (recordings, previews, screenshots, exports), only for people who may open the project.
+
+    The URL is the file's place under ``projects/``, whose first folder is ``{slug}-{id[:8]}``. Range requests
+    work, so videos can be scrubbed. Browsers must check back each time (the answer depends on who asks), and
+    get a short "not modified" when their copy is current."""
+    folder, _, inside = asset_path.partition("/")
+    slug, _, id_prefix = folder.rpartition("-")
+    if inside and slug and id_prefix:
+        for project in find_projects_by_folder(slug, id_prefix):
+            if project_role(project["id"], user) is None:
+                continue
+            root = project_dir(project["slug"], project["id"]).resolve()
+            path = (root / inside).resolve()
+            if path.is_relative_to(root) and path.is_file():
+                headers = {"Cache-Control": "private, no-cache"}
+                response = FileResponse(path, headers=headers, stat_result=path.stat())
+                if request.headers.get("if-none-match") == response.headers["etag"]:
+                    return Response(status_code=304, headers={**headers, "ETag": response.headers["etag"]})
+                return response
+    raise HTTPException(status_code=404, detail="Not found")
 
 
 class FrontendFiles(StaticFiles):
@@ -1068,7 +1150,7 @@ class FrontendFiles(StaticFiles):
 
 
 def mount_frontend(target: FastAPI, directory: Path) -> None:
-    # Mounted last, so every API route and the `/assets/projects` media mount above take precedence.
+    # Mounted last, so every API route, `/assets/projects` media included, takes precedence.
     target.mount("/", FrontendFiles(directory=str(directory), html=True), name="frontend")
 
 

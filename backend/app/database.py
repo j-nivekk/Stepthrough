@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
 from .config import DB_PATH, ensure_app_dirs
+from .utils import utc_now
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -98,12 +100,41 @@ CREATE TABLE IF NOT EXISTS run_events (
     created_at TEXT NOT NULL
 );
 
+-- People who use the app. `name` is what they log in with; `tags` is a JSON list, and the `admin` tag makes an
+-- administrator. The standalone app has one built-in user (LOCAL_USER_ID) and no login.
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    tags TEXT NOT NULL DEFAULT '[]',
+    is_disabled INTEGER NOT NULL DEFAULT 0,
+    delete_after TEXT,
+    created_at TEXT NOT NULL,
+    last_seen_at TEXT
+);
+
+-- Who may open a project. `member` is a user id, or `tag:<name>` for everyone with that tag; `role` is `owner`
+-- (may change it) or `viewer` (may only look). Recordings, runs, steps and exports follow their project.
+CREATE TABLE IF NOT EXISTS project_members (
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    member TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner', 'viewer')),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, member)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_members_member ON project_members(member);
 CREATE INDEX IF NOT EXISTS idx_recordings_project_id ON recordings(project_id);
 CREATE INDEX IF NOT EXISTS idx_runs_recording_id ON detection_runs(recording_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_run_id ON candidate_frames(run_id);
 CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id, created_at);
 """
 
+
+# The standalone app's only user, and the owner of every project made before there were users.
+LOCAL_USER_ID = "local"
+LOCAL_USER_NAME = "local"
+ADMIN_TAG = "admin"
 
 # Runs write progress from their own threads while requests read and write too. A writer waits this long for
 # another to finish instead of failing at once with "database is locked" (sqlite3's default is 5 s).
@@ -154,12 +185,37 @@ def _backfill_detection_run_phase(conn: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_local_user(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO users (id, name, display_name, tags, created_at)
+        VALUES (?, ?, 'This computer', ?, ?)
+        """,
+        (LOCAL_USER_ID, LOCAL_USER_NAME, json.dumps([ADMIN_TAG]), utc_now()),
+    )
+
+
+def _adopt_projects_without_members(conn: sqlite3.Connection) -> None:
+    """Give projects that nobody may open (all of them, in a database from before users) to the built-in user."""
+    conn.execute(
+        """
+        INSERT INTO project_members (project_id, member, role, created_at)
+        SELECT p.id, ?, 'owner', p.created_at
+        FROM projects p
+        WHERE NOT EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id)
+        """,
+        (LOCAL_USER_ID,),
+    )
+
+
 def reset_db() -> None:
     """Drop all application tables and reinitialise the schema."""
     ensure_app_dirs()
     with connect() as conn:
         conn.executescript("""
             PRAGMA foreign_keys = OFF;
+            DROP TABLE IF EXISTS project_members;
+            DROP TABLE IF EXISTS users;
             DROP TABLE IF EXISTS export_bundles;
             DROP TABLE IF EXISTS run_events;
             DROP TABLE IF EXISTS candidate_frames;
@@ -192,3 +248,5 @@ def init_db() -> None:
         _ensure_column(conn, "candidate_frames", "score_breakdown", "TEXT")
         _ensure_column(conn, "recordings", "working_path", "TEXT")
         _backfill_detection_run_phase(conn)
+        _ensure_local_user(conn)
+        _adopt_projects_without_members(conn)

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Sequence
 from typing import Any
 from uuid import uuid4
 
-from .database import connect
+from .database import LOCAL_USER_ID, connect
 from .models import RunSettings
 from .utils import slugify, utc_now
 
@@ -65,31 +66,115 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     return dict(row) if row is not None else None
 
 
-def create_project(name: str) -> dict[str, Any]:
+def _placeholders(values: Sequence[Any]) -> str:
+    return ", ".join("?" for _ in values)
+
+
+def create_project(name: str, owner_id: str = LOCAL_USER_ID) -> dict[str, Any]:
     project_id = uuid4().hex
     payload = {
         "id": project_id,
         "name": name.strip(),
         "slug": slugify(name),
         "created_at": utc_now(),
+        "owner": owner_id,
     }
     with connect() as conn:
         conn.execute(
             "INSERT INTO projects (id, name, slug, created_at) VALUES (:id, :name, :slug, :created_at)",
             payload,
         )
+        conn.execute(
+            "INSERT INTO project_members (project_id, member, role, created_at) VALUES (:id, :owner, 'owner', :created_at)",
+            payload,
+        )
     return get_project(project_id)
 
 
-def list_projects() -> list[dict[str, Any]]:
+def list_projects(members: Sequence[str] | None = None) -> list[dict[str, Any]]:
+    """Projects any of ``members`` (user ids and ``tag:`` entries) belongs to; every project when ``None``."""
+    where, params = "", ()
+    if members is not None:
+        if not members:
+            return []
+        where = f"WHERE p.id IN (SELECT project_id FROM project_members WHERE member IN ({_placeholders(members)}))"
+        params = tuple(members)
     with connect() as conn:
         rows = conn.execute(
             f"""
             {PROJECT_SUMMARY_SELECT}
+            {where}
             ORDER BY last_activity_at DESC, p.created_at DESC
-            """
+            """,
+            params,
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def find_projects_by_folder(slug: str, id_prefix: str) -> list[dict[str, Any]]:
+    """Projects whose folder under ``projects/`` is ``{slug}-{id_prefix}`` (see ``storage.project_dir``)."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id, name, slug FROM projects WHERE slug = ? AND substr(id, 1, ?) = ?",
+            (slug, len(id_prefix), id_prefix),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def project_member_roles(project_id: str, members: Sequence[str]) -> set[str]:
+    if not members:
+        return set()
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT role FROM project_members WHERE project_id = ? AND member IN ({_placeholders(members)})",
+            (project_id, *members),
+        ).fetchall()
+    return {row["role"] for row in rows}
+
+
+def set_project_member(project_id: str, member: str, role: str = "owner") -> None:
+    """Give ``member`` (a user id or ``tag:<name>``) a role on a project, replacing any role it had."""
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO project_members (project_id, member, role, created_at) VALUES (?, ?, ?, ?)
+            ON CONFLICT (project_id, member) DO UPDATE SET role = excluded.role
+            """,
+            (project_id, member, role, utc_now()),
+        )
+
+
+def list_project_members(project_id: str) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT member, role, created_at FROM project_members WHERE project_id = ? ORDER BY created_at, member",
+            (project_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_user(
+    name: str, *, display_name: str | None = None, tags: Iterable[str] = (), user_id: str | None = None
+) -> dict[str, Any]:
+    payload = {
+        "id": user_id or uuid4().hex,
+        "name": name.strip(),
+        "display_name": display_name,
+        "tags": json.dumps(sorted(set(tags))),
+        "created_at": utc_now(),
+    }
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO users (id, name, display_name, tags, created_at) VALUES (:id, :name, :display_name, :tags, :created_at)",
+            payload,
+        )
+    return get_user(payload["id"])
+
+
+def get_user(user_id: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+    return _row_to_dict(row)
 
 
 def get_project(project_id: str) -> dict[str, Any] | None:

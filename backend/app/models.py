@@ -62,6 +62,14 @@ class ProjectUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
 
 
+class UserResponse(BaseModel):
+    id: str
+    name: str
+    display_name: str | None = None
+    tags: list[str] = []
+    is_admin: bool = False
+
+
 class ProjectResponse(BaseModel):
     id: str
     name: str

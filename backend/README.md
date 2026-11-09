@@ -97,13 +97,19 @@ breakdown, revisit links and the timing columns `transition_type`, `change_start
 | `STEPTHROUGH_MAX_CONCURRENT_RUNS` | no limit in `local`, `2` in `server` | analyses that may run at once; later runs wait as `queued`, first come first served, and can be ended while they wait. `0` lifts the limit |
 | `STEPTHROUGH_FRONTEND_DIR` | unset | a built frontend (`frontend/dist`) to serve from the API's own origin, as the Docker image does; it must contain `index.html` |
 
-Only `data/projects/` is served under `/assets/projects/`; the database, OCR models and other files in
-the data root are not reachable over HTTP. Runs that were queued or running when the backend stopped are
-marked failed at the next start-up.
+Project media (recordings, screenshots, exports) is served under `/assets/projects/` only to people who may
+open that project; the database, OCR models and other files in the data root are not reachable over HTTP.
+Runs that were queued or running when the backend stopped are marked failed at the next start-up.
+
+Each project has members (`project_members`): a user, or everyone with a tag (`tag:<name>`), as an owner (may
+change it) or a viewer (may only look). Recordings, runs, steps and exports follow their project, and every
+endpoint checks the role. People who may not open a project get the same 404 as for one that does not exist.
+Users with the `admin` tag may open every project. There is no login yet: every request comes from the
+built-in user `local`, an administrator, who also owns every project made before users existed.
 
 Run the API with a single worker process: run progress, cancel requests and the run queue live in that process's
 memory. The database uses SQLite's write-ahead log; copy it with `python -m app.backup` (SQLite's backup API)
 rather than copying the file. For the Docker image, see [`DEPLOY.md`](../DEPLOY.md).
 
-Not yet in place for a shared server: user accounts and per-user access checks (planned behind a single sign-on
-login at the reverse proxy), and analysis in a separate worker that survives restarts.
+Not yet in place for a shared server: logging in with an account and password, and analysis in a separate
+worker that survives restarts.

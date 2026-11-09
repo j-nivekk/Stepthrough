@@ -97,3 +97,12 @@ def test_init_db_migrates_existing_detection_runs(monkeypatch, tmp_path) -> None
         assert 'run_events' in event_tables
         phase = conn.execute("SELECT phase FROM detection_runs WHERE id = 'run-1'").fetchone()[0]
         assert phase == 'completed'
+        # A database from before users: its projects go to the built-in user, an administrator.
+        assert conn.execute("SELECT name, tags FROM users WHERE id = 'local'").fetchone() == ('local', '["admin"]')
+        members = conn.execute("SELECT project_id, member, role FROM project_members").fetchall()
+        assert members == [('project-1', 'local', 'owner')]
+
+    database.init_db()  # running it again changes nothing
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM users').fetchone()[0] == 1
+        assert conn.execute('SELECT COUNT(*) FROM project_members').fetchone()[0] == 1

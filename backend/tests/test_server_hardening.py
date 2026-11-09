@@ -5,7 +5,6 @@ from dataclasses import replace
 from fastapi.testclient import TestClient
 
 import app.main as main
-import app.storage as storage
 from app.repository import create_project, create_recording, create_run, get_run, list_run_events
 from app.models import RunSettings
 
@@ -104,6 +103,7 @@ def test_runs_use_the_working_copy_and_serve_it_for_preview(client: TestClient, 
     refreshed = client.get(f"/recordings/{recording['id']}").json()
     assert refreshed['source_url'].endswith('/working/working.mp4')
     assert refreshed['fps'] == 25.0  # constant-rate sources under the 30 fps cap keep their own rate
-    # The /assets mount is bound to the real data root at import time, so check the file on disk here.
-    relative = refreshed['source_url'].removeprefix('/assets/')
-    assert (storage.DATA_ROOT / relative).stat().st_size > 0
+    preview = client.get(refreshed['source_url'])
+    assert preview.status_code == 200
+    assert preview.headers['content-type'] == 'video/mp4'
+    assert len(preview.content) > 0
