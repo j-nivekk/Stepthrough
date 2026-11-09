@@ -351,7 +351,9 @@ Labels describe the change. They never decide what counts as a step.
   the screen from being still. Draw an ignore area over it.
 - **Screens shorter than the minimum time on screen are skipped.** Lower the minimum, or add the moment by
   hand.
-- **Changes smaller than the smallest change are ignored.** Lower it, or add the moment by hand.
+- **Changes smaller than the smallest change are usually ignored.** Stepthrough measures changes in small
+  blocks, so a change a little smaller than the setting can still count, but one much smaller does not. Lower
+  the setting, or add the moment by hand.
 - **It sees pixels, not meaning.** Two screens that look alike count as the same screen. A big change that
   means nothing, such as switching to dark mode, counts as a step.
 
@@ -495,6 +497,13 @@ running.
 
 When a page comes to rest and then loads more content, the loaded page is a step of its own, labelled
 *update*. Reject the earlier step, or raise the minimum time on screen so that the first one is skipped.
+
+### Typing on a computer is split up or shows unfinished text
+
+On a computer screen, each typed character is a tiny change, far below the default smallest change for the
+**computer** recording type. Set the **smallest change** to 0.05 % for recordings with typing, and keep the
+mouse still while typing. The same setting helps when a scroll through a list of similar-looking rows is
+missed: try 0.10 %.
 
 ### There are many scroll steps
 
