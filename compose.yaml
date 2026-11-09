@@ -25,6 +25,8 @@ services:
       STEPTHROUGH_MAX_UPLOAD_MB: ${STEPTHROUGH_MAX_UPLOAD_MB:-1024}
       STEPTHROUGH_OCR_MODEL_SOURCE: ${STEPTHROUGH_OCR_MODEL_SOURCE:-auto}
       STEPTHROUGH_PUBLIC_URL: ${STEPTHROUGH_PUBLIC_URL:-}
+      # Empty: people log in, as on any server. `none` only for Stepthrough on your own computer, for you alone.
+      STEPTHROUGH_AUTH: ${STEPTHROUGH_AUTH:-}
     volumes:
       - data:/data
     # A heavy analysis must not starve other tools on the same host. 0 means no limit.

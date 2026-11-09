@@ -91,10 +91,13 @@ Stepthrough works best on a laptop or desktop computer, in a browser window of a
    mkdir Stepthrough
    cd Stepthrough
    curl -fsSLO https://raw.githubusercontent.com/j-nivekk/Stepthrough/main/compose.yaml
+   echo STEPTHROUGH_AUTH=none>>.env
    ```
 
    The same commands work on Windows and on a Mac. They make a folder called `Stepthrough` in your user
-   folder and save a file called `compose.yaml` in it, which tells Docker how to run Stepthrough.
+   folder and save a file called `compose.yaml` in it, which tells Docker how to run Stepthrough. The last line
+   saves a setting in a file called `.env`: Stepthrough runs for you alone, so it opens without logging in.
+   (The same set-up on a server, for a group, leaves that line out, and people there log in.)
 
 3. **Start Stepthrough:**
 
@@ -131,7 +134,8 @@ window, type `cd Stepthrough` first.
 
 **Settings.** You can change a few things by adding lines to a settings file called `.env` in your Stepthrough
 folder. Each command below adds one line; afterwards, type `docker compose up -d` to apply it. To undo your
-settings, delete the file (`del .env` on Windows, `rm .env` on a Mac) and type `docker compose up -d` again.
+settings, delete the file (`del .env` on Windows, `rm .env` on a Mac), add the line from step 2 again
+(`echo STEPTHROUGH_AUTH=none>>.env`) and type `docker compose up -d`.
 
 - **Text recognition (OCR).** Reading the text in each screenshot needs a larger version of Stepthrough
   (about 600 MB to download), and the first run that uses it downloads its recognition models as well. It
@@ -157,6 +161,8 @@ settings, delete the file (`del .env` on Windows, `rm .env` on a Mac) and type `
   try again.
 - *port is already allocated*: another program uses port 8080. Choose a different port (see **Settings**
   above).
+- *Stepthrough asks you to log in* (for example after an update): the `.env` file is missing the line from
+  step 2. Type `echo STEPTHROUGH_AUTH=none>>.env` and then `docker compose up -d`, and reload the page.
 
 ### From the source code
 

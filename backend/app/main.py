@@ -62,6 +62,7 @@ from .models import (
 )
 from .repository import (
     ACTIVE_RUN_STATUSES,
+    any_password_set,
     clear_export_bundle_for_run,
     create_export_bundle as create_export_bundle_record,
     create_project,
@@ -84,7 +85,6 @@ from .repository import (
     list_recordings,
     list_run_events,
     list_runs,
-    list_users,
     project_has_active_runs,
     recording_has_active_runs,
     replace_candidates,
@@ -273,7 +273,7 @@ def _start_account_cleanup() -> None:
 def startup() -> None:
     ensure_app_dirs()
     init_db()
-    if server_config.auth == "password" and not any(row["has_password"] for row in list_users()):
+    if server_config.auth == "password" and not any_password_set():
         logger.warning(
             "Nobody can log in yet. Make the first administrator with `python -m app.users add NAME --admin` "
             "(in Docker: `docker compose exec stepthrough python -m app.users add NAME --admin`)."

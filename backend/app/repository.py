@@ -249,6 +249,12 @@ def get_password_hash(user_id: str) -> str | None:
     return row["password_hash"] if row else None
 
 
+def any_password_set() -> bool:
+    """Whether anyone can log in at all: some account has a password."""
+    with connect() as conn:
+        return conn.execute("SELECT 1 FROM users WHERE password_hash IS NOT NULL LIMIT 1").fetchone() is not None
+
+
 def set_password_hash(user_id: str, password_hash: str) -> None:
     with connect() as conn:
         conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))

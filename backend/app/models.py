@@ -81,6 +81,8 @@ class SessionResponse(BaseModel):
 
     mode: AuthModeName
     user: UserResponse | None = None
+    # Logins are on but no account has a password yet, so nobody can log in: the login page explains what to do.
+    setup_needed: bool = False
 
 
 class LoginRequest(BaseModel):

@@ -292,6 +292,8 @@ export interface SessionUser {
 export interface SessionInfo {
   mode: AuthMode;
   user: SessionUser | null;
+  /** Logins are on, but no account has a password yet, so nobody can log in. */
+  setup_needed?: boolean;
 }
 
 export interface LinkDetails {

@@ -57,7 +57,7 @@ export function Root() {
   if (session?.mode === 'password' && !session.user) {
     return (
       <>
-        <LoginScreen onLoggedIn={enter} />
+        <LoginScreen onLoggedIn={enter} setupNeeded={Boolean(session.setup_needed)} />
         <AppWatermark />
       </>
     );

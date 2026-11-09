@@ -54,6 +54,7 @@ Edit `.env`, then apply it with `docker compose up -d --wait`. Every setting is 
 | `STEPTHROUGH_VOLUME` | `stepthrough_data` | name of the Docker volume with all data |
 | `STEPTHROUGH_OCR_MODEL_SOURCE` | `auto` | where the text recognition image downloads its models (`auto`, `huggingface`, `bos`) |
 | `STEPTHROUGH_PUBLIC_URL` | unset | the address people open, such as `https://stepthrough.example.org`; the command line prints password links with it |
+| `STEPTHROUGH_AUTH` | `password` | whether people log in. Keep `password` on a server; `none` (no logins, everyone is an administrator) is only for Stepthrough on one person's own computer |
 
 ## Web server
 

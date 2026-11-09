@@ -48,7 +48,15 @@ from .models import (
     UserLinkResponse,
     UserResponse,
 )
-from .repository import find_user_by_name, get_password_hash, get_user, list_users, transfer_projects, update_user
+from .repository import (
+    any_password_set,
+    find_user_by_name,
+    get_password_hash,
+    get_user,
+    list_users,
+    transfer_projects,
+    update_user,
+)
 from .user_admin import (
     AccountBusy,
     AccountError,
@@ -88,7 +96,9 @@ def user_response(user: User) -> UserResponse:
 
 
 def _session_response(request: Request, user: User | None) -> SessionResponse:
-    return SessionResponse(mode=auth_mode(request), user=user_response(user) if user else None)
+    mode = auth_mode(request)
+    setup_needed = mode == "password" and user is None and not any_password_set()
+    return SessionResponse(mode=mode, user=user_response(user) if user else None, setup_needed=setup_needed)
 
 
 def _require_passwords(request: Request) -> None:

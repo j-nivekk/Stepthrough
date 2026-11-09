@@ -4,9 +4,11 @@ import type { SessionInfo } from '../../types';
 
 export interface LoginScreenProps {
   onLoggedIn: (session: SessionInfo) => void;
+  /** Nobody can log in yet: explain how to get started instead of asking for a password reset. */
+  setupNeeded?: boolean;
 }
 
-export function LoginScreen({ onLoggedIn }: LoginScreenProps) {
+export function LoginScreen({ onLoggedIn, setupNeeded = false }: LoginScreenProps) {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -54,7 +56,22 @@ export function LoginScreen({ onLoggedIn }: LoginScreenProps) {
           {pending ? 'logging in…' : 'log in'}
         </button>
         {error && <p className="entry-notice error account-gate-message">{error}</p>}
-        <p className="account-gate-hint">forgot your password? ask an administrator for a new link.</p>
+        {setupNeeded ? (
+          <div className="account-gate-setup">
+            <p className="entry-notice warning">nobody can log in yet: this stepthrough has no accounts.</p>
+            <p className="account-gate-hint">
+              <strong>on your own computer,</strong> stepthrough does not need logins. in your stepthrough folder, type{' '}
+              <code className="app-settings-code">echo STEPTHROUGH_AUTH=none&gt;&gt;.env</code> and then{' '}
+              <code className="app-settings-code">docker compose up -d</code>, and reload this page.
+            </p>
+            <p className="account-gate-hint">
+              <strong>on a server,</strong> whoever runs it makes the first administrator with{' '}
+              <code className="app-settings-code">python -m app.users add NAME --admin --password</code>.
+            </p>
+          </div>
+        ) : (
+          <p className="account-gate-hint">forgot your password? ask an administrator for a new link.</p>
+        )}
       </form>
     </div>
   );

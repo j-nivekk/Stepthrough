@@ -49,7 +49,7 @@ def invite(name: str, *tags: str, delete_after: str | None = None) -> str:
 
 
 def test_without_a_login_only_the_page_and_health_answer(passwords: TestClient) -> None:
-    assert passwords.get('/auth/session').json() == {'mode': 'password', 'user': None}
+    assert passwords.get('/auth/session').json() == {'mode': 'password', 'user': None, 'setup_needed': True}
     assert passwords.get('/health').status_code == 200
     for url in ('/me', '/projects', '/admin/users', '/assets/projects/x-12345678/source/a.mp4'):
         response = passwords.get(url)
@@ -496,3 +496,35 @@ def test_passwords_an_administrator_supplies_are_kept_as_given(
         '/admin/users/import', files={'file': ('x.csv', b'name,password\nroy,' + b'x' * 1025 + b'\n', 'text/csv')}
     ).json()
     assert too_long['created'] == [] and 'at most 1024' in too_long['errors'][0]['message']
+
+
+def test_the_login_page_learns_when_nobody_can_log_in_yet(client: TestClient, passwords: TestClient) -> None:
+    assert passwords.get('/auth/session').json()['setup_needed'] is True
+    invite('only-invited')  # an account without a password still cannot log in
+    assert passwords.get('/auth/session').json()['setup_needed'] is True
+    make_admin()
+    assert passwords.get('/auth/session').json()['setup_needed'] is False
+    passwords.app.state.auth_mode = 'none'
+    assert passwords.get('/auth/session').json()['setup_needed'] is False
+    passwords.app.state.auth_mode = 'password'
+
+
+@pytest.mark.parametrize('deployment, setting, expected', [
+    ('server', None, 'password'),
+    ('server', '', 'password'),  # what compose passes when .env does not set it
+    ('server', 'none', 'none'),
+    ('local', None, 'none'),
+    ('local', 'password', 'password'),
+])
+def test_compose_leaves_servers_on_logins_unless_told(
+    monkeypatch: pytest.MonkeyPatch, deployment: str, setting: str | None, expected: str
+) -> None:
+    from app.config import build_server_config
+
+    monkeypatch.setenv('STEPTHROUGH_DEPLOYMENT', deployment)
+    monkeypatch.delenv('STEPTHROUGH_FRONTEND_DIR', raising=False)
+    if setting is None:
+        monkeypatch.delenv('STEPTHROUGH_AUTH', raising=False)
+    else:
+        monkeypatch.setenv('STEPTHROUGH_AUTH', setting)
+    assert build_server_config().auth == expected
