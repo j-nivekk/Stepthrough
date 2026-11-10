@@ -166,7 +166,7 @@ settings, delete the file (`del .env` on Windows, `rm .env` on a Mac), add the l
 
 ### From the source code
 
-You need Git, uv (which also installs the right version of Python), Node.js 18 or later and FFmpeg 5.1 or
+You need Git, uv (which also installs the right version of Python), Node.js 20.19 or later and FFmpeg 5.1 or
 later.
 
 **On Windows**, install these programs with winget, which comes with Windows 10 and 11. In Command Prompt,

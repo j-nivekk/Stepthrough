@@ -1,4 +1,4 @@
-# Stepthrough 🔎
+# Stepthrough
 
 **Stepthrough** is a local-first research tool designed to automatically turn video screen recordings into clean, chronological walkthrough screenshots. It is built to help researchers, designers, and developers quickly extract key navigational steps from app runs or usability tests.
 
@@ -9,7 +9,7 @@
 ![React Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB.svg)
 
 
-## 📌 Features
+## Features
 
 - **Stable-Screen Detection**: Every screen that stays still for a moment becomes a step, with one settled screenshot each. Settings are in milliseconds and screen share, so they can be reported in a methods section.
 - **Local-First & Private**: Everything stays on your machine. Data, recordings, and extracted frames process and save directly to your local `./data` folder.
@@ -19,7 +19,7 @@
 
 ---
 
-## 🎯 Why Use Screen Recordings Instead Of Taking Screenshots Live?
+## Why Use Screen Recordings Instead Of Taking Screenshots Live?
 
 For walkthrough-driven research, screen recordings are often a better capture medium than trying to take screenshots manually during a session.
 
@@ -35,7 +35,7 @@ Stepthrough is built around that workflow: record first, then review and curate 
 
 ---
 
-## 🐳 Quickest start: Docker
+## Quickest start: Docker
 
 With [Docker Desktop](https://www.docker.com/products/docker-desktop/) running, on Windows or Mac:
 
@@ -54,10 +54,10 @@ instead, read on.
 
 ---
 
-## 🏗 Requirements
+## Requirements
 
 To run Stepthrough from source, you must have the following installed on your system:
-- **Node.js 18+**
+- **Node.js 20.19+** (or 22.12+)
 - **FFmpeg & FFprobe 5.1+**: Required for video frame extraction.
   - *Mac:* `brew install ffmpeg`
   - *Ubuntu/Debian:* `sudo apt install ffmpeg` (Ubuntu 22.04's FFmpeg 4.4 is too old)
@@ -69,7 +69,7 @@ type instead.
 
 ---
 
-## 🚀 Installation & Setup
+## Installation & Setup
 
 1. **Clone the repository:**
    ```bash
@@ -87,7 +87,7 @@ type instead.
 
 ---
 
-## 🕹 Running Locally
+## Running Locally
 
 You can spin up both the frontend and backend servers easily with the provided start script.
 
@@ -107,7 +107,7 @@ covers installing, configuring, upgrading and backing it up.
 
 ---
 
-## 🏷 Releases and builds
+## Releases and builds
 
 Each release is listed on the [releases page](https://github.com/j-nivekk/Stepthrough/releases), with what changed
 and how to upgrade. The Docker images are at `ghcr.io/j-nivekk/stepthrough`:
@@ -132,15 +132,15 @@ on GitHub.
 
 ---
 
-## 🛠 Project Structure
+## Project Structure
 
-- `/backend`: The FastAPI application. Handles SQLite database operations, step detection, manual screenshot extraction, FFmpeg bindings, and the export pipeline.
+- `/backend`: The FastAPI application. Handles SQLite database operations, step detection, manual screenshot extraction, FFmpeg calls, and the export pipeline.
 - `/frontend`: The Vite + React user interface. Handles video importing, review boards, step annotation, and configuration forms.
 - `/data`: Auto-generated on launch. Contains the `stepthrough.sqlite3` manifest alongside imported MP4 videos and extracted screenshots.
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 - [`GUIDE.md`](GUIDE.md): how Stepthrough works and how to use it, with a first tutorial, settings,
   review, exports, recording tips and notes on research use.
@@ -153,16 +153,17 @@ on GitHub.
 
 ---
 
-## 🎓 Credits
+## Credits
 
 Created and maintained by **H. "Kevin" Jin** at the **University of Amsterdam**.
 
 ---
 
-## 📜 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
 
 ---
 
-> *Note: FFmpeg is invoked directly via CLI subprocess. It is not bundled or statically linked within the codebase.*
+> *Note: Stepthrough runs FFmpeg as a separate program and does not link it into its own code. Run from source, it uses
+> the FFmpeg you install; the Docker image includes Debian's FFmpeg package, which keeps its own licence (LGPL/GPL).*
