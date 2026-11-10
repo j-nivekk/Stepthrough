@@ -3,10 +3,13 @@ const PREFS_VERSION = 1;
 
 export interface AppPreferences {
   showPerfMonitor: boolean;
+  /** Cover the page with a note when the window is smaller than it needs; "continue anyway" turns this off. */
+  warnSmallWindow: boolean;
 }
 
 export const defaultAppPreferences: AppPreferences = {
   showPerfMonitor: false,
+  warnSmallWindow: true,
 };
 
 export function loadAppPreferences(): AppPreferences {
@@ -19,6 +22,7 @@ export function loadAppPreferences(): AppPreferences {
     }
     return {
       showPerfMonitor: parsed['showPerfMonitor'] === true,
+      warnSmallWindow: parsed['warnSmallWindow'] !== false,
     };
   } catch {
     return { ...defaultAppPreferences };

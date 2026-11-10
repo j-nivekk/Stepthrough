@@ -102,6 +102,15 @@ export function AppSettings({
           />
         </label>
         <p className="app-settings-hint">shows a live fps readout in the bottom-left corner.</p>
+        <label className="app-settings-toggle-row">
+          <span>small-window warning</span>
+          <input
+            checked={prefs.warnSmallWindow}
+            onChange={(e) => onChangePref('warnSmallWindow', e.target.checked)}
+            type="checkbox"
+          />
+        </label>
+        <p className="app-settings-hint">covers the page when the window is smaller than it needs.</p>
       </div>
 
       <div className="app-settings-section">

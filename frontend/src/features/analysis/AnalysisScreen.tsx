@@ -1337,7 +1337,8 @@ export function AnalysisScreen({
           </div>
         )}
 
-        <div className="analysis-grid">
+        {/* Selecting tasks needs a wider toolbar: the tasks column then takes more room and the others give way. */}
+        <div className={`analysis-grid ${taskSelectMode ? 'tasks-widened' : ''}`}>
           <AnalysisVideosPanel
             onDeleteRecording={onDeleteRecording}
             onFilesDropped={onDropFiles}

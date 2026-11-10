@@ -28,9 +28,19 @@ const configuredApiBase = import.meta.env.VITE_API_BASE_URL;
 export const API_BASE =
   configuredApiBase === undefined ? 'http://127.0.0.1:8000' : configuredApiBase.trim() || window.location.origin;
 
+// The base as a folder (ending in `/`), so a backend served under a path such as `https://example.org/backend/`
+// keeps that path.
+const API_ROOT = API_BASE.endsWith('/') ? API_BASE : `${API_BASE}/`;
+
+/** A backend address for a path such as `/projects` or `/assets/projects/...`. The path is joined onto the base
+ *  rather than resolved against it: `new URL('/projects', base)` would drop any path the base has. */
+export function apiUrl(path: string): URL {
+  return new URL(path.replace(/^\/+/, ''), API_ROOT);
+}
+
 /** The same address for a WebSocket (`ws:` or `wss:`). */
 export function apiSocketUrl(path: string): string {
-  return new URL(path, API_BASE).toString().replace(/^http/, 'ws');
+  return apiUrl(path).toString().replace(/^http/, 'ws');
 }
 
 export class ApiError extends Error {
@@ -47,7 +57,7 @@ export const SIGNED_OUT_EVENT = 'stepthrough:signed-out';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // `include`: the session cookie also goes along when the development frontend runs on another port.
-  const response = await fetch(new URL(path, API_BASE), { credentials: 'include', ...init });
+  const response = await fetch(apiUrl(path), { credentials: 'include', ...init });
   if (response.status === 204) {
     return undefined as T;
   }
@@ -70,7 +80,7 @@ function jsonBody(method: string, payload: unknown): RequestInit {
 }
 
 export function absoluteApiUrl(path: string): string {
-  return new URL(path, API_BASE).toString();
+  return apiUrl(path).toString();
 }
 
 export function listProjects(): Promise<Project[]> {

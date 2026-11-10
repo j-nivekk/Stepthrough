@@ -392,17 +392,20 @@ function App({ session, onSessionChange }: AppProps) {
   const hasSelectedProject = Boolean(selectedProjectId);
   const activeViewportStage: WorkflowStage =
     workflowStage === 'projects' || !hasSelectedProject ? 'projects' : workflowStage;
-  const viewportMinimum = workflowViewportMinimums[activeViewportStage];
+  // The users page has the analysis page's columns, so it needs the same room.
+  const viewportMinimum = workflowViewportMinimums[showUsers ? 'analysis' : activeViewportStage];
   const isViewportTooSmall =
     viewportSize.width < viewportMinimum.width || viewportSize.height < viewportMinimum.height;
-  const viewportWarning = isViewportTooSmall ? (
-    <ViewportWarning
-      currentHeight={viewportSize.height}
-      currentWidth={viewportSize.width}
-      minimumHeight={viewportMinimum.height}
-      minimumWidth={viewportMinimum.width}
-    />
-  ) : null;
+  const viewportWarning =
+    isViewportTooSmall && appPrefs.warnSmallWindow ? (
+      <ViewportWarning
+        currentHeight={viewportSize.height}
+        currentWidth={viewportSize.width}
+        minimumHeight={viewportMinimum.height}
+        minimumWidth={viewportMinimum.width}
+        onDismiss={() => updateAppPref('warnSmallWindow', false)}
+      />
+    ) : null;
 
   const selectedRecording = recordingDetailQuery.data ?? null;
   const selectedRun = runDetailQuery.data ?? null;

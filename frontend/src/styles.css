@@ -1238,6 +1238,11 @@ a {
   font-size: 12px;
 }
 
+.viewport-warning-dismiss {
+  justify-self: center;
+  margin-top: 6px;
+}
+
 .editable-name {
   display: inline-flex;
   align-items: center;
@@ -1999,6 +2004,10 @@ a {
   min-height: 100vh;
   padding: 0;
   display: block;
+  /* .entry-screen centres its content with place-items. In a block container, browsers apply that centring
+     (justify-items) too, which shrank the analysis page to its content's width: narrower normally, full width
+     whenever wider content appeared (selecting tasks). The analysis page always uses the full width. */
+  justify-items: normal;
 }
 
 .analysis-stage-nav {
@@ -2046,12 +2055,25 @@ a {
   gap: 6px;
 }
 
+/* Three columns with the same gutters between them (each column's own padding). When one needs more room, it widens
+   and the others give way, sliding rather than jumping. */
 .analysis-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 0;
   margin-inline: -43px;
   align-items: start;
+  transition: grid-template-columns 240ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.analysis-grid.tasks-widened {
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 1.3fr);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-grid {
+    transition: none;
+  }
 }
 
 .analysis-column {

@@ -1,6 +1,6 @@
 [project]
 name = "stepthrough-backend"
-version = "1.0.0"
+version = "1.0.1"
 description = "Local-first backend for walkthrough screenshot extraction"
 readme = "README.md"
 requires-python = ">=3.11"
