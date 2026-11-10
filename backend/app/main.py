@@ -39,7 +39,8 @@ from .accounts import (
     require_admin,
 )
 from .analysis_metadata import serialize_analysis_metadata
-from .config import DATA_ROOT, build_server_config, build_tool_diagnostics, ensure_app_dirs
+from . import __version__
+from .config import DATA_ROOT, build_label, build_server_config, build_tool_diagnostics, ensure_app_dirs
 from .database import init_db, reset_db
 from .models import (
     AnalysisMetadataResponse,
@@ -147,7 +148,7 @@ class OcrHealthState:
 _api_docs = server_config.deployment != "server"
 app = FastAPI(
     title="Stepthrough API",
-    version="0.2.0",
+    version=__version__,
     docs_url="/docs" if _api_docs else None,
     redoc_url="/redoc" if _api_docs else None,
     openapi_url="/openapi.json" if _api_docs else None,
@@ -814,6 +815,8 @@ def health(request: Request, user: MaybeUser) -> HealthResponse:
     ocr_state = _get_ocr_state()
     detailed = auth_mode(request) == "none" or (user is not None and user.is_admin)
     return HealthResponse(
+        version=__version__,
+        build=build_label(),
         ffmpeg_available=diagnostics.ffmpeg_available,
         ffprobe_available=diagnostics.ffprobe_available,
         ocr_status=ocr_state.status,

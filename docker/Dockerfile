@@ -20,8 +20,14 @@ WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY frontend/ ./
+# The image's tag and commit (CI passes them; `edge` for builds of main, the version number for releases), so the app
+# can say which build it is. Kept after the npm install, so a new commit does not reinstall the packages.
+ARG VERSION=dev
+ARG REVISION=unknown
 # Empty means "the server this page came from", so one build works behind any domain.
-ENV VITE_API_BASE_URL=""
+ENV VITE_API_BASE_URL="" \
+    VITE_BUILD_VERSION=${VERSION} \
+    VITE_BUILD_REVISION=${REVISION}
 RUN npm run build
 
 # --- 2. Python packages, exactly as locked in uv.lock ----------------------------------------------------------
@@ -88,6 +94,9 @@ LABEL org.opencontainers.image.title="Stepthrough" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
+# Which build this is, for /health (the app's own version number is in the code).
+ENV STEPTHROUGH_BUILD=${VERSION} \
+    STEPTHROUGH_REVISION=${REVISION}
 USER stepthrough
 VOLUME ["/data"]
 EXPOSE 8000

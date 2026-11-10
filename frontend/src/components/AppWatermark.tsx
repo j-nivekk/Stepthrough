@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { APP_VERSION, BUILD_LABEL, VERSION_LABEL } from '../lib/buildInfo';
 import { HowItWorksDemo } from './howItWorks/HowItWorksDemo';
 
-const APP_IDENTITY = 'stepthrough, v 0.1.0';
+const APP_IDENTITY = `stepthrough, ${VERSION_LABEL}`;
 
 /** The panels that open from the bottom-right corner. Only one is open at a time. */
 export type CornerPanel = 'account' | 'settings' | 'about';
@@ -88,7 +89,10 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
           >
             how it works
           </button>
-          <p>version 0.1.0</p>
+          <p>
+            version {APP_VERSION}
+            {BUILD_LABEL ? ` (${BUILD_LABEL})` : ''}
+          </p>
         </div>
       ) : null}
       {showDemo ? <HowItWorksDemo onClose={() => setShowDemo(false)} /> : null}

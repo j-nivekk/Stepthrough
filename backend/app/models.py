@@ -44,6 +44,9 @@ RunEventLevel = Literal["info", "warning", "error", "success"]
 
 
 class HealthResponse(BaseModel):
+    # The app's version, and for builds of the main branch which one (`edge 80892ff`); None for releases.
+    version: str
+    build: str | None = None
     ffmpeg_available: bool
     ffprobe_available: bool
     ocr_status: OcrStatus

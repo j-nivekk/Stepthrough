@@ -45,7 +45,7 @@ Edit `.env`, then apply it with `docker compose up -d --wait`. Every setting is 
 
 | setting | default | meaning |
 |---|---|---|
-| `STEPTHROUGH_TAG` | `stable` | image version: `stable` (latest release), a release such as `0.2.0`, or `edge` (latest from `main`) |
+| `STEPTHROUGH_TAG` | `stable` | image version: `stable` (latest release), a release such as `1.0.0`, or `edge` (latest from `main`) |
 | `STEPTHROUGH_BIND_ADDRESS` | `127.0.0.1` | host address to listen on; keep `127.0.0.1` behind a web server |
 | `STEPTHROUGH_PORT` | `8080` | host port |
 | `STEPTHROUGH_MAX_CONCURRENT_RUNS` | `2` | analyses that run at once; `0` is no limit |
@@ -123,6 +123,9 @@ docker compose pull && docker compose up -d --wait
 Data lives in the volume and survives upgrades. Database changes are applied automatically at start-up. A restart
 ends analyses that are still running; they show as interrupted and can be started again, so upgrade when nobody is
 using it. To stay on a known version, set `STEPTHROUGH_TAG` to a release number instead of `stable`.
+
+To see which version a server runs, look at the bottom right of the app: a release shows `v 1.0.0`, a build of
+`main` adds `edge` and its commit (`v 1.0.0 · edge 80892ff`). `/health` reports the same as `version` and `build`.
 
 ## Back up and restore
 

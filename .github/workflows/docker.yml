@@ -2,7 +2,7 @@
 # GitHub Container Registry (ghcr.io/j-nivekk/stepthrough).
 #
 #   push to `main`               -> :edge and :sha-<commit>   (plus -ocr variants)
-#   push a tag such as v0.2.0    -> :0.2.0, :0.2 and :stable  (plus -ocr variants)
+#   push a tag such as v1.0.0    -> :1.0.0, :1.0 and :stable  (plus -ocr variants)
 #   pull requests                -> test only, nothing published
 #
 # Publishing uses the workflow's own GITHUB_TOKEN, so no personal registry credentials are stored in the repository.

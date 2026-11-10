@@ -107,6 +107,19 @@ def _auth_mode(deployment: str) -> AuthMode:
     return raw  # type: ignore[return-value]
 
 
+def build_label() -> str | None:
+    """Which build this is, when it is not a release: `edge 80892ff` for an image built from the main branch.
+
+    The Docker build passes the image's tag and commit in (STEPTHROUGH_BUILD, STEPTHROUGH_REVISION). Release images
+    carry their version number (`1.0.0`, `1.0.0-ocr`), and builds from source carry nothing; neither needs a label.
+    """
+    build = (os.environ.get("STEPTHROUGH_BUILD") or "").strip()
+    revision = (os.environ.get("STEPTHROUGH_REVISION") or "").strip()[:7]
+    if not build or build == "dev" or build[0].isdigit():
+        return None
+    return f"{build} {revision}".strip() if revision and revision != "unknown" else build
+
+
 def public_url() -> str | None:
     """The address people open, for links printed by `python -m app.users` (the web pages know their own)."""
     raw = (os.environ.get("STEPTHROUGH_PUBLIC_URL") or "").strip().rstrip("/")
