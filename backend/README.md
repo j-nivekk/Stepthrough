@@ -97,7 +97,7 @@ breakdown, revisit links and the timing columns `transition_type`, `change_start
 | `STEPTHROUGH_MAX_CONCURRENT_RUNS` | no limit in `local`, `2` in `server` | analyses that may run at once; later runs wait as `queued`, first come first served, and can be ended while they wait. `0` lifts the limit |
 | `STEPTHROUGH_FRONTEND_DIR` | unset | a built frontend (`frontend/dist`) to serve from the API's own origin, as the Docker image does; it must contain `index.html` |
 | `STEPTHROUGH_AUTH` | `none` in `local`, `password` in `server` | `none`: no logins, every request comes from the built-in user; `password`: people log in (see [Accounts](#accounts)) |
-| `STEPTHROUGH_PUBLIC_URL` | unset | the address people open, such as `https://stepthrough.example.org`, so `python -m app.users` prints whole links |
+| `STEPTHROUGH_PUBLIC_URL` | unset | the address people open, such as `https://stepthrough.example.org`, so `python -m app.users` prints whole links; an `https` address also keeps the session cookie to HTTPS, even when the web server in front does not say the browser used HTTPS |
 
 Project media (recordings, screenshots, exports) is served under `/assets/projects/` only to people who may
 open that project; the database, OCR models and other files in the data root are not reachable over HTTP.
@@ -140,8 +140,9 @@ With `STEPTHROUGH_AUTH=password` people log in with a name and a password:
   the list (or from `python -m app.users add --password`) is kept as given, even one the rules above would
   refuse, since it usually comes from another system where people already use it; the import names those people.
 - **Sessions** last 30 days, or end after 7 days unused, in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` over
-  HTTPS). Setting a new password logs out the account's other browsers, and switching an account off logs it out
-  at once. Only the SHA-256 of session and link tokens is stored.
+  HTTPS, or whenever `STEPTHROUGH_PUBLIC_URL` is an `https` address). Setting a new password logs out the
+  account's other browsers, and switching an account off logs it out at once. Only the SHA-256 of session and
+  link tokens is stored.
 - **Guessing.** Wrong logins get one answer, in the same time, whether or not the name exists. Within 15 minutes,
   further attempts are refused after 10 wrong passwords for a name from one address, 100 for a name from anywhere,
   or 100 from one address (generous, since a class may share one address). Wrong current passwords when changing

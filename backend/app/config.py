@@ -121,7 +121,8 @@ def build_label() -> str | None:
 
 
 def public_url() -> str | None:
-    """The address people open, for links printed by `python -m app.users` (the web pages know their own)."""
+    """The address people open: links printed by `python -m app.users` start with it (the web pages know their
+    own), and an https address keeps the session cookie to HTTPS."""
     raw = (os.environ.get("STEPTHROUGH_PUBLIC_URL") or "").strip().rstrip("/")
     return raw or None
 

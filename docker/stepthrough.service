@@ -1,0 +1,37 @@
+# Stepthrough from a checkout, without Docker, as a systemd user service of the account that owns the checkout:
+# it starts at boot, restarts after a crash and logs to the journal. See "Without Docker" in DEPLOY.md.
+#
+#   sudo loginctl enable-linger stepthrough       # once, as root: start this account's services at boot
+#   mkdir -p ~/.config/systemd/user && cp docker/stepthrough.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now stepthrough
+#
+# %h is that account's home folder; the paths assume the checkout is ~/Stepthrough. Other settings from DEPLOY.md
+# and backend/README.md go in as more Environment= lines. After changing this file: systemctl --user daemon-reload,
+# then systemctl --user restart stepthrough.
+
+[Unit]
+Description=Stepthrough
+Documentation=https://github.com/j-nivekk/Stepthrough/blob/main/DEPLOY.md
+
+[Service]
+WorkingDirectory=%h/Stepthrough/backend
+Environment=STEPTHROUGH_DEPLOYMENT=server
+Environment=STEPTHROUGH_FRONTEND_DIR=%h/Stepthrough/frontend/dist
+# The address people open. Links printed by `python -m app.users` start with it, and an https address keeps the
+# login cookie to HTTPS.
+Environment=STEPTHROUGH_PUBLIC_URL=https://stepthrough.example.org
+
+# One worker: live progress, the run queue and the login limits are kept in this one process.
+# With the web server on this machine, keep both addresses at 127.0.0.1. With the web server on another machine,
+# set --host to the address it connects to and --forwarded-allow-ips to the web server's own address, so its
+# headers are believed; then let only the web server reach the port.
+ExecStart=%h/Stepthrough/backend/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8080 --workers 1 \
+    --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header
+Restart=on-failure
+RestartSec=5
+# A restart ends running analyses anyway; do not wait long for open connections.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target

@@ -115,7 +115,7 @@ and how to upgrade. The Docker images are at `ghcr.io/j-nivekk/stepthrough`:
 | tag | what it is |
 |---|---|
 | `stable` (`stable-ocr` with text recognition) | the latest release |
-| `1.0.1`, `1.0` (and `-ocr`) | a release, or the latest of a series, to stay on a known version |
+| `1.0.2`, `1.0` (and `-ocr`) | a release, or the latest of a series, to stay on a known version |
 | `edge` (`edge-ocr`) | the latest build of `main`; the app shows its commit at the bottom right |
 
 The [Docker image workflow](.github/workflows/docker.yml) builds the image, runs the backend tests and an end-to-end
@@ -123,7 +123,7 @@ smoke test in it, and only then publishes. It runs for:
 
 - a push to `main` that changes the app, its tests or the image (it publishes `edge`). Changes to documentation and
   other files outside the image skip it, and so does any commit with `[skip ci]` in its message;
-- a version tag such as `v1.0.1` (it publishes the release images and moves `stable`);
+- a version tag such as `v1.0.2` (it publishes the release images and moves `stable`);
 - pull requests that change the app (tests only).
 
 **To release:** set the new version in `backend/app/__init__.py`, `backend/pyproject.toml` and

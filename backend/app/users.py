@@ -50,6 +50,11 @@ def _say(text: str) -> None:
     print(text, file=sys.stderr)
 
 
+def _count(number: int, one: str, many: str | None = None) -> str:
+    """A number with its word: `1 project`, `2 projects`."""
+    return f"{number} {one if number == 1 else many or one + 's'}"
+
+
 def _link_text(link: UserLink) -> str:
     return link_url(link.token, public_url())
 
@@ -104,15 +109,16 @@ def cmd_import(args: argparse.Namespace) -> None:
     writer.writerow(["name", "link"])
     for row, link in result.created:
         writer.writerow([row["name"], _link_text(link) if link else ""])
-    _say(f"Made {len(result.created)} accounts.")
+    _say(f"Made {_count(len(result.created), 'account')}.")
     if result.existing:
-        _say(f"Left {len(result.existing)} existing accounts as they were: {', '.join(result.existing)}.")
+        _say(f"Left {_count(len(result.existing), 'existing account')} unchanged: {', '.join(result.existing)}.")
     for number, name, message in result.errors:
         _say(f"Row {number}" + (f" ({name})" if name else "") + f" skipped: {message}")
     if result.weak_passwords:
+        people = _count(len(result.weak_passwords), "person", "people")
         _say(
-            f"Kept the passwords from the list for {len(result.weak_passwords)} people although they would be refused "
-            f"as new ones (common, short or containing the name): {', '.join(result.weak_passwords)}."
+            f"Kept the passwords from the list for {people} although they would be refused as new ones "
+            f"(common, short or containing the name): {', '.join(result.weak_passwords)}."
         )
 
 
@@ -129,12 +135,12 @@ def cmd_list(args: argparse.Namespace) -> None:
         details = [
             ", ".join(user.tags) or "no tags",
             state,
-            f"{row['project_count']} projects",
+            _count(row["project_count"], "project"),
             f"deleted on {user.delete_after}" if user.delete_after else "",
             f"last seen {row['last_seen_at'][:10]}" if row.get("last_seen_at") else "never logged in",
         ]
         _out(f"{user.name:<24} " + " · ".join(part for part in details if part))
-    _say(f"{len(rows)} accounts.")
+    _say(f"{_count(len(rows), 'account')}.")
 
 
 def cmd_link(args: argparse.Namespace) -> None:
@@ -159,13 +165,13 @@ def cmd_delete(args: argparse.Namespace) -> None:
     row = _user(args.name)
     projects = [project["name"] for project in projects_owned_only_by(row["id"])]
     if not args.yes:
-        listed = f" and {len(projects)} projects only it owns ({', '.join(projects)})" if projects else ""
+        listed = f" and {_count(len(projects), 'project')} only it owns ({', '.join(projects)})" if projects else ""
         answer = input(f"Delete the account {row['name']}{listed}? This cannot be undone. Type the name to confirm: ")
         if answer.strip().lower() != row["name"].lower():
             _say("Nothing deleted.")
             return
     deleted = delete_account(row["id"])
-    _out(f"Deleted {row['name']}" + (f" and {len(deleted)} projects." if deleted else "."))
+    _out(f"Deleted {row['name']}" + (f" and {_count(len(deleted), 'project')}." if deleted else "."))
 
 
 def cmd_transfer(args: argparse.Namespace) -> None:
@@ -176,12 +182,12 @@ def cmd_transfer(args: argparse.Namespace) -> None:
     if target["id"] == source["id"]:
         raise AccountError("Choose two different accounts.")
     moved = transfer_projects(source["id"], target["id"])
-    _out(f"Handed {moved} projects from {source['name']} to {target['name']}.")
+    _out(f"Handed {_count(moved, 'project')} from {source['name']} to {target['name']}.")
 
 
 def cmd_expire(_args: argparse.Namespace) -> None:
     deleted = delete_expired_accounts()
-    _out(f"Deleted {len(deleted)} accounts" + (f": {', '.join(deleted)}." if deleted else "."))
+    _out(f"Deleted {_count(len(deleted), 'account')}" + (f": {', '.join(deleted)}." if deleted else "."))
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -124,6 +124,33 @@ def test_logging_out_ends_the_session(passwords: TestClient) -> None:
     assert stolen.get('/projects').status_code == 401
 
 
+def cookie_flags(response) -> set[str]:
+    """The attributes of the cookie a response sets, in lower case and without their values."""
+    return {part.split('=')[0].strip().lower() for part in response.headers['set-cookie'].split(';')[1:]}
+
+
+def test_the_session_cookie_stays_on_https_when_the_server_can_tell(
+    passwords: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_admin()
+    login = {'name': 'ada', 'password': ADMIN_PASSWORD}
+    monkeypatch.delenv('STEPTHROUGH_PUBLIC_URL', raising=False)
+    assert 'secure' not in cookie_flags(passwords.post('/auth/login', json=login))  # plain http, as on a laptop
+
+    # The request says it came over https (behind a web server uvicorn trusts, its headers say so).
+    over_https = TestClient(main.app, base_url='https://testserver')
+    assert 'secure' in cookie_flags(over_https.post('/auth/login', json=login))
+    assert over_https.get('/me').status_code == 200
+    assert 'secure' in cookie_flags(over_https.post('/auth/logout'))
+
+    # Behind a web server that does not pass the scheme on, an https public address is enough.
+    monkeypatch.setenv('STEPTHROUGH_PUBLIC_URL', 'HTTPS://stepthrough.example.org/')
+    assert 'secure' in cookie_flags(browser().post('/auth/login', json=login))
+    assert 'secure' in cookie_flags(browser().post('/auth/logout'))
+    monkeypatch.setenv('STEPTHROUGH_PUBLIC_URL', 'http://stepthrough.intranet')
+    assert 'secure' not in cookie_flags(browser().post('/auth/login', json=login))
+
+
 def test_changing_your_password_keeps_you_in_and_logs_out_elsewhere(passwords: TestClient) -> None:
     make_admin()
     log_in(passwords, 'ada', ADMIN_PASSWORD)
@@ -528,3 +555,21 @@ def test_compose_leaves_servers_on_logins_unless_told(
     else:
         monkeypatch.setenv('STEPTHROUGH_AUTH', setting)
     assert build_server_config().auth == expected
+
+
+def test_the_command_line_counts_in_words(passwords: TestClient, capsys: pytest.CaptureFixture[str]) -> None:
+    from app.users import main as users_main
+
+    make_admin()
+    log_in(passwords, 'ada', ADMIN_PASSWORD)
+    assert passwords.post('/projects', json={'name': 'Walkthroughs'}).is_success
+    invite('bo', 'seminar-a')
+    capsys.readouterr()
+
+    assert users_main(['list']) == 0
+    listed = capsys.readouterr().out
+    assert '· 1 project ·' in listed and '1 projects' not in listed
+    assert users_main(['list', '--tag', 'seminar-a']) == 0
+    assert capsys.readouterr().err.strip() == '1 account.'
+    assert users_main(['transfer', 'ada', 'bo']) == 0
+    assert capsys.readouterr().out.strip() == 'Handed 1 project from ada to bo.'

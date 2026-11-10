@@ -32,7 +32,7 @@ from urllib.parse import urlsplit
 from fastapi import Depends, HTTPException
 from starlette.requests import HTTPConnection
 
-from .config import AuthMode
+from .config import AuthMode, public_url
 from .database import ADMIN_TAG, LOCAL_USER_ID
 from .repository import (
     create_session,
@@ -223,14 +223,22 @@ def set_session_cookie(response: Any, conn: HTTPConnection, token: str) -> None:
         max_age=int(SESSION_LIFETIME.total_seconds()),
         httponly=True,
         samesite="lax",
-        # Behind the web server, uvicorn's --proxy-headers makes the scheme the one the browser used.
-        secure=conn.url.scheme == "https",
+        secure=cookie_https_only(conn),
         path="/",
     )
 
 
 def clear_session_cookie(response: Any, conn: HTTPConnection) -> None:
-    response.delete_cookie(SESSION_COOKIE, httponly=True, samesite="lax", secure=conn.url.scheme == "https", path="/")
+    response.delete_cookie(SESSION_COOKIE, httponly=True, samesite="lax", secure=cookie_https_only(conn), path="/")
+
+
+def cookie_https_only(conn: HTTPConnection) -> bool:
+    """Whether browsers may send the session cookie over HTTPS only. Yes when the request came over HTTPS, which
+    behind a web server uvicorn can tell only if it trusts that server's headers (--forwarded-allow-ips), and yes
+    when STEPTHROUGH_PUBLIC_URL is an https address, which needs nothing from the web server. Browsers then keep
+    no login on a plain-http address other than localhost, such as the port opened directly."""
+    address = public_url()
+    return conn.url.scheme == "https" or (address is not None and address.lower().startswith("https://"))
 
 
 # ── who is asking (FastAPI dependencies) ─────────────────────────────────────────────────────────────────────
