@@ -5,6 +5,10 @@
 #   push a tag such as v1.0.0    -> :1.0.0, :1.0 and :stable  (plus -ocr variants)
 #   pull requests                -> test only, nothing published
 #
+# Pushes and pull requests run only when they change something the image or its tests are built from (the `paths`
+# lists below): documentation, the nginx example and the evaluation write-ups do not. Release tags always run, as
+# GitHub does not apply path filters to tags. For other small changes, put [skip ci] in the commit message.
+#
 # Publishing uses the workflow's own GITHUB_TOKEN, so no personal registry credentials are stored in the repository.
 
 name: Docker image
@@ -13,11 +17,30 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths:
+      - "backend/app/**"
+      - "backend/tests/**"
+      - "!backend/tests/**/*.md"
+      - "backend/pyproject.toml"
+      - "backend/uv.lock"
+      - "frontend/**"
+      - "!frontend/**/*.md"
+      - "docker/Dockerfile"
+      - "docker/smoke_test.py"
+      - "compose.yaml"
+      - ".dockerignore"
+      - ".github/workflows/docker.yml"
   pull_request:
     paths:
-      - "backend/**"
+      - "backend/app/**"
+      - "backend/tests/**"
+      - "!backend/tests/**/*.md"
+      - "backend/pyproject.toml"
+      - "backend/uv.lock"
       - "frontend/**"
-      - "docker/**"
+      - "!frontend/**/*.md"
+      - "docker/Dockerfile"
+      - "docker/smoke_test.py"
       - "compose.yaml"
       - ".dockerignore"
       - ".github/workflows/docker.yml"

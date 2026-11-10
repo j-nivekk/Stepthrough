@@ -2,6 +2,8 @@
 
 **Stepthrough** is a local-first research tool designed to automatically turn video screen recordings into clean, chronological walkthrough screenshots. It is built to help researchers, designers, and developers quickly extract key navigational steps from app runs or usability tests.
 
+[![Latest release](https://img.shields.io/github/v/release/j-nivekk/Stepthrough)](https://github.com/j-nivekk/Stepthrough/releases/latest)
+[![Docker image build](https://github.com/j-nivekk/Stepthrough/actions/workflows/docker.yml/badge.svg?branch=main)](https://github.com/j-nivekk/Stepthrough/actions/workflows/docker.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20OpenCV-3776AB.svg)
 ![React Frontend](https://img.shields.io/badge/frontend-React%20%2B%20Vite-61DAFB.svg)
@@ -41,10 +43,12 @@ With [Docker Desktop](https://www.docker.com/products/docker-desktop/) running, 
 mkdir Stepthrough
 cd Stepthrough
 curl -fsSLO https://raw.githubusercontent.com/j-nivekk/Stepthrough/main/compose.yaml
+echo STEPTHROUGH_AUTH=none>>.env
 docker compose up -d
 ```
 
-Then open `http://localhost:8080`. [`GUIDE.md`](GUIDE.md#3-installing-and-starting-stepthrough) explains every step,
+Then open `http://localhost:8080`. The `.env` line tells Stepthrough it runs for you alone, so it opens without a
+login. [`GUIDE.md`](GUIDE.md#3-installing-and-starting-stepthrough) explains every step,
 including updates, text recognition and what to do if something goes wrong. To run Stepthrough from the source code
 instead, read on.
 
@@ -100,6 +104,31 @@ By default, the backend runs at `http://127.0.0.1:8000` and the frontend at `htt
 
 A Docker image runs Stepthrough for a group, behind a web server such as nginx. [`DEPLOY.md`](DEPLOY.md)
 covers installing, configuring, upgrading and backing it up.
+
+---
+
+## 🏷 Releases and builds
+
+Each release is listed on the [releases page](https://github.com/j-nivekk/Stepthrough/releases), with what changed
+and how to upgrade. The Docker images are at `ghcr.io/j-nivekk/stepthrough`:
+
+| tag | what it is |
+|---|---|
+| `stable` (`stable-ocr` with text recognition) | the latest release |
+| `1.0.1`, `1.0` (and `-ocr`) | a release, or the latest of a series, to stay on a known version |
+| `edge` (`edge-ocr`) | the latest build of `main`; the app shows its commit at the bottom right |
+
+The [Docker image workflow](.github/workflows/docker.yml) builds the image, runs the backend tests and an end-to-end
+smoke test in it, and only then publishes. It runs for:
+
+- a push to `main` that changes the app, its tests or the image (it publishes `edge`). Changes to documentation and
+  other files outside the image skip it, and so does any commit with `[skip ci]` in its message;
+- a version tag such as `v1.0.1` (it publishes the release images and moves `stable`);
+- pull requests that change the app (tests only).
+
+**To release:** set the new version in `backend/app/__init__.py`, `backend/pyproject.toml` and
+`frontend/package.json` (a test checks they match), commit, push a tag such as `v1.0.2`, and write the release notes
+on GitHub.
 
 ---
 
