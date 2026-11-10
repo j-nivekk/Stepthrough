@@ -2,6 +2,7 @@
   "name": "stepthrough-frontend",
   "private": true,
   "version": "1.0.1",
+  "author": "H. \"Kevin\" Jin <h.jin@terminallyonline.nl>",
   "type": "module",
   "scripts": {
     "dev": "vite",

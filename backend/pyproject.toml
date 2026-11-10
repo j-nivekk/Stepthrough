@@ -2,6 +2,7 @@
 name = "stepthrough-backend"
 version = "1.0.1"
 description = "Local-first backend for walkthrough screenshot extraction"
+authors = [{ name = 'H. "Kevin" Jin', email = "h.jin@terminallyonline.nl" }]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
