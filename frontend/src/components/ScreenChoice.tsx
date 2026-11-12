@@ -56,6 +56,7 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, anyStep = fal
   // Where the list opens, in the window: it is not part of the card, which would cut it off.
   const [place, setPlace] = useState<CSSProperties>({});
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -63,19 +64,22 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, anyStep = fal
       if (shellRef.current && !shellRef.current.contains(event.target as Node)) setOpen(false);
     }
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     }
     // The list stays where it opened, so it closes when the page under it moves (not when the list itself scrolls).
     function closeOnScroll(event: Event) {
       if (!(event.target instanceof Node) || !shellRef.current?.contains(event.target)) setOpen(false);
     }
     const close = () => setOpen(false);
-    document.addEventListener('pointerdown', closeOutside);
+    document.addEventListener('pointerdown', closeOutside, true);
     document.addEventListener('keydown', closeOnEscape);
     window.addEventListener('scroll', closeOnScroll, true);
     window.addEventListener('resize', close);
     return () => {
-      document.removeEventListener('pointerdown', closeOutside);
+      document.removeEventListener('pointerdown', closeOutside, true);
       document.removeEventListener('keydown', closeOnEscape);
       window.removeEventListener('scroll', closeOnScroll, true);
       window.removeEventListener('resize', close);
@@ -112,6 +116,7 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, anyStep = fal
   function choose(screenLink: string) {
     onUpdate({ screen_link: screenLink });
     setOpen(false);
+    triggerRef.current?.focus();
   }
 
   return (
@@ -121,6 +126,7 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, anyStep = fal
         aria-haspopup="dialog"
         className={`inline-link-button screen-choice-trigger ${link || candidate.screen_kind ? 'chosen' : ''}`}
         onClick={toggle}
+        ref={triggerRef}
         title="which screen this step shows in the pathway"
         type="button"
       >

@@ -53,6 +53,7 @@ from .models import (
     HealthResponse,
     ManualCandidateCreate,
     PathwayDetail,
+    PathwayMerge,
     PathwayResponse,
     ProjectCreate,
     ProjectResponse,
@@ -95,6 +96,7 @@ from .repository import (
     recording_has_active_runs,
     replace_candidates,
     save_run_settings,
+    set_candidate_screen_links,
     update_candidate,
     update_project_name,
     update_recording_filename,
@@ -103,7 +105,7 @@ from .repository import (
 )
 from .services.export import build_accepted_steps, create_export_bundle
 from .services.ocr import probe_paddleocr_availability
-from .services.pathway import build_pathway
+from .services.pathway import build_pathway, pathway_screen_members
 from .services.run_control import CancellationRequested
 from .services.stable_detection import detect_candidates_stable, resolve_stable_config
 from .services.ingest import ensure_working_copy, working_copy_path
@@ -473,10 +475,11 @@ def _set_run_state(
         updates["progress"] = progress
     if message is not None:
         updates["message"] = message
-    run = update_run(run_id, **updates)
     if emit_event and message is not None and phase is not None:
-        _emit_run_event(run_id, phase=phase, level=level, message=message, progress=progress)
-    return run
+        event = create_run_event(run_id, phase=phase, level=level, message=message, progress=progress, run_updates=updates)
+        _job_manager().publish(run_id, event)
+        return get_run(run_id)
+    return update_run(run_id, **updates)
 
 
 def _recording_context(recording_id: str) -> tuple[dict, dict]:
@@ -1075,6 +1078,19 @@ def runs_pathway(run_id: str, user: CurrentUser, detail: PathwayDetail = "screen
     for step in pathway["steps"]:
         step["image_url"] = asset_url(step["image_path"])
     return PathwayResponse(**pathway)
+
+
+@app.post("/runs/{run_id}/pathway/merge", status_code=204)
+def runs_pathway_merge(run_id: str, payload: PathwayMerge, user: CurrentUser) -> Response:
+    _run_for(run_id, user, "owner")
+    candidates = list_candidates(run_id)
+    ids = {candidate["id"] for candidate in candidates}
+    if payload.source_candidate_id not in ids or payload.target_candidate_id not in ids:
+        raise HTTPException(status_code=422, detail="Choose two screens of the same run.")
+    members = pathway_screen_members(candidates, payload.source_candidate_id, payload.detail)
+    if payload.target_candidate_id not in members:
+        set_candidate_screen_links(run_id, members, payload.target_candidate_id)
+    return Response(status_code=204)
 
 
 @app.post("/runs/{run_id}/cancel", response_model=DetectionRunSummary)

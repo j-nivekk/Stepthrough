@@ -364,6 +364,43 @@ def test_delete_project_removes_it_and_its_recordings(client: TestClient, video_
     assert missing_recording_response.status_code == 404
 
 
+def test_terminal_status_is_published_with_its_final_event(client: TestClient, video_factory, monkeypatch) -> None:
+    from contextlib import contextmanager
+    import app.main as main
+    import app.repository as repository
+
+    project = _create_project(client)
+    recording = _import_video(client, project['id'], video_factory('completion.mp4', ['red']))
+    run = client.post(f"/recordings/{recording['id']}/runs/manual").json()
+    repository.update_run(run['id'], status='running')
+    connect = repository.connect
+    observed = []
+
+    class ObserveFinalEvent:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def execute(self, sql, *args):
+            if 'INSERT INTO run_events' in sql:
+                # A separate request must still see the run as active until its final log is stored. If it
+                # sees "completed" first, it may delete the run under the worker's pending log insert.
+                with connect() as reader:
+                    observed.append(reader.execute('SELECT status FROM detection_runs WHERE id = ?', (run['id'],)).fetchone()[0])
+            return self.connection.execute(sql, *args)
+
+    @contextmanager
+    def observing_connection():
+        with connect() as connection:
+            yield ObserveFinalEvent(connection)
+
+    monkeypatch.setattr(repository, 'connect', observing_connection)
+    main._set_run_state(run['id'], status='completed', phase='completed', message='Finished', progress=1.0)
+    assert observed == ['running']
+    detail = client.get(f"/runs/{run['id']}").json()
+    assert detail['summary']['status'] == 'completed'
+    assert detail['events'][-1]['message'] == 'Finished'
+
+
 def test_project_delete_blocks_while_any_run_is_active(client: TestClient, video_factory, wait_for_run, monkeypatch) -> None:
     import app.main as main
     from app.services.run_control import CancellationRequested

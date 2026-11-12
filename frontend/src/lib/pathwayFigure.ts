@@ -80,7 +80,8 @@ export const measureText: TextMeasurer = (text, size, bold) => {
 };
 
 const esc = (value: string): string =>
-  value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const n1 = (value: number): number => Math.round(value * 10) / 10;
 
 /** `0:04`, or `1:02:03` from an hour on. */
@@ -456,11 +457,15 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   const leftMargin = MARGIN + (sideTracks.left.length ? 12 + sideTracks.left.length * TRACK : 0);
   const rightMargin = MARGIN + (sideTracks.right.length ? 12 + sideTracks.right.length * TRACK : 0);
   const figureWidth = Math.max(520, leftMargin + cols * width + (cols - 1) * GAP_X + STACK + rightMargin);
+  const titleLines = wrapText(input.title, figureWidth - 2 * MARGIN, 17, true, measure);
+  const subtitleLines = wrapText(input.subtitle, figureWidth - 2 * MARGIN, 10.5, false, measure);
+  const subtitleY = 46 + Math.max(0, titleLines.length - 1) * 22 + 18;
+  const headerBottom = subtitleY + Math.max(0, subtitleLines.length - 1) * 14;
   const inRow = (row: number): Card[] => [...placed.values()].filter((item) => item.row === row).map((item) => cards.get(item.screen.id)).filter((card): card is Card => Boolean(card));
 
   const rowTop: number[] = [];
   const busBase: number[] = [];
-  let y = options.caption ? 92 : MARGIN;
+  let y = options.caption ? headerBottom + 28 : MARGIN;
   for (let row = 0; row < rows; row += 1) {
     const tracks = busTracks[row]?.length ?? 0;
     if (tracks) y += 10 + tracks * TRACK;
@@ -554,7 +559,10 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   // ── markup ──
   let body = '';
   if (options.caption) {
-    body += `<g id="header">${text(MARGIN, 46, input.title, { size: 17, bold: true })}${text(MARGIN, 64, input.subtitle, { size: 10.5, fill: SUB })}</g>`;
+    body += '<g id="header">';
+    titleLines.forEach((line, index) => { body += text(MARGIN, 46 + index * 22, line, { size: 17, bold: true }); });
+    subtitleLines.forEach((line, index) => { body += text(MARGIN, subtitleY + index * 14, line, { size: 10.5, fill: SUB }); });
+    body += '</g>';
   }
   body += '<g id="moves">';
   for (const route of routes) {
@@ -606,7 +614,11 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           key += text(x, keyY, time, { size: 10.5, fill: SUB });
           x += measure(time, 10.5) + 6;
         }
-        key += text(x, keyY, titles.get(step.screen_id) ?? '', { size: 10.5, bold: true });
+        const titleLines = wrapText(titles.get(step.screen_id) ?? '', keyWidth - (x - MARGIN), 10.5, true, measure);
+        titleLines.forEach((line, index) => {
+          if (index) keyY += 13.5;
+          key += text(x, keyY, line, { size: 10.5, bold: true });
+        });
         for (const line of wrapText((step.notes ?? '').trim(), keyWidth, 10.5, false, measure)) {
           keyY += 13.5;
           key += text(MARGIN, keyY, line, { size: 10.5, fill: NOTE });
@@ -641,17 +653,24 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
     let legend = '';
     let x = MARGIN;
     let cy = leftBottom + (leftBottom > chartBottom ? 28 : 38);
+    let rowBottom = cy + 8;
     for (const [draw, iconWidth, label] of items) {
-      const itemWidth = iconWidth + 6 + measure(label, 10);
+      const labelWidth = leftEnd - MARGIN - iconWidth - 6;
+      const lines = wrapText(label, labelWidth, 10, false, measure);
+      const itemWidth = iconWidth + 6 + Math.max(...lines.map((line) => measure(line, 10)));
       if (x > MARGIN && x + itemWidth > leftEnd) {
         x = MARGIN;
-        cy += 22;
+        cy = rowBottom + 14;
       }
-      legend += draw(x, cy) + text(x + iconWidth + 6, cy + 3.5, label, { size: 10, fill: '#444' });
+      legend += draw(x, cy);
+      lines.forEach((line, index) => {
+        legend += text(x + iconWidth + 6, cy + 3.5 + index * 13.5, line, { size: 10, fill: '#444' });
+      });
+      rowBottom = Math.max(rowBottom, cy + 8 + (lines.length - 1) * 13.5);
       x += itemWidth + 20;
     }
     body += `<g id="legend">${legend}</g>`;
-    leftBottom = cy + 8;
+    leftBottom = rowBottom;
   }
 
   // Made as a group of its own, like the title and the legend, so it is easy to move in a drawing program.

@@ -37,7 +37,19 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
                 warnings=(),
             )
         )
-        yield test_client
+        try:
+            yield test_client
+        finally:
+            # A few tests only check queuing/counts. Their workers must finish before the next test swaps
+            # the database path and job manager; otherwise they can write into the next test's database.
+            manager = main._job_manager()
+            with manager._lock:
+                workers = list(manager._threads.items())
+            for run_id, _worker in workers:
+                manager.request_cancel(run_id)
+            for _run_id, worker in workers:
+                worker.join(timeout=15)
+                assert not worker.is_alive(), 'analysis worker outlived its test'
 
 
 @pytest.fixture()

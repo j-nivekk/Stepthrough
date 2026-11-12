@@ -30,7 +30,7 @@ FIELD_NOTES = {
                         "away) or the label of the change that stayed on the screen (scroll, text_entry, ...); "
                         "null for the step that starts a screen",
     "steps.screen_choice": "what the reviewer chose for the step: automatic (nothing), new_screen (a screen of its "
-                           "own) or same_screen (the screen of an earlier step they picked)",
+                           "own) or same_screen (the screen of another step they picked)",
     "steps.kind_choice": "automatic, or what the reviewer set: screen or popup",
     "screens": "one box of the pathway, in order of first visit",
     "screens.kind": "popup when the reviewer marked its first step as one or, without their say, when that step "
@@ -152,6 +152,13 @@ def _group_candidates(candidates: list[dict[str, Any]], detail: PathwayDetail) -
             open_popups.clear()  # a new screen: whatever was open went with the old one
         previous_detected = candidate
     return {candidate_id: find(candidate_id) for candidate_id in parent}, reasons
+
+
+def pathway_screen_members(candidates: list[dict[str, Any]], candidate_id: str, detail: PathwayDetail) -> list[str]:
+    """All members of a box, including rejected steps that could be accepted again later."""
+    groups, _reasons = _group_candidates(candidates, detail)
+    group = groups[candidate_id]
+    return [member for member, member_group in groups.items() if member_group == group]
 
 
 def build_pathway(rows: list[dict[str, Any]], candidates: list[dict[str, Any]], detail: PathwayDetail = "screens") -> dict[str, Any]:

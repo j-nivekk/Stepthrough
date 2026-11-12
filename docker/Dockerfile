@@ -28,7 +28,7 @@ ARG REVISION=unknown
 ENV VITE_API_BASE_URL="" \
     VITE_BUILD_VERSION=${VERSION} \
     VITE_BUILD_REVISION=${REVISION}
-RUN npm run build
+RUN npm test && npm run build
 
 # --- 2. Python packages, exactly as locked in uv.lock ----------------------------------------------------------
 FROM ${PYTHON_IMAGE} AS python-deps

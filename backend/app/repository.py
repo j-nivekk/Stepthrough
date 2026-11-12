@@ -729,6 +729,15 @@ def update_candidate(candidate_id: str, **fields: Any) -> dict[str, Any] | None:
     return get_candidate(candidate_id)
 
 
+def set_candidate_screen_links(run_id: str, candidate_ids: Sequence[str], target_id: str) -> None:
+    """Move an entire pathway box together; a failed write must not leave a partial merge."""
+    with connect() as conn:
+        conn.executemany(
+            "UPDATE candidate_frames SET screen_link = ?, updated_at = ? WHERE run_id = ? AND id = ?",
+            [(target_id, utc_now(), run_id, candidate_id) for candidate_id in candidate_ids],
+        )
+
+
 def create_export_bundle(run_id: str, output_dir: str, zip_path: str, item_count: int) -> dict[str, Any]:
     bundle_id = uuid4().hex
     payload = {
@@ -781,7 +790,12 @@ def get_export_bundle_for_run(run_id: str) -> dict[str, Any] | None:
     return _row_to_dict(row)
 
 
-def create_run_event(run_id: str, phase: str, level: str, message: str, progress: float | None) -> dict[str, Any]:
+def create_run_event(
+    run_id: str, phase: str, level: str, message: str, progress: float | None,
+    *, run_updates: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Store an event, optionally with its run state in the same transaction. A terminal state must not
+    allow another request to delete the run before the worker has saved its last event."""
     event_id = uuid4().hex
     payload = {
         "id": event_id,
@@ -793,6 +807,10 @@ def create_run_event(run_id: str, phase: str, level: str, message: str, progress
         "created_at": utc_now(),
     }
     with connect() as conn:
+        if run_updates is not None:
+            fields = {**run_updates, "updated_at": payload["created_at"]}
+            assignments = ", ".join(f"{key} = :{key}" for key in fields)
+            conn.execute(f"UPDATE detection_runs SET {assignments} WHERE id = :id", {**fields, "id": run_id})
         conn.execute(
             """
             INSERT INTO run_events (id, run_id, phase, level, message, progress, created_at)

@@ -194,9 +194,27 @@ def check_a_project() -> None:
         status, headers, image = call("GET", urlsplit(candidates[-1]["image_url"]).path)
         check(status == 200 and image[:8] == b"\x89PNG\r\n\x1a\n", "a screenshot is served")
 
-        bundle = call_json("POST", f"/runs/{run['id']}/export", {"mode": "all"})
+        for candidate in candidates:
+            call_json("PATCH", f"/candidates/{candidate['id']}", {"status": "accepted"})
+        pathway = call_json("GET", f"/runs/{run['id']}/pathway")
+        check(pathway['step_count'] == len(candidates), "the accepted steps appear in the pathway")
+        call_json("POST", f"/runs/{run['id']}/pathway/merge", {
+            "source_candidate_id": candidates[-1]['id'], "target_candidate_id": candidates[0]['id'],
+        })
+        merged = call_json("GET", f"/runs/{run['id']}/pathway")
+        check(merged['steps'][0]['screen_id'] == merged['steps'][-1]['screen_id'], "the pathway merge is saved")
+        saved = call_json("PUT", f"/me/run-settings/projects/{project['id']}", {"stable": {"min_dwell_ms": 1200}})
+        defaults = call_json("GET", "/me/run-settings")
+        check(saved in defaults, "the account's project settings can be saved and read back")
+
+        bundle = call_json("POST", f"/runs/{run['id']}/export", {"mode": "accepted"})
         status, _, archive = call("GET", f"/exports/{bundle['id']}/download")
         check(status == 200 and archive[:2] == b"PK", "the export downloads as a zip")
+        with zipfile.ZipFile(io.BytesIO(archive)) as exported:
+            name = next(entry for entry in exported.namelist() if entry.endswith('pathway.json'))
+            chart = json.loads(exported.read(name))
+        check(chart['step_count'] == len(candidates) and chart['screens'] == merged['screens'],
+              "the bundle contains the reviewed pathway")
         if OCR:
             # Recognised text is not part of the API's step list; exports carry it in steps.csv.
             with zipfile.ZipFile(io.BytesIO(archive)) as bundle:

@@ -95,8 +95,13 @@ grouping, also rejected ones, because a label describes the change from the dete
 
 A reviewer can overrule the grouping per step (`PATCH /candidates/{id}`): `screen_link` is `auto`, `new` (a
 screen of its own) or the id of another step of the run that shows the same screen, and `screen_kind` is
-`auto`, `screen` or `popup`. A step joins at most one earlier step, by the first that applies: the
+`auto`, `screen` or `popup`. A step joins another step, by the first that applies: the
 reviewer's choice, a revisit, a pop-up closing, a label that stays on the screen.
+
+`POST /runs/{id}/pathway/merge` takes `source_candidate_id`, `target_candidate_id` and `detail` (`screens`
+by default). It moves every member of the source box to the target together, including rejected members,
+so accepting one later preserves the merge. Both candidates must belong to that run, and the caller must
+be a project owner.
 
 ## Configuration
 

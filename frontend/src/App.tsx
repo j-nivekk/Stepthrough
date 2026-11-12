@@ -825,10 +825,11 @@ function App({ session, onSessionChange }: AppProps) {
   });
 
   const updateCandidateMutation = useMutation({
+    mutationKey: ['candidate-update'],
     mutationFn: ({ candidateId, payload }: { candidateId: string; payload: CandidateChanges }) =>
       updateCandidate(candidateId, payload),
     onSuccess: (candidate) => {
-      void refreshRunQueries(candidate.run_id, candidate.recording_id);
+      return refreshRunQueries(candidate.run_id, candidate.recording_id);
     },
     onError: (error: Error) => setAppError(error.message),
   });

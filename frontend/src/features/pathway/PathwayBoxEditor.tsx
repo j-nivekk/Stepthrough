@@ -12,13 +12,15 @@ interface PathwayBoxEditorProps {
   /** Select the box that holds this step, or none. */
   onSelect: (candidateId: string | null) => void;
   onUpdateCandidate: (candidateId: string, changes: CandidateChanges) => void;
+  onMerge: (sourceId: string, targetId: string) => void;
+  disabled: boolean;
 }
 
 /**
  * Changes to one box of the pathway: its title, whether it is a pop-up, and where its steps belong. Every
  * change is stored on a step (its title, its screen choice), so the step review shows the same.
  */
-export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUpdateCandidate }: PathwayBoxEditorProps) {
+export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUpdateCandidate, onMerge, disabled }: PathwayBoxEditorProps) {
   const steps = useMemo(() => new Map(pathway.steps.map((step) => [step.step_id, step])), [pathway]);
   const byId = useMemo(() => new Map(candidates.map((candidate) => [candidate.id, candidate])), [candidates]);
   const firstCandidateId = (screen: PathwayScreen): string => steps.get(screen.image_step_id)?.source_candidate_id ?? '';
@@ -34,7 +36,7 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
   const pick = (
     <label className="pathway-editor-field">
       <span className={selected ? '' : 'sr-only'}>screen</span>
-      <select onChange={(event) => onSelect(event.target.value || null)} value={selected ? firstCandidateId(selected) : ''}>
+      <select disabled={disabled} onChange={(event) => onSelect(event.target.value || null)} value={selected ? firstCandidateId(selected) : ''}>
         <option value="">{selected ? 'none' : 'choose a screen…'}</option>
         {pathway.screens.map((screen) => (
           <option key={screen.id} value={firstCandidateId(screen)}>
@@ -66,12 +68,13 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
   }
 
   return (
-    <div className="pathway-editor">
+    <fieldset className="pathway-editor" disabled={disabled}>
       {pick}
       <label className="pathway-editor-field">
         <span>title</span>
         <input
           className="candidate-field pathway-editor-title"
+          maxLength={240}
           onBlur={(event) => commitTitle(event.target.value)}
           onChange={(event) => setTitle(event.target.value)}
           onKeyDown={(event) => {
@@ -107,7 +110,7 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
           <span>merge into</span>
           <select
             onChange={(event) => {
-              if (event.target.value) onUpdateCandidate(first.id, { screen_link: event.target.value });
+              if (event.target.value) onMerge(first.id, event.target.value);
             }}
             value=""
           >
@@ -123,6 +126,6 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
       <button className="analysis-task-link subtle pathway-editor-done" onClick={() => onSelect(null)} type="button">
         done
       </button>
-    </div>
+    </fieldset>
   );
 }

@@ -1,7 +1,7 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 
-import { absoluteApiUrl, getRunPathway } from '../../api';
+import { absoluteApiUrl, getRunPathway, mergePathwayScreens } from '../../api';
 import { downloadText } from '../../lib/accountLinks';
 import { APP_VERSION } from '../../lib/buildInfo';
 import { buildPathwayFigure, formatPathwayTime, type PathwayFigureOptions, type PathwayNotesPlacement } from '../../lib/pathwayFigure';
@@ -14,6 +14,7 @@ import {
   type PathwayView,
 } from '../../lib/pathwayView';
 import { rangeFillStyle } from '../../lib/rangeFill';
+import { pathwayQueryOptions } from '../../lib/pathwayQuery';
 import { recordingAspect } from '../../lib/stepLayout';
 import { splitFilename } from '../../lib/utils';
 import type { CandidateChanges, Pathway, PathwayDetail, PathwayStep, RecordingSummary, RunDetail } from '../../types';
@@ -56,12 +57,19 @@ async function embedImage(url: string, maxWidth: number): Promise<string> {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.round(bitmap.width * scale));
   canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
+  try {
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('could not prepare a screenshot for the figure.');
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  } finally {
+    bitmap.close();
+  }
   return canvas.toDataURL('image/jpeg', 0.86);
 }
 
 export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }: PathwayPanelProps) {
+  const queryClient = useQueryClient();
+  const editingCandidates = useIsMutating({ mutationKey: ['candidate-update'] }) > 0;
   const [view, setView] = useState<PathwayView>(() => loadPathwayView());
   const [areaRef, areaWidth] = useElementWidth<HTMLDivElement>();
   const [downloading, setDownloading] = useState(false);
@@ -77,17 +85,19 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
   useEffect(() => {
     setSelectedCandidateId(null);
   }, [runId]);
-  // The pathway is built from the steps, so it is fetched again when a decision, title, note or screen choice changes.
-  const acceptedKey = run.candidates
-    .map((step) => [step.id, step.status, step.title ?? '', step.notes ?? '', step.screen_link ?? '', step.screen_kind ?? ''].join('\u0001'))
-    .join('\u0002');
-  const pathwayQuery = useQuery({
-    queryKey: ['pathway', runId, view.detail, acceptedKey],
-    queryFn: () => getRunPathway(runId, view.detail),
-    enabled: run.accepted_steps.length > 0,
-    placeholderData: keepPreviousData,
+  const pathwayQuery = useQuery(pathwayQueryOptions(run, view.detail, getRunPathway));
+  const mergeMutation = useMutation({
+    mutationFn: ({ sourceId, targetId }: { sourceId: string; targetId: string }) =>
+      mergePathwayScreens(runId, sourceId, targetId, view.detail),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['run', runId] }),
+        queryClient.invalidateQueries({ queryKey: ['pathway', runId] }),
+      ]);
+    },
   });
   const pathway = run.accepted_steps.length > 0 ? pathwayQuery.data : undefined;
+  const updating = pathwayQuery.isFetching || pathwayQuery.isPlaceholderData || mergeMutation.isPending || editingCandidates;
 
   const aspect = recordingAspect(recording?.width, recording?.height);
   const options: PathwayFigureOptions = useMemo(
@@ -138,7 +148,7 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
   const scale = view.zoom ?? fitScale;
 
   async function handleDownload() {
-    if (!pathway) return;
+    if (!pathway || updating) return;
     setDownloading(true);
     setDownloadError('');
     try {
@@ -188,6 +198,7 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
             </>
           ) : null}
           {downloadError ? ` · ${downloadError}` : ''}
+          {mergeMutation.isError ? ` · could not merge the screens: ${mergeMutation.error.message}` : ''}
         </span>
         <div className="pathway-controls">
           <div aria-label="boxes of the pathway" className="pathway-control" role="group">
@@ -270,7 +281,7 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
               fit
             </button>
           </div>
-          <button className="analysis-pill success" disabled={!figure || downloading} onClick={() => void handleDownload()} type="button">
+          <button className="analysis-pill success" disabled={!figure || downloading || updating} onClick={() => void handleDownload()} type="button">
             {downloading ? 'preparing…' : 'download svg'}
           </button>
         </div>
@@ -278,6 +289,8 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
       {pathway && figure ? (
         <PathwayBoxEditor
           candidates={run.candidates}
+          disabled={updating}
+          onMerge={(sourceId, targetId) => mergeMutation.mutate({ sourceId, targetId })}
           onSelect={setSelectedCandidateId}
           onUpdateCandidate={onUpdateCandidate}
           pathway={pathway}

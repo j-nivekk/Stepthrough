@@ -5194,6 +5194,9 @@ button:disabled {
 /* Changes to the selected box of the pathway, in a strip above the figure. It stays in view while a long
    chart scrolls, so a box picked further down can still be changed. */
 .pathway-editor {
+  min-width: 0;
+  margin-inline: 0;
+  border: 0;
   position: sticky;
   top: 8px;
   z-index: 6;

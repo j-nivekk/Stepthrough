@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use Stepthrough in research, cite the Zenodo record for the version you used."
+type: software
+title: "Stepthrough: screen recordings to walkthrough steps and interface pathways"
+version: "1.1.0"
+authors:
+  - family-names: Jin
+    given-names: 'H. "Kevin"'
+doi: 10.5281/zenodo.24159850
+repository-code: "https://github.com/j-nivekk/Stepthrough"
+url: "https://github.com/j-nivekk/Stepthrough"
+license: MIT
+abstract: >-
+  Stepthrough is a local-first research tool that turns screen recordings into
+  chronological walkthrough screenshots and interface pathways. It combines
+  stable-screen detection with manual review, titles, annotations and screen
+  relationships. Researchers can export screenshots, CSV and JSON step data,
+  structured pathways and SVG diagrams. Text recognition is optional.
+keywords:
+  - screen recordings
+  - walkthrough method
+  - interface research
+  - interface pathways
+  - research software

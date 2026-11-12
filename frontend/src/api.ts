@@ -171,8 +171,14 @@ export function getRun(runId: string): Promise<RunDetail> {
   return request<RunDetail>(`/runs/${runId}`);
 }
 
-export function getRunPathway(runId: string, detail: PathwayDetail): Promise<Pathway> {
-  return request<Pathway>(`/runs/${runId}/pathway?detail=${detail}`);
+export function getRunPathway(runId: string, detail: PathwayDetail, signal?: AbortSignal): Promise<Pathway> {
+  return request<Pathway>(`/runs/${runId}/pathway?detail=${detail}`, { signal });
+}
+
+export function mergePathwayScreens(runId: string, sourceId: string, targetId: string, detail: PathwayDetail): Promise<void> {
+  return request<void>(`/runs/${runId}/pathway/merge`, jsonBody('POST', {
+    source_candidate_id: sourceId, target_candidate_id: targetId, detail,
+  }));
 }
 
 export function abortRun(runId: string): Promise<RunSummary> {

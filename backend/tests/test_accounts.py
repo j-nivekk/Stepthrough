@@ -77,6 +77,7 @@ def read_requests(w: World) -> list[tuple[str, str, dict]]:
         ('GET', f'/projects/{w.project_id}', {}),
         ('GET', f'/recordings/{w.recording_id}', {}),
         ('GET', f'/runs/{w.run_id}', {}),
+        ('GET', f'/runs/{w.run_id}/pathway', {}),
         ('GET', f'/exports/{w.bundle_id}/download', {}),
         ('GET', w.image_url, {}),
         ('GET', w.source_url, {}),
@@ -93,6 +94,10 @@ def write_requests(w: World) -> list[tuple[str, str, dict]]:
         ('POST', f'/recordings/{w.recording_id}/runs', {'json': {}}),
         ('POST', f'/runs/{w.run_id}/cancel', {}),
         ('PATCH', f'/candidates/{w.candidate_id}', {'json': {'status': 'accepted'}}),
+        ('PATCH', f'/candidates/{w.candidate_id}', {'json': {'screen_link': 'new', 'screen_kind': 'popup'}}),
+        ('POST', f'/runs/{w.run_id}/pathway/merge', {'json': {
+            'source_candidate_id': w.candidate_id, 'target_candidate_id': w.candidate_id,
+        }}),
         ('POST', f'/runs/{w.run_id}/candidates/manual', {'json': {'timestamp_ms': 500}}),
         ('POST', f'/runs/{w.run_id}/export', {'json': {'mode': 'all'}}),
         ('DELETE', f'/runs/{w.run_id}', {}),

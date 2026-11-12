@@ -536,6 +536,12 @@ class RecordingDetailResponse(BaseModel):
     runs: list[DetectionRunSummary]
 
 
+class PathwayMerge(BaseModel):
+    source_candidate_id: str = Field(min_length=1, max_length=64)
+    target_candidate_id: str = Field(min_length=1, max_length=64)
+    detail: PathwayDetail = "screens"
+
+
 class CandidateUpdate(BaseModel):
     status: CandidateStatus | None = None
     title: str | None = Field(default=None, max_length=240)

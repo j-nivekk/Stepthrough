@@ -149,6 +149,36 @@ def test_a_step_can_be_put_with_a_later_step() -> None:
     assert [step['grouped_by'] for step in pathway['steps']] == [None, None, 'researcher']
 
 
+def test_merging_a_box_moves_all_its_steps(client: TestClient, video_factory, wait_for_run) -> None:
+    detail = _import_run(client, video_factory, wait_for_run)
+    run_id = detail['summary']['id']
+    first, second, third = detail['candidates']
+    for candidate in detail['candidates']:
+        client.patch(f"/candidates/{candidate['id']}", json={'status': 'accepted'})
+    # A manually linked box whose first step points forward. Replacing only that first link would leave
+    # the third step behind. Include a rejected member too, so accepting it later keeps the chosen merge.
+    client.patch(f"/candidates/{first['id']}", json={'screen_link': third['id']})
+    client.patch(f"/candidates/{third['id']}", json={'screen_link': 'new', 'status': 'rejected'})
+    response = client.post(f'/runs/{run_id}/pathway/merge', json={
+        'source_candidate_id': first['id'], 'target_candidate_id': second['id'], 'detail': 'screens',
+    })
+    assert response.status_code == 204
+    client.patch(f"/candidates/{third['id']}", json={'status': 'accepted'})
+    pathway = client.get(f'/runs/{run_id}/pathway').json()
+    assert _screens_of(pathway) == ['screen-01'] * 3
+    kept = client.get(f'/runs/{run_id}').json()['candidates']
+    assert [candidate['screen_link'] for candidate in kept] == [second['id'], None, second['id']]
+
+    # Invalid targets must leave the whole group alone, including candidates from another run.
+    other_run = client.post(f"/recordings/{first['recording_id']}/runs/manual").json()
+    other = client.post(f"/runs/{other_run['id']}/candidates/manual", json={'timestamp_ms': 500}).json()
+    for source, target in ((first['id'], 'missing'), (first['id'], other['id']), (other['id'], second['id'])):
+        assert client.post(f'/runs/{run_id}/pathway/merge', json={
+            'source_candidate_id': source, 'target_candidate_id': target,
+        }).status_code == 422
+    assert client.get(f'/runs/{run_id}').json()['candidates'] == kept
+
+
 def test_a_revisit_comes_before_a_label() -> None:
     # Step 3 was reached by a small change but shows step 1's screen again, so it is on that screen and does
     # not pull the screen of step 2 into it.
