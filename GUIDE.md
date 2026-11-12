@@ -422,7 +422,7 @@ While the video plays, the card of the step on screen is outlined, so you can se
 | add a title and notes | **annotate** on a card, or type directly in the list view |
 | show only some steps | **all**, **pending**, **accepted** or **rejected** above the steps |
 | hide steps with a certain label | click the label in the legend above the timeline; click again to show them |
-| change the layout | **grid** or **list**; the slider sets the size of the images |
+| change the layout | **grid** or **list**; the slider sets the size of the images, and **fit** goes back to images sized to fill the width of the window |
 | accept or reject many steps at once | tick the boxes on pending steps, then press **accept selected** or **reject selected** |
 | go to an earlier visit of the same screen | **similar to candidate N** on a revisit |
 

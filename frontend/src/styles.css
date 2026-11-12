@@ -159,6 +159,19 @@ a {
   z-index: 20;
 }
 
+/* On the analysis page the steps scroll under the watermark, so it sits on a patch of page colour, its text in
+   line with the right edge of the page's content. */
+.analysis-screen ~ .app-watermark-shell {
+  right: 35px;
+  bottom: 34px;
+  padding: 6px 8px;
+  background: var(--bg);
+}
+
+.analysis-screen ~ .app-watermark-shell .app-watermark-popover {
+  right: 8px;
+}
+
 .app-watermark-text {
   opacity: 0.2;
   color: #000;
@@ -2027,7 +2040,8 @@ a {
   min-width: 0;
   max-width: 100%;
   overflow-x: clip;
-  padding: 60px 43px 48px;
+  /* The bottom clears the watermark, so the last steps can scroll out from under it. */
+  padding: 60px 43px 88px;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -2149,12 +2163,16 @@ a {
 }
 
 
+/* As tall as the full-width "advanced" and "compare runs" bars. */
 .analysis-run-button {
   width: 100%;
+  padding: 6px 10px;
   justify-content: center;
   text-align: center;
 }
 
+/* The lists reach 8px past the column on both sides and pad it back, so their text lines up with the divider
+   above while a selected row's tint can run 8px past the text without the scrolling list cutting it off. */
 .analysis-videos,
 .analysis-tasks {
   display: flex;
@@ -2162,14 +2180,14 @@ a {
   gap: 10px;
   max-height: var(--analysis-list-max-height);
   overflow-y: auto;
-  padding-right: 6px;
+  margin-inline: -8px;
+  padding-inline: 8px;
   scrollbar-gutter: stable;
 }
 
 /* Video rows run the full width of the divider above them; a scrollbar only takes room once the list
    is long enough to scroll. */
 .analysis-videos {
-  padding-right: 0;
   scrollbar-gutter: auto;
 }
 
@@ -2251,8 +2269,10 @@ a {
 }
 
 .analysis-video-row.selected .analysis-video-row-button {
+  width: auto;
+  margin-inline: -8px;
+  padding-inline: 8px;
   background: rgba(205, 109, 30, 0.52);
-  padding-inline: 4px;
 }
 
 .analysis-video-name {
@@ -4550,8 +4570,9 @@ button:disabled {
   align-items: flex-end;
 }
 
+/* Everything sits on the line of the export name field (30px high); the file name preview hangs below it. */
 .candidate-review-toolbar {
-  align-items: center;
+  align-items: flex-start;
 }
 
 .candidate-review-title {
@@ -4606,6 +4627,7 @@ button:disabled {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  min-height: 30px;
 }
 
 .candidate-bulk-count,
@@ -4616,10 +4638,18 @@ button:disabled {
   white-space: nowrap;
 }
 
+.candidate-review-actions .analysis-export-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+}
+
 .candidate-export-shell {
   position: relative;
   display: inline-flex;
+  align-items: center;
   justify-content: flex-end;
+  height: 30px;
 }
 
 .candidate-review-nav-group {
@@ -4627,6 +4657,7 @@ button:disabled {
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
+  min-height: 30px;
 }
 
 .candidate-review-stepper {
@@ -4921,17 +4952,29 @@ button:disabled {
 .candidate-size-control {
   display: inline-flex;
   align-items: center;
+  gap: 12px;
+}
+
+.candidate-size-slider {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
   color: rgba(0, 0, 0, 0.45);
 }
 
-.candidate-size-control input {
+.candidate-size-slider input {
   width: 140px;
 }
 
 /* Width comes from the size slider (area-based, so portrait and landscape recordings both read well). */
 .candidate-grid.sized {
   grid-template-columns: repeat(auto-fill, minmax(0, var(--candidate-card-width)));
+}
+
+/* Fitted (the default): the page works out how many columns fit at about the default size, and they share the
+   whole width. */
+.candidate-grid.sized.fitted {
+  grid-template-columns: repeat(var(--candidate-columns), minmax(0, 1fr));
 }
 
 .candidate-grid.sized .candidate-card {
@@ -5028,10 +5071,12 @@ button:disabled {
 }
 
 .candidate-row {
+  /* Every column has a width that does not depend on what is in it (the decisions: three 28px buttons), so the
+     heading row, whose cells are mostly empty, divides the width the same way as the rows below it. */
   display: grid;
   grid-template-columns:
     18px var(--candidate-thumb-width) 76px minmax(110px, 0.8fr) 64px
-    minmax(140px, 1.3fr) minmax(140px, 1.3fr) auto;
+    minmax(140px, 1.3fr) minmax(140px, 1.3fr) calc(3 * 28px + 2 * 6px);
   grid-template-areas: 'select thumb step label duration title notes actions';
   align-items: center;
   column-gap: 14px;
@@ -5089,6 +5134,12 @@ button:disabled {
 
 .candidate-row-head .candidate-row-thumb {
   background: transparent;
+}
+
+/* Headings over the text fields line up with the text inside them. */
+.candidate-row-head .candidate-row-title,
+.candidate-row-head .candidate-row-notes {
+  padding-left: 10px;
 }
 
 .candidate-row-thumb img {

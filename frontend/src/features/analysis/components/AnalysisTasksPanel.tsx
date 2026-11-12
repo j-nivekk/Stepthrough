@@ -152,13 +152,13 @@ export function AnalysisTasksPanel({
             {
               key: 'dwell',
               label: 'on screen',
-              value: `${getEffectiveStableValues(stableRun, analysisMetadata).minDwellMs}ms`,
+              value: `${getEffectiveStableValues(stableRun, analysisMetadata).minDwellMs} ms`,
               isDirty: (stableRun.min_dwell_ms ?? null) !== (stableDefaults?.min_dwell_ms ?? null),
             },
             {
               key: 'change',
               label: 'change',
-              value: `${getEffectiveStableValues(stableRun, analysisMetadata).minChangePercent.toFixed(2)}%`,
+              value: `${getEffectiveStableValues(stableRun, analysisMetadata).minChangePercent.toFixed(2)} %`,
               isDirty: (stableRun.min_change_percent ?? null) !== (stableDefaults?.min_change_percent ?? null),
             },
             ...(stableRun.ignore_regions.length

@@ -25,6 +25,7 @@ import {
   formatPercent,
   formatPhase,
   formatRelativeTime,
+  formatRunShortTimestamp,
   formatRunTiming,
 } from '../../lib/formatters';
 import { StageNavigator } from '../../components/StageNavigator';
@@ -57,9 +58,12 @@ import { AnalysisVideosPanel } from './components/AnalysisVideosPanel';
 import type { WorkflowStage } from '../../lib/workflow';
 import { defaultStableSettings, formatStableSummary } from '../../lib/stableSettings';
 import {
+  clampStepSize,
+  fitStepGrid,
   loadStepLayout,
   recordingAspect,
   saveStepLayout,
+  STEP_SIZE_DEFAULT,
   STEP_SIZE_MAX,
   STEP_SIZE_MIN,
   stepImageBox,
@@ -69,6 +73,7 @@ import {
 import { rangeFillStyle } from '../../lib/rangeFill';
 import { playbackWindows, stepClip } from '../../lib/stepClips';
 import type { StepHoverProps } from '../../components/CandidateCard';
+import { useElementWidth } from './useElementWidth';
 import { useHoverClips } from './useHoverClips';
 import { usePlaybackHighlight } from './usePlaybackHighlight';
 
@@ -295,6 +300,7 @@ export function AnalysisScreen({
   const [hoveredLegendType, setHoveredLegendType] = useState<string | null>(null);
   const [hiddenSegmentTypes, setHiddenSegmentTypes] = useState<Set<string>>(new Set());
   const [stepLayout, setStepLayout] = useState<StepLayout>(() => loadStepLayout());
+  const [stepAreaRef, stepAreaWidth] = useElementWidth<HTMLDivElement>();
   const parameterColumnRef = useRef<HTMLElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const saveMenuRef = useRef<HTMLDivElement | null>(null);
@@ -457,8 +463,12 @@ export function AnalysisScreen({
     return labelVisibleCandidates.filter((candidate) => candidateMatchesFilter(candidate, activeCandidateFilter));
   }, [activeCandidateFilter, canReviewCandidates, labelVisibleCandidates, selectedRun]);
   const stepAspect = recordingAspect(selectedRecordingSummary?.width, selectedRecordingSummary?.height);
-  const stepCardBox = stepImageBox(stepLayout.size, stepAspect);
-  const stepThumb = stepThumbBox(stepLayout.size, stepAspect);
+  // Fitted (the default): cards fill the width of the page. A size from the slider keeps cards exactly that size.
+  const fittedStepGrid = stepLayout.size === null && stepAreaWidth > 0 ? fitStepGrid(stepAreaWidth, stepAspect) : null;
+  const stepSize = stepLayout.size ?? fittedStepGrid?.size ?? STEP_SIZE_DEFAULT;
+  const stepCardWidth = fittedStepGrid?.cardWidth ?? stepImageBox(stepSize, stepAspect).width;
+  const stepThumb = stepThumbBox(stepSize, stepAspect);
+  const stepSliderValue = clampStepSize(stepSize);
   useEffect(() => {
     saveStepLayout(stepLayout);
   }, [stepLayout]);
@@ -1762,7 +1772,7 @@ export function AnalysisScreen({
                         <option value="">select another completed run</option>
                         {comparableRuns.map((run) => (
                           <option key={run.id} value={run.id}>
-                            {formatRunSummaryLabel(run, analysisMetadata)} · {new Date(run.created_at).toLocaleString().toLocaleLowerCase()}
+                            {formatRunSummaryLabel(run, analysisMetadata)} · {formatRunShortTimestamp(run.created_at)}
                           </option>
                         ))}
                       </select>
@@ -2167,7 +2177,7 @@ export function AnalysisScreen({
                   ) : null}
                 </div>
 
-                <div className="candidate-view-bar">
+                <div className="candidate-view-bar" ref={stepAreaRef}>
                   <span className="candidate-view-note">
                     {labelHiddenCount > 0 ? (
                       <>
@@ -2198,24 +2208,35 @@ export function AnalysisScreen({
                         </button>
                       ))}
                     </div>
-                    <label className="candidate-size-control" title="image size">
-                      <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
-                        <rect height="6" rx="1" width="6" x="4" y="4" />
-                      </svg>
-                      <input
-                        aria-label="step image size"
-                        max={STEP_SIZE_MAX}
-                        min={STEP_SIZE_MIN}
-                        onChange={(event) => setStepLayout((current) => ({ ...current, size: Number(event.target.value) }))}
-                        step={10}
-                        style={rangeFillStyle(stepLayout.size, STEP_SIZE_MIN, STEP_SIZE_MAX)}
-                        type="range"
-                        value={stepLayout.size}
-                      />
-                      <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
-                        <rect height="12" rx="1" width="12" x="1" y="1" />
-                      </svg>
-                    </label>
+                    <div className="candidate-size-control">
+                      <label className="candidate-size-slider" title="image size">
+                        <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
+                          <rect height="6" rx="1" width="6" x="4" y="4" />
+                        </svg>
+                        <input
+                          aria-label="step image size"
+                          max={STEP_SIZE_MAX}
+                          min={STEP_SIZE_MIN}
+                          onChange={(event) => setStepLayout((current) => ({ ...current, size: Number(event.target.value) }))}
+                          step={10}
+                          style={rangeFillStyle(stepSliderValue, STEP_SIZE_MIN, STEP_SIZE_MAX)}
+                          type="range"
+                          value={stepSliderValue}
+                        />
+                        <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
+                          <rect height="12" rx="1" width="12" x="1" y="1" />
+                        </svg>
+                      </label>
+                      <button
+                        aria-pressed={stepLayout.size === null}
+                        className={`candidate-filter-tab ${stepLayout.size === null ? 'active' : ''}`}
+                        onClick={() => setStepLayout((current) => ({ ...current, size: null }))}
+                        title="size the images to fill the width of the page"
+                        type="button"
+                      >
+                        fit
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -2267,16 +2288,20 @@ export function AnalysisScreen({
                   </div>
                 ) : filteredCandidates.length ? (
                   <div
-                    className={`candidate-grid sized ${filteredCandidates.length < 3 ? 'sparse' : ''}`}
+                    className={`candidate-grid sized ${fittedStepGrid ? 'fitted' : ''} ${filteredCandidates.length < 3 ? 'sparse' : ''}`}
                     id="analysis-candidate-review"
-                    style={{ '--candidate-card-width': `${stepCardBox.width}px` } as CSSProperties}
+                    style={
+                      fittedStepGrid
+                        ? ({ '--candidate-columns': fittedStepGrid.columns } as CSSProperties)
+                        : ({ '--candidate-card-width': `${stepCardWidth}px` } as CSSProperties)
+                    }
                   >
                     {filteredCandidates.map((candidate) => {
                       const similarityLink = candidateSimilarityLinks.get(candidate.id);
                       return (
                         <CandidateCard
                           candidate={candidate}
-                          compact={stepCardBox.width < 190}
+                          compact={stepCardWidth < 190}
                           hover={stepHover(candidate)}
                           isActive={activeCandidateId === candidate.id}
                           isAnnotationExpanded={expandedAnnotationCandidateId === candidate.id}

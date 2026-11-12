@@ -42,20 +42,21 @@ export function formatPhase(phase: RunPhase): string {
   return phaseLabels[phase] ?? phase;
 }
 
+/** When a run finished, stopped or started, written the way the task list writes run times. */
 export function formatRunTiming(run: RunSummary): string {
   if (run.status === 'completed' && run.completed_at) {
-    return `finished ${formatLowercaseLocaleText(new Date(run.completed_at).toLocaleString())}`;
+    return `finished ${formatRunShortTimestamp(run.completed_at)}`;
   }
   if (run.status === 'cancelled' && run.completed_at) {
-    return `aborted ${formatLowercaseLocaleText(new Date(run.completed_at).toLocaleString())}`;
+    return `aborted ${formatRunShortTimestamp(run.completed_at)}`;
   }
   if (run.status === 'failed' && run.completed_at) {
-    return `failed ${formatLowercaseLocaleText(new Date(run.completed_at).toLocaleString())}`;
+    return `failed ${formatRunShortTimestamp(run.completed_at)}`;
   }
   if (run.started_at) {
-    return `started ${formatLowercaseLocaleText(new Date(run.started_at).toLocaleString())}`;
+    return `started ${formatRunShortTimestamp(run.started_at)}`;
   }
-  return `created ${formatLowercaseLocaleText(new Date(run.created_at).toLocaleString())}`;
+  return `created ${formatRunShortTimestamp(run.created_at)}`;
 }
 
 function formatProjectActivity(lastActivityAt: string): string {
