@@ -147,6 +147,18 @@ CREATE TABLE IF NOT EXISTS project_members (
     PRIMARY KEY (project_id, member)
 );
 
+-- Analysis settings that someone saved to start new runs from: their own defaults (`project_id` NULL), or theirs
+-- for one project. `settings` is a run's settings as JSON. They belong to the account, so they follow it to every
+-- computer, and go with the account or the project.
+CREATE TABLE IF NOT EXISTS saved_run_settings (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+    settings TEXT NOT NULL,
+    saved_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_run_settings_scope ON saved_run_settings(user_id, IFNULL(project_id, ''));
+CREATE INDEX IF NOT EXISTS idx_saved_run_settings_project ON saved_run_settings(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_members_member ON project_members(member);
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_recordings_project_id ON recordings(project_id);
@@ -235,7 +247,8 @@ def _adopt_projects_without_members(conn: sqlite3.Connection) -> None:
 
 def reset_db() -> None:
     """Drop all projects and what is in them, and reinitialise the schema. Accounts and logins are kept, so an
-    administrator who resets a shared server can still log in afterwards."""
+    administrator who resets a shared server can still log in afterwards, and so are everyone's own default
+    settings; settings saved for a project go with it."""
     ensure_app_dirs()
     with connect() as conn:
         conn.executescript("""
@@ -250,6 +263,9 @@ def reset_db() -> None:
             PRAGMA foreign_keys = ON;
         """)
     init_db()
+    with connect() as conn:
+        # Dropping `projects` with foreign keys off does not cascade.
+        conn.execute("DELETE FROM saved_run_settings WHERE project_id IS NOT NULL")
 
 
 def init_db() -> None:

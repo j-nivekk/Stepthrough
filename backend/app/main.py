@@ -26,6 +26,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from .account_routes import router as account_router, user_response
 from .accounts import (
@@ -59,6 +60,7 @@ from .models import (
     RecordingUpdate,
     RunEventResponse,
     RunSettings,
+    SavedRunSettingsResponse,
     UserResponse,
 )
 from .repository import (
@@ -86,9 +88,11 @@ from .repository import (
     list_recordings,
     list_run_events,
     list_runs,
+    list_saved_run_settings,
     project_has_active_runs,
     recording_has_active_runs,
     replace_candidates,
+    save_run_settings,
     update_candidate,
     update_project_name,
     update_recording_filename,
@@ -550,7 +554,7 @@ def _apply_candidate_paths(candidates: list[dict[str, Any]], frames_path: Path) 
 RETIRED_ENGINES = {"scene_v1", "hybrid_v2"}
 
 
-def _validate_run_settings_for_recording(recording: dict[str, Any], settings: RunSettings) -> None:
+def _refuse_retired_engine(settings: RunSettings) -> None:
     if settings.analysis_engine in RETIRED_ENGINES:
         raise HTTPException(
             status_code=422,
@@ -559,6 +563,10 @@ def _validate_run_settings_for_recording(recording: dict[str, Any], settings: Ru
                 "earlier runs stay available to review and export."
             ),
         )
+
+
+def _validate_run_settings_for_recording(recording: dict[str, Any], settings: RunSettings) -> None:
+    _refuse_retired_engine(settings)
     resolve_stable_config(settings, fps=recording["fps"], width=recording["width"], height=recording["height"])
 
 
@@ -859,6 +867,35 @@ def admin_recheck_ocr(user: CurrentUser) -> Response:
 @app.get("/me", response_model=UserResponse)
 def me(user: CurrentUser) -> UserResponse:
     return user_response(user)
+
+
+@app.get("/me/run-settings", response_model=list[SavedRunSettingsResponse])
+def my_run_settings(user: CurrentUser) -> list[SavedRunSettingsResponse]:
+    """The settings this person saved for new runs, whichever computer they saved them on: their own defaults
+    (no project) and theirs per project."""
+    saved = []
+    for row in list_saved_run_settings(user.id):
+        try:
+            saved.append(SavedRunSettingsResponse(**row))
+        except ValidationError:
+            continue  # saved by a version that allowed what this one does not; the defaults apply instead
+    return saved
+
+
+@app.put("/me/run-settings/default", response_model=SavedRunSettingsResponse)
+def my_run_settings_save_default(settings: RunSettings, user: CurrentUser) -> SavedRunSettingsResponse:
+    _refuse_retired_engine(settings)
+    return SavedRunSettingsResponse(**save_run_settings(user.id, None, settings))
+
+
+@app.put("/me/run-settings/projects/{project_id}", response_model=SavedRunSettingsResponse)
+def my_run_settings_save_for_project(
+    project_id: str, settings: RunSettings, user: CurrentUser
+) -> SavedRunSettingsResponse:
+    # Viewers may keep their own settings for a project too: nobody else sees them.
+    _project_for(project_id, user, "viewer")
+    _refuse_retired_engine(settings)
+    return SavedRunSettingsResponse(**save_run_settings(user.id, project_id, settings))
 
 
 @app.get("/projects", response_model=list[ProjectResponse])

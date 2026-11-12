@@ -262,15 +262,10 @@ export interface RunSettings {
   stable: StableSettings;
 }
 
-export interface GlobalRunPreset {
-  version: number;
-  settings: RunSettings;
-  saved_at: string;
-}
-
-export interface ProjectRunPreset {
-  version: number;
-  project_id: string;
+/** Settings someone saved to start new runs from: their own defaults (`project_id` null) or theirs for one
+ * project. They are kept with the account, so they follow it to any computer. */
+export interface SavedRunSettings {
+  project_id: string | null;
   settings: RunSettings;
   saved_at: string;
 }

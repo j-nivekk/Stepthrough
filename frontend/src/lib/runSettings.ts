@@ -1,4 +1,4 @@
-import type { AnalysisMetadata, GlobalRunPreset, ProjectRunPreset, RunSettings, RunSummary } from '../types';
+import type { AnalysisMetadata, RunSettings, RunSummary, SavedRunSettings } from '../types';
 import {
   areStableSettingsEqual,
   defaultStableSettings,
@@ -9,6 +9,7 @@ import {
   STABLE_PRESET_FIELDS,
 } from './stableSettings';
 
+// Where earlier versions kept saved settings in the browser; now they are saved with the account.
 const PRESET_STORAGE_VERSION = 1;
 const GLOBAL_PRESET_STORAGE_KEY = 'stepthrough.run-preset.global.v1';
 const PROJECT_PRESET_STORAGE_KEY_PREFIX = 'stepthrough.run-preset.project.v1';
@@ -36,77 +37,59 @@ export function enforceLocalOcrAvailability(
   return { ...settings, stable: { ...settings.stable, enable_ocr: false } };
 }
 
-export function getProjectPresetStorageKey(projectId: string): string {
-  return `${PROJECT_PRESET_STORAGE_KEY_PREFIX}.${projectId}`;
+/** Settings saved in this browser by earlier versions, which kept them per browser rather than per account. */
+export interface BrowserRunPresets {
+  defaults: RunSettings | null;
+  projects: { projectId: string; settings: RunSettings }[];
+  keys: string[];
 }
 
-function readStoredJson<T>(key: string): T | null {
-  if (typeof window === 'undefined') {
-    return null;
-  }
+type StoredBrowserPreset = { version?: number; project_id?: string; settings?: RunSettings };
+
+function readStoredPreset(key: string): StoredBrowserPreset | null {
   try {
-    const rawValue = window.localStorage.getItem(key);
-    if (!rawValue) {
-      return null;
-    }
-    return JSON.parse(rawValue) as T;
+    const parsed = JSON.parse(window.localStorage.getItem(key) ?? 'null') as StoredBrowserPreset | null;
+    return parsed && parsed.version === PRESET_STORAGE_VERSION && parsed.settings ? parsed : null;
   } catch {
     return null;
   }
 }
 
-function writeStoredJson(key: string, value: unknown): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
+/** What earlier versions saved in this browser, to move to the account; null if there is nothing. */
+export function readBrowserRunPresets(): BrowserRunPresets | null {
+  let keys: string[];
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    keys = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index) ?? '');
   } catch {
-    // storage can be unavailable (private window, blocked site data); the preset still applies for this visit
+    return null; // storage can be unavailable (private window, blocked site data)
   }
-}
-
-export function loadGlobalRunPreset(): GlobalRunPreset | null {
-  const stored = readStoredJson<GlobalRunPreset>(GLOBAL_PRESET_STORAGE_KEY);
-  if (!stored || stored.version !== PRESET_STORAGE_VERSION) {
+  keys = keys.filter((key) => key === GLOBAL_PRESET_STORAGE_KEY || key.startsWith(`${PROJECT_PRESET_STORAGE_KEY_PREFIX}.`));
+  if (keys.length === 0) {
     return null;
   }
-  return {
-    ...stored,
-    settings: sanitizeRunSettings(stored.settings),
-  };
+  const defaults = readStoredPreset(GLOBAL_PRESET_STORAGE_KEY)?.settings;
+  const projects = keys.flatMap((key) => {
+    const projectId = key.slice(PROJECT_PRESET_STORAGE_KEY_PREFIX.length + 1);
+    const stored = key === GLOBAL_PRESET_STORAGE_KEY ? null : readStoredPreset(key);
+    return stored?.settings && stored.project_id === projectId
+      ? [{ projectId, settings: sanitizeRunSettings(stored.settings) }]
+      : [];
+  });
+  return { defaults: defaults ? sanitizeRunSettings(defaults) : null, projects, keys };
 }
 
-export function loadProjectRunPreset(projectId: string): ProjectRunPreset | null {
-  const stored = readStoredJson<ProjectRunPreset>(getProjectPresetStorageKey(projectId));
-  if (!stored || stored.version !== PRESET_STORAGE_VERSION || stored.project_id !== projectId) {
-    return null;
+export function forgetBrowserRunPresets(presets: BrowserRunPresets): void {
+  try {
+    presets.keys.forEach((key) => window.localStorage.removeItem(key));
+  } catch {
+    // nothing to forget when storage is unavailable
   }
-  return {
-    ...stored,
-    settings: sanitizeRunSettings(stored.settings),
-  };
 }
 
-export function persistGlobalRunPreset(settings: RunSettings): GlobalRunPreset {
-  const preset: GlobalRunPreset = {
-    version: PRESET_STORAGE_VERSION,
-    settings: sanitizeRunSettings(settings),
-    saved_at: new Date().toISOString(),
-  };
-  writeStoredJson(GLOBAL_PRESET_STORAGE_KEY, preset);
-  return preset;
-}
-
-export function persistProjectRunPreset(projectId: string, settings: RunSettings): ProjectRunPreset {
-  const preset: ProjectRunPreset = {
-    version: PRESET_STORAGE_VERSION,
-    project_id: projectId,
-    settings: sanitizeRunSettings(settings),
-    saved_at: new Date().toISOString(),
-  };
-  writeStoredJson(getProjectPresetStorageKey(projectId), preset);
-  return preset;
+/** The settings someone saved for a project, or as their own defaults (`projectId` null); null if none. */
+export function findSavedRunSettings(saved: SavedRunSettings[], projectId: string | null): RunSettings | null {
+  const match = saved.find((item) => item.project_id === projectId);
+  return match ? sanitizeRunSettings(match.settings) : null;
 }
 
 export function areRunSettingsEqual(left: RunSettings, right: RunSettings): boolean {

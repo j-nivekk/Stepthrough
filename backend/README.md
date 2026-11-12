@@ -118,6 +118,11 @@ endpoint checks the role. People who may not open a project get the same 404 as 
 Users with the `admin` tag may open every project, though their project list shows only their own. Sharing a
 project with other people or a tag works in the data model but has no page yet.
 
+Settings saved for new runs (`saved_run_settings`) belong to the person who saved them: their own defaults, and
+theirs for any project they may open, as a viewer too. They are deleted with the account or the project; resetting
+the database keeps everyone's own defaults. Earlier versions kept them in the browser; the app moves those to the
+first account that opens it there.
+
 With `STEPTHROUGH_AUTH=none` (the desktop app) there are no logins: every request comes from the built-in user
 `local`, an administrator, who also owns every project made before users existed.
 

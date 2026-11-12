@@ -275,6 +275,15 @@ class RunSettings(BaseModel):
         return self
 
 
+class SavedRunSettingsResponse(BaseModel):
+    """Settings someone saved to start new runs from: their own defaults (``project_id`` None) or theirs for one
+    project."""
+
+    project_id: str | None
+    settings: RunSettings
+    saved_at: str
+
+
 class RecordingImportResponse(BaseModel):
     id: str
     project_id: str

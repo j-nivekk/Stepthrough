@@ -392,8 +392,10 @@ settings for a short explanation of each one.
 
 ### Saving and sharing settings
 
-- **save… → save for this project** keeps the current settings as this project's default, in this browser.
-- **save… → save as universal defaults** uses them for every project, in this browser.
+- **save… → save for this project** keeps the current settings as your default for this project.
+- **save… → save as universal defaults** uses them for every project you have not saved settings for.
+- Saved settings belong to your account, not to the browser: on a shared server they are there on any computer
+  you log in from, and other people in a shared project keep their own.
 - **preset text** shows the settings as a short piece of text that you can copy, for example into a methods
   section or to share with others. **load** reads such a text back in.
 - The **reset** button (★) goes back to the project's or the universal defaults.

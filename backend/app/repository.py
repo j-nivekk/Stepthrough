@@ -297,6 +297,36 @@ def transfer_projects(from_member: str, to_member: str) -> int:
     return moved
 
 
+def list_saved_run_settings(user_id: str) -> list[dict[str, Any]]:
+    """The settings this user saved: their own defaults (``project_id`` None) first, then those for projects."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT project_id, settings, saved_at FROM saved_run_settings
+            WHERE user_id = ?
+            ORDER BY project_id IS NOT NULL, saved_at
+            """,
+            (user_id,),
+        ).fetchall()
+    return [{**dict(row), "settings": json.loads(row["settings"])} for row in rows]
+
+
+def save_run_settings(user_id: str, project_id: str | None, settings: RunSettings) -> dict[str, Any]:
+    """Keep ``settings`` as this user's defaults (``project_id`` None) or as theirs for one project, in place of
+    what was saved there before."""
+    saved = {"project_id": project_id, "settings": settings.model_dump(mode="json"), "saved_at": utc_now()}
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM saved_run_settings WHERE user_id = ? AND IFNULL(project_id, '') = IFNULL(?, '')",
+            (user_id, project_id),
+        )
+        conn.execute(
+            "INSERT INTO saved_run_settings (user_id, project_id, settings, saved_at) VALUES (?, ?, ?, ?)",
+            (user_id, project_id, json.dumps(saved["settings"]), saved["saved_at"]),
+        )
+    return saved
+
+
 def users_due_for_deletion(today: str) -> list[dict[str, Any]]:
     """Users whose ``delete_after`` date (YYYY-MM-DD) is ``today`` or earlier."""
     with connect() as conn:

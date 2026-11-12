@@ -3,6 +3,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 
 import {
   abortRun,
+  ApiError,
   apiSocketUrl,
   createManualCandidate,
   createManualRun,
@@ -16,12 +17,14 @@ import {
   getProject,
   getRecording,
   getRun,
+  getSavedRunSettings,
   health,
   importRecording,
   listProjects,
   logOut,
   recheckOcr,
   resetDatabase,
+  saveRunSettings,
   updateCandidate,
   updateProject,
   updateRecording,
@@ -55,12 +58,10 @@ import {
   areRunSettingsEqual,
   defaultRunSettings,
   enforceLocalOcrAvailability,
-  getProjectPresetStorageKey,
-  loadGlobalRunPreset,
-  loadProjectRunPreset,
+  findSavedRunSettings,
+  forgetBrowserRunPresets,
   parseRunPresetText,
-  persistGlobalRunPreset,
-  persistProjectRunPreset,
+  readBrowserRunPresets,
   sanitizeRunSettings,
   serializeRunPresetText,
 } from './lib/runSettings';
@@ -70,7 +71,6 @@ import type {
   CandidateFrame,
   CandidateStatus,
   ExportMode,
-  GlobalRunPreset,
   HealthResponse,
   Project,
   RecordingDetail,
@@ -78,6 +78,7 @@ import type {
   RunDetail,
   RunSettings,
   RunSummary,
+  SavedRunSettings,
   SessionInfo,
 } from './types';
 
@@ -85,6 +86,8 @@ type PendingTaskNavigation = {
   anchorId: 'analysis-candidate-review' | 'analysis-run-detail';
   runId: string;
 };
+
+const SAVED_RUN_SETTINGS_KEY = ['saved-run-settings'];
 
 // Logged-in people are reminded this many days before their account is deleted.
 const DELETION_NOTICE_DAYS = 30;
@@ -116,8 +119,6 @@ function App({ session, onSessionChange }: AppProps) {
   const [pendingTaskNavigation, setPendingTaskNavigation] = useState<PendingTaskNavigation | null>(null);
   const [runSettings, setRunSettingsState] = useState<RunSettings>(defaultRunSettings);
   const [settingsFeedback, setSettingsFeedback] = useState('');
-  const [globalPreset, setGlobalPreset] = useState<GlobalRunPreset | null>(() => loadGlobalRunPreset());
-  const [projectDefaultSettings, setProjectDefaultSettings] = useState<RunSettings>(defaultRunSettings);
   const [importQueue, setImportQueue] = useState<ImportQueueItem[]>([]);
   const [importSelectionFeedback, setImportSelectionFeedback] = useState('');
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
@@ -160,6 +161,24 @@ function App({ session, onSessionChange }: AppProps) {
     staleTime: Infinity,
   });
   const analysisMetadata = analysisMetadataQuery.data ?? null;
+  // Settings saved to start new runs from. They are kept with the account, so they follow it to any computer.
+  const savedRunSettingsQuery = useQuery<SavedRunSettings[]>({
+    queryKey: SAVED_RUN_SETTINGS_KEY,
+    queryFn: getSavedRunSettings,
+    enabled: backendReady,
+  });
+  const savedRunSettings = savedRunSettingsQuery.data;
+  const savedRunSettingsLoaded = savedRunSettings !== undefined;
+  const universalDefaultSettings = useMemo(
+    () => findSavedRunSettings(savedRunSettings ?? [], null) ?? defaultRunSettings,
+    [savedRunSettings],
+  );
+  const projectDefaultSettings = useMemo(
+    () =>
+      (selectedProjectId ? findSavedRunSettings(savedRunSettings ?? [], selectedProjectId) : null) ??
+      universalDefaultSettings,
+    [savedRunSettings, selectedProjectId, universalDefaultSettings],
+  );
   const ocrStatus = healthQuery.data?.ocr_status ?? null;
   const ocrAvailability = healthQuery.data?.ocr_available;
   const ocrStatusMessage = backendReady ? healthQuery.data?.ocr_message ?? null : null;
@@ -219,7 +238,6 @@ function App({ session, onSessionChange }: AppProps) {
   useEffect(() => {
     if (!selectedProjectId) {
       setRunSettings(defaultRunSettings);
-      setProjectDefaultSettings(defaultRunSettings);
       setSettingsFeedback('');
       setImportQueue([]);
       setImportSelectionFeedback('');
@@ -229,12 +247,47 @@ function App({ session, onSessionChange }: AppProps) {
       return;
     }
 
-    const projectPreset = loadProjectRunPreset(selectedProjectId);
-    const nextSettings = applyLocalOcrAvailability(projectPreset?.settings ?? globalPreset?.settings ?? defaultRunSettings);
-    setProjectDefaultSettings(nextSettings);
-    setRunSettings(nextSettings);
     setSettingsFeedback('');
-  }, [globalPreset?.settings, selectedProjectId]);
+  }, [selectedProjectId]);
+
+  // A project opens with the settings saved for it, or else the person's own defaults; again once those have
+  // loaded. Saving, or fetching them again later, leaves the settings on screen alone.
+  useEffect(() => {
+    if (selectedProjectId) {
+      setRunSettings(projectDefaultSettings);
+    }
+  }, [savedRunSettingsLoaded, selectedProjectId]);
+
+  // Earlier versions kept saved settings in the browser. They go to the first account that opens the app here,
+  // where it has saved nothing of its own, and are then forgotten, so they cannot reach a second account.
+  useEffect(() => {
+    if (!savedRunSettings) {
+      return;
+    }
+    const presets = readBrowserRunPresets();
+    if (!presets) {
+      return;
+    }
+    const isSaved = (projectId: string | null) => savedRunSettings.some((item) => item.project_id === projectId);
+    const missing = [
+      ...(presets.defaults && !isSaved(null) ? [{ projectId: null, settings: presets.defaults }] : []),
+      ...presets.projects.filter(({ projectId }) => !isSaved(projectId)),
+    ];
+    void Promise.allSettled(missing.map(({ projectId, settings }) => saveRunSettings(projectId, settings))).then(
+      (results) => {
+        results.forEach((result) => {
+          if (result.status === 'fulfilled') {
+            rememberSavedRunSettings(result.value);
+          }
+        });
+        // A project this account cannot open is refused; keep the presets for another try only when the server
+        // could not be reached.
+        if (results.every((result) => result.status === 'fulfilled' || result.reason instanceof ApiError)) {
+          forgetBrowserRunPresets(presets);
+        }
+      },
+    );
+  }, [savedRunSettingsLoaded]);
 
   useEffect(() => {
     function syncViewportSize() {
@@ -604,10 +657,27 @@ function App({ session, onSessionChange }: AppProps) {
     onError: (error: Error) => setAppError(error.message),
   });
 
+  const saveRunSettingsMutation = useMutation({
+    mutationFn: ({ projectId, settings }: { projectId: string | null; settings: RunSettings }) =>
+      saveRunSettings(projectId, settings),
+    onSuccess: (saved) => {
+      rememberSavedRunSettings(saved);
+      setSettingsFeedback(
+        saved.project_id
+          ? 'saved the current settings for this project.'
+          : 'saved the current settings as universal defaults.',
+      );
+    },
+    onError: (error: Error) => setAppError(error.message),
+  });
+
   const deleteProjectMutation = useMutation({
     mutationFn: ({ projectId }: { projectId: string }) => deleteProject(projectId),
     onSuccess: (_result, variables) => {
-      window.localStorage.removeItem(getProjectPresetStorageKey(variables.projectId));
+      // The server drops the settings saved for it along with it.
+      queryClient.setQueryData<SavedRunSettings[]>(SAVED_RUN_SETTINGS_KEY, (current) =>
+        current?.filter((item) => item.project_id !== variables.projectId),
+      );
       if (selectedProjectId === variables.projectId) {
         if (selectedRecordingId) {
           queryClient.removeQueries({ queryKey: ['recording', selectedRecordingId] });
@@ -871,19 +941,22 @@ function App({ session, onSessionChange }: AppProps) {
     });
   }
 
+  function rememberSavedRunSettings(saved: SavedRunSettings) {
+    queryClient.setQueryData<SavedRunSettings[]>(SAVED_RUN_SETTINGS_KEY, (current = []) => [
+      ...current.filter((item) => item.project_id !== saved.project_id),
+      saved,
+    ]);
+  }
+
   function handleSaveProjectDefault() {
     if (!selectedProjectId) {
       return;
     }
-    const savedPreset = persistProjectRunPreset(selectedProjectId, applyLocalOcrAvailability(runSettings));
-    setProjectDefaultSettings(savedPreset.settings);
-    setSettingsFeedback('saved the current settings for this project.');
+    saveRunSettingsMutation.mutate({ projectId: selectedProjectId, settings: applyLocalOcrAvailability(runSettings) });
   }
 
-  function handleSaveBrowserDefault() {
-    const savedPreset = persistGlobalRunPreset(applyLocalOcrAvailability(runSettings));
-    setGlobalPreset(savedPreset);
-    setSettingsFeedback('saved the current settings as universal defaults.');
+  function handleSaveUniversalDefault() {
+    saveRunSettingsMutation.mutate({ projectId: null, settings: applyLocalOcrAvailability(runSettings) });
   }
 
   function applyAnalysisSettings(nextSettings: RunSettings, feedback: string) {
@@ -896,7 +969,7 @@ function App({ session, onSessionChange }: AppProps) {
   }
 
   function handleResetToUniversalDefaults() {
-    applyAnalysisSettings(globalPreset?.settings ?? defaultRunSettings, 'reset the current settings to the universal defaults.');
+    applyAnalysisSettings(universalDefaultSettings, 'reset the current settings to the universal defaults.');
   }
 
   function handleApplyImportedPreset(settings: RunSettings) {
@@ -1552,7 +1625,7 @@ function App({ session, onSessionChange }: AppProps) {
         onResetToProjectDefaults={handleResetToProjectDefaults}
         onResetToUniversalDefaults={handleResetToUniversalDefaults}
         onSaveProjectPreset={handleSaveProjectDefault}
-        onSaveUniversalPreset={handleSaveBrowserDefault}
+        onSaveUniversalPreset={handleSaveUniversalDefault}
         onSelectRecording={handleSelectRecording}
         onSelectRun={handleSelectTaskRun}
         onStartRun={handleStartAnalysisRun}

@@ -14,6 +14,7 @@ import type {
   RunDetail,
   RunSettings,
   RunSummary,
+  SavedRunSettings,
   SessionInfo,
   UserImportResult,
   UserLink,
@@ -146,6 +147,17 @@ export function createRun(recordingId: string, settings: RunSettings): Promise<R
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),
   });
+}
+
+/** The settings the logged-in person saved for new runs: their own defaults and theirs per project. */
+export function getSavedRunSettings(): Promise<SavedRunSettings[]> {
+  return request<SavedRunSettings[]>('/me/run-settings');
+}
+
+/** Save settings as the logged-in person's own defaults (`projectId` null) or as theirs for one project. */
+export function saveRunSettings(projectId: string | null, settings: RunSettings): Promise<SavedRunSettings> {
+  const path = projectId ? `/me/run-settings/projects/${projectId}` : '/me/run-settings/default';
+  return request<SavedRunSettings>(path, jsonBody('PUT', settings));
 }
 
 export function createManualRun(recordingId: string): Promise<RunSummary> {
