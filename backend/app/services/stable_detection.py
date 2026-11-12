@@ -46,7 +46,7 @@ from .run_control import CancellationCallback, CancellationRequested, ProgressCa
 from .similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string, text_distance
 from .video import extract_frame
 
-ENGINE_VERSION = "stable_v3/1.0.0"
+ENGINE_VERSION = "stable_v3/1.1.0"
 
 ANALYSIS_LONG_EDGE = 480
 TARGET_SAMPLE_FPS = 15.0
@@ -70,6 +70,11 @@ KEYBOARD_MAX_CHANGE_SHARE = 0.12  # switching between letter and number/symbol l
 MOTION_MIN_CONFIDENCE = 0.3
 MOTION_FLOOR = 0.05
 REVISIT_LOOKBACK = 60  # steps compared when looking for an earlier visit of the same screen
+# A scrim over a screen turns grey level v into k * v + c: k is how much shows through, c what the scrim's
+# own colour adds (0 for black, the usual one). These are the values of c that are tried.
+SCRIM_OFFSETS = (0.0, 4.0, 8.0, 12.0, 16.0, 24.0, 32.0, 40.0)
+SCRIM_MIN_LEVEL = 40.0  # pixels darker than this say too little about k to estimate it from
+_NOT_AN_EDIT = ("scroll", "feed_card_swap", "modal", "modal_close")
 FRAME_MEMORY_BUDGET_BYTES = 512 * 1024 * 1024
 SCAN_RANGE = (0.10, 0.46)
 PROGRESS_STEP_PERCENT = 5
@@ -289,6 +294,7 @@ class _Transition:
     direct_dy: float
     direct_confidence: float
     overlay: bool  # a sheet or dialog over an unchanged or uniformly dimmed screen
+    overlay_closed: bool = False  # that sheet or dialog went away, and the screen under it is back
     label: str = "unknown"
 
 
@@ -337,30 +343,38 @@ def _boxes_and_share(raw: np.ndarray, speck: float) -> tuple[list[tuple[int, int
 def _is_overlay(a: np.ndarray, b: np.ndarray, raw: np.ndarray) -> bool:
     """Did a sheet or dialog appear over a dimmed copy of the previous screen?
 
-    Changed pixels that a single dimming factor explains (new = k * old) are the backdrop; at least 15 % of
-    the screen must be dimmed like that. What is left is the overlay's content. It counts when that content
-    is one block, centred or anchored to the bottom edge. Sheets that do not dim the screen are labelled by
-    the size of the change instead, because new content on the page looks the same.
+    A scrim turns every pixel of the screen under it from v into k * v + c. Changed pixels that one such
+    pair explains are the backdrop; at least 15 % of the screen must be dimmed like that. What is left is
+    the overlay's content. It counts when that content is one block, centred or anchored to the bottom edge.
+    Sheets that do not dim the screen are labelled by the size of the change instead, because new content
+    on the page looks the same.
+
+    With ``a`` and ``b`` swapped this asks the opposite: did an overlay go away, leaving the screen under it?
     """
     height, width = raw.shape
     changed = raw.astype(bool)
     if changed.mean() < 0.05:
         return False
-    before = a.astype(np.float32) - 16.0
-    after = b.astype(np.float32) - 16.0
-    lit = before >= 24.0
+    before = a.astype(np.float32)
+    after = b.astype(np.float32)
+    lit = before >= SCRIM_MIN_LEVEL
     candidates = changed & lit
     if candidates.sum() < 0.15 * raw.size:
         return False
-    ratio = np.where(lit, after / np.maximum(before, 1.0), 0.0)
-    factor = float(np.median(ratio[candidates]))
-    if not 0.25 <= factor <= 0.92:
-        return False
-    backdrop = lit & (np.abs(ratio - factor) <= 0.1)
-    if (changed & backdrop).mean() < 0.15:
+    # Dark pixels follow the scrim too (a dark header bar gets darker still), within a few grey levels.
+    tolerance = np.maximum(0.1 * before, 6.0)
+    backdrop = None
+    for offset in SCRIM_OFFSETS:
+        factor = float(np.median((after[candidates] - offset) / before[candidates]))
+        if not 0.25 <= factor <= 0.92:
+            continue
+        fits = np.abs(after - (factor * before + offset)) <= tolerance
+        if backdrop is None or (changed & fits).sum() > (changed & backdrop).sum():
+            backdrop = fits
+    if backdrop is None or (changed & lit & backdrop).mean() < 0.15:
         return False  # without a dimmed backdrop, new content on the page is not told apart from a dialog
     # Dimming keeps the old screen's edges and text, only darker. Smooth images (two video frames) can match
-    # one factor by accident, so the factor must also hold on the old screen's edges.
+    # one scrim by accident, so it must also hold on the old screen's edges.
     edges = cv2.morphologyEx(a, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8)) >= 24
     edge_pixels = changed & lit & edges
     if edge_pixels.sum() < 0.01 * raw.size or float(backdrop[edge_pixels].mean()) < 0.5:
@@ -418,6 +432,7 @@ def _describe(
         direct_dy=direct_dy,
         direct_confidence=direct_confidence,
         overlay=_is_overlay(previous.anchor, current.anchor, raw),
+        overlay_closed=_is_overlay(current.anchor, previous.anchor, raw),
     )
     transition.label = _classify(transition, comparer.width, comparer.height)
     return transition
@@ -427,6 +442,8 @@ def _classify(t: _Transition, width: int, height: int) -> str:
     """Describe the change into a step. Labels annotate steps; they never decide whether a step exists."""
     if t.overlay:
         return "modal"  # checked first: a sheet sliding up also moves vertically
+    if t.overlay_closed:
+        return "modal_close"
     travel = abs(t.travel_dy)
     swiped = t.vertical_moves >= 2 and t.vertical_consistency >= 0.8 and travel > 2 * abs(t.travel_dx)
     if swiped and 0.8 * height <= travel <= 1.25 * height and t.changed_share >= 0.8:
@@ -511,7 +528,7 @@ def _is_small_edit(transition: _Transition | None) -> bool:
         transition is not None
         and bool(transition.boxes)
         and transition.changed_area <= TYPING_MAX_CHANGE_SHARE
-        and transition.label not in ("scroll", "feed_card_swap", "modal")
+        and transition.label not in _NOT_AN_EDIT
     )
 
 
@@ -519,7 +536,7 @@ def _is_keyboard_change(transition: _Transition | None, frame_height: int, area_
     """A change only inside the on-screen keyboard (layout switch, shift key) while typing on a phone."""
     if transition is None or transition.changed_area > KEYBOARD_MAX_CHANGE_SHARE:
         return False
-    if transition.label in ("scroll", "feed_card_swap", "modal"):
+    if transition.label in _NOT_AN_EDIT:
         return False
     parts = [box for box in transition.boxes if box[4] >= area_min]
     return bool(parts) and all(box[1] >= KEYBOARD_TOP_SHARE * frame_height for box in parts)

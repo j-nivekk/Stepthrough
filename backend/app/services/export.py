@@ -81,8 +81,9 @@ _ENGINE_NOTES = {
         "step": "a screen that stayed still for at least resolved_settings.min_dwell_ms",
         "scene_score": "share of the screen that changed into this step (share of a 24 x 24 grid of regions); 1 for the opening screen",
         "transition_type": (
-            "how the step was reached: opening_screen, navigation, scroll, feed_card_swap, modal, content_update, "
-            "small_ui_change or text_entry (a typing burst grouped into one step); a description, not used to find steps"
+            "how the step was reached: opening_screen, navigation, scroll, feed_card_swap, modal, modal_close "
+            "(a pop-up went away and the screen under it was still there), content_update, small_ui_change or "
+            "text_entry (a typing burst grouped into one step); a description, not used to find steps"
         ),
         "change_started_ms": "when the screen started changing away from the previous step",
         "settled_ms": "when this step's screen stopped changing",

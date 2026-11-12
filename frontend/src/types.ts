@@ -9,6 +9,7 @@ export type TransitionType =
   | 'scroll'
   | 'feed_card_swap'
   | 'modal'
+  | 'modal_close'
   | 'content_update'
   | 'small_ui_change'
   | 'text_entry'

@@ -3630,6 +3630,10 @@ a {
   --segment-rgb: 177, 69, 60;
 }
 
+.timeline-segment--modal_close {
+  --segment-rgb: 199, 125, 137;
+}
+
 .timeline-segment--feed_card_swap {
   --segment-rgb: 45, 122, 90;
 }
@@ -6298,6 +6302,7 @@ button:disabled {
 .timeline-legend-color.dwell { color: rgb(162, 105, 27); }
 .timeline-legend-color.navigation { color: rgb(209, 109, 56); }
 .timeline-legend-color.modal { color: rgb(177, 69, 60); }
+.timeline-legend-color.modal_close { color: rgb(199, 125, 137); }
 .timeline-legend-color.feed_card_swap { color: rgb(45, 122, 90); }
 .timeline-legend-color.content_update { color: rgb(111, 102, 90); }
 .timeline-legend-color.small_ui_change { color: rgb(157, 77, 38); }

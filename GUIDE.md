@@ -350,6 +350,7 @@ Labels describe the change. They never decide what counts as a step.
 | navigation | most of the screen changed: a new page or view |
 | scroll | the content moved and then stopped |
 | modal | a pop-up or panel appeared over a dimmed screen |
+| modal closed | a pop-up or panel went away, and the screen under it was still there |
 | feed swap | a full-screen swipe to the next item, as in short-video apps |
 | update | part of the screen changed, for example because content loaded |
 | ui change | a small change, such as a switch, a badge or a button |

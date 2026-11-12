@@ -170,6 +170,42 @@ def test_revisit_means_the_same_screen_state(tmp_path: Path) -> None:
     assert candidates[1]["revisit_group_id"] is None
 
 
+def _dialog_over(screen: np.ndarray, scrim_grey: int) -> np.ndarray:
+    """``screen`` under a scrim of that grey, with a dialog in the middle."""
+    frame = r.fade(screen, np.full_like(screen, scrim_grey), 0.45)
+    height, width = frame.shape[:2]
+    x, y = (width - 320) // 2, (height - 200) // 2
+    r.rect(frame, x, y, 320, 200, r.WHITE, radius=12)
+    r.text_centered(frame, "Allow notifications?", y + 50, color=r.NEAR_BLACK, scale=0.6, thickness=2)
+    r.button(frame, "Not now", x + 20, y + 140, 120, 36, bg=r.GRAY_200, text_color=r.NEAR_BLACK)
+    r.button(frame, "Allow", x + 180, y + 140, 120, 36, bg=r.BLUE_700)
+    return frame
+
+
+@pytest.mark.parametrize("scrim_grey", [0, 40])
+def test_a_dialog_is_labelled_when_it_opens_and_when_it_closes(tmp_path: Path, scrim_grey: int) -> None:
+    # A dark header bar: under a scrim it gets darker still, which must count as dimming, not as new content.
+    def settings(notifications: bool) -> np.ndarray:
+        items = [("Notifications", notifications), ("Dark Mode", False), ("Auto-Save", False)]
+        return r.app_chrome(r.settings_screen(items=items), header_text="Settings", header_color=(95, 58, 31),
+                            header_text_color=r.WHITE)
+
+    before, after = settings(False), settings(True)
+    clip = _write(tmp_path / "dialog", [before] * 30 + [_dialog_over(before, scrim_grey)] * 30 + [after] * 30)
+    candidates = _detect(clip, tmp_path, _settings())
+
+    assert _labels(candidates) == ["opening_screen", "modal", "modal_close"]
+    # A switch changed while the dialog was open, so the screen under it is not the same state again.
+    assert candidates[2]["similar_to_candidate_id"] is None
+
+
+def test_a_new_page_after_a_dialog_is_not_a_closing(tmp_path: Path) -> None:
+    under = r.app_chrome(r.settings_screen(), header_text="Settings")
+    other = r.app_chrome(r.dashboard_screen(), header_text="Dashboard")
+    clip = _write(tmp_path / "leave", [under] * 30 + [_dialog_over(under, 0)] * 30 + [other] * 30)
+    assert _labels(_detect(clip, tmp_path, _settings())) == ["opening_screen", "modal", "navigation"]
+
+
 def test_screenshot_is_taken_inside_the_stable_screen(tmp_path: Path) -> None:
     a = r.app_chrome(r.list_screen(), header_text="Inbox")
     b = r.app_chrome(r.dashboard_screen(), header_text="Dashboard")

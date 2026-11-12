@@ -80,6 +80,7 @@ export const transitionLabels: { type: string; label: string }[] = [
   { type: 'dwell', label: 'dwell' },
   { type: 'navigation', label: 'navigation' },
   { type: 'modal', label: 'modal' },
+  { type: 'modal_close', label: 'modal closed' },
   { type: 'feed_card_swap', label: 'feed swap' },
   { type: 'content_update', label: 'update' },
   { type: 'small_ui_change', label: 'ui change' },

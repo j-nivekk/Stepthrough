@@ -1,7 +1,7 @@
 # How well Stepthrough finds steps
 
 This page reports how Stepthrough's step detection was tested, how well it does, and where it goes wrong. It
-covers the engine that every new run uses, **stable screens** (`stable_v3`, engine version 1.0.0).
+covers the engine that every new run uses, **stable screens** (`stable_v3`, engine version 1.1.0).
 [Section 5 of the guide](../GUIDE.md#5-how-stepthrough-finds-steps) explains how it works in plain terms, and
 [`backend/README.md`](../backend/README.md) lists its settings.
 
@@ -11,6 +11,12 @@ regenerate the recordings and repeat the numbers. No real recordings are used.
 All numbers below were measured on 8 November 2026, with the engine as of commit `865003f`, on a Mac (Apple M4)
 with FFmpeg 9.0.2, OpenCV 4.10 and Python 3.12. [Section 5](#5-reproducing-these-numbers) shows how to repeat
 them.
+
+Those measurements were made with engine version 1.0.0. Version 1.1.0 changes labels only: a pop-up is now
+recognised whatever dark colour dims the screen under it and when dark areas such as a header bar sit beside
+it, and a pop-up that closes gets its own label (*modal closed*). The interface scenarios in section 3 were
+measured again with 1.1.0 on 12 November 2026 and give the same table. The other numbers were not measured
+again.
 
 ## Summary
 
