@@ -52,7 +52,9 @@ To see this as an animation, open Stepthrough and choose **about → how it work
 | **step** | a screen that stayed still long enough to count, with one screenshot; until you review it, it is called a candidate |
 | **accepted step** | a step you decided belongs in the walkthrough |
 | **label** | the kind of change that led to a step, such as navigation, scroll or typing |
-| **export** | a zip file with the screenshots and two files that describe the steps, `steps.csv` and `steps.json` |
+| **screen** | one or more steps that show the same screen of the app, such as a page before and after scrolling |
+| **pathway** | the accepted steps drawn as a chart: the screens, and the moves between them |
+| **export** | a zip file with the screenshots and files that describe the steps: `steps.csv`, `steps.json` and `pathway.json` |
 
 ## 3. Installing and starting Stepthrough
 
@@ -422,16 +424,88 @@ While the video plays, the card of the step on screen is outlined, so you can se
 | play the video from a step | **play from here** on the screenshot, or `p` for the selected step |
 | add a title and notes | **annotate** on a card, or type directly in the list view |
 | show only some steps | **all**, **pending**, **accepted** or **rejected** above the steps |
+| fold away the strip of accepted steps | click **accepted steps** above it; click again to show it |
 | hide steps with a certain label | click the label in the legend above the timeline; click again to show them |
 | change the layout | **grid** or **list**; the slider sets the size of the images, and **fit** goes back to images sized to fill the width of the window |
 | accept or reject many steps at once | tick the boxes on pending steps, then press **accept selected** or **reject selected** |
 | go to an earlier visit of the same screen | **similar to candidate N** on a revisit |
+| say which screen a step shows in the pathway | **screen** under **annotate** on a card, or in the **label, screen** column of the list |
 
 ### Comparing runs
 
 Under **compare runs**, choose a second finished run of the same recording. You then see which steps both runs
 found, which steps only one of them found, and which were found at slightly different times. This helps you
 see what a change of settings does.
+
+### Pathway
+
+Above the steps of a finished run you can switch from **steps** to **pathway**. The pathway draws the
+accepted steps as a chart: one box per screen, with a screenshot, and arrows for the moves between screens.
+A recording is a straight line in time; the chart shows where that line went back to a screen, left it again
+another way, or took a detour.
+
+How to read it:
+
+- The black numbers are step numbers, the same as in the step list and in `steps.csv`. A screen shows the
+  steps taken on it, each with its time. An arrow shows the number of the step it leads to, so you can
+  follow the journey from 1 onwards.
+- A solid arrow goes onwards; a dashed arrow goes back to a screen that was first seen earlier.
+- A doubled frame means several steps in a row on that screen (for example `6–7` after scrolling).
+- A dashed frame is a pop-up, when the change that led to it was labelled as one (**modal**).
+- A screen takes the title of its first step that has one. Notes appear under the screen, with the step
+  number in front when the screen has several steps.
+
+Which steps count as the same screen is decided automatically, from two things. A step that shows an earlier
+screen again (a revisit) always shares its box. A step reached by scrolling, typing, swiping to the next
+item of a feed or a small change stays in the box of the step before it. Choose **boxes: steps** to give
+every step its own box, so that only revisits share one. A step you added by hand always has its own box.
+When a pop-up closes (**modal closed**), the step after it goes back into the box of the screen under the
+pop-up, also when something on that screen changed in the meantime, such as a switch that is now on.
+As with labels, this goes by what the screen looks like: two screens that look alike count as one, and the
+same screen in a different state can count as two.
+
+**When the pathway gets it wrong**, correct it on the step itself, under **steps**. Each step has a **screen**
+choice (under **annotate** on a card, or in the **label, screen** column of the list):
+
+- **automatic** leaves the step where the rules above put it;
+- **a new screen** gives the step a box of its own, for two pages that look alike and were taken for one;
+- **the same screen as** another step, picked from a list with screenshots, puts the step in that step's
+  box, for a return that was not recognised or the same page in a different state;
+- **this step is a pop-up** marks a menu or dialog that was not recognised (or, unticked, one that was
+  recognised by mistake). A pop-up always starts a box of its own.
+
+Your choice comes before everything automatic and applies to both kinds of boxes. A card shows it as
+`screen: same as 3`; switch to **pathway** to see the result.
+
+You can make the same corrections in the pathway itself. Click a screen in the chart (or choose it under
+**screen** above the chart) and the strip above the chart shows that box:
+
+- **title** renames the box. A box is named after its first step that has a title, so this is that step's
+  title, and the step list shows it too;
+- **pop-up** marks the box as a pop-up or as an ordinary screen;
+- **steps and where they belong** lists the steps in the box, each with its **screen** choice, where you can
+  move one step to another box or give it a box of its own. Steps that follow a moved step by scrolling or
+  typing move with it;
+- **merge into** puts the whole box into another one.
+
+Everything you change here is stored on the steps, exactly as if you had chosen it in the step list.
+
+| to | do this |
+| --- | --- |
+| give every step its own box | **boxes: steps** (the default, **screens**, groups them) |
+| move the notes | **notes: under screens** (cut after four lines), **in a key** below the chart (in full), or **off** |
+| leave out the times, or the title and legend | **show: times** and **title and legend** |
+| change the size on the page | the slider; **fit** fills the width of the window |
+| save the chart | **download svg** |
+
+The downloaded file is one SVG image with the screenshots inside it, so it needs no other files. Its text
+stays text and every screen is a group of its own, so you can finish the figure in a drawing program such as
+Inkscape, Illustrator or Affinity. The title and legend are separate groups that are easy to delete.
+
+At the bottom right, every figure carries a small badge: a QR code that leads to Stepthrough's repository,
+the date the figure was made, the version of Stepthrough that made it, and the addresses to find and cite
+it. The badge is drawn as shapes, not as text, so it looks the same on every computer. It is a group of its
+own too, which you can move or resize in a drawing program.
 
 ### Tasks
 
@@ -446,7 +520,9 @@ a run used, **review outputs** opens it, and **select** lets you delete or expor
 
 - `images/`: one screenshot (PNG) per step, named after the recording, the step number and the time;
 - `steps.csv`: one row per step, to open in a spreadsheet;
-- `steps.json`: the same steps, plus everything about the run, for use in your own scripts.
+- `steps.json`: the same steps, plus everything about the run, for use in your own scripts;
+- `pathway.json`: the same steps as a pathway: which screen each step is on, the visits to each screen, and
+  the moves between screens with the steps they lead to.
 
 For each step, the export has its time, the screenshot's file name, its status, title and notes, and its label
 (`transition_type`). It also has when the change started (`change_started_ms`), when the screen came to rest
@@ -457,6 +533,12 @@ recognition was on, the text in the screenshot (`ocr_text`).
 `steps.json` also records the size and frame rate of the recording, the settings as you chose them and as
 they were actually used, what was measured (such as the flicker level), and `field_notes` explaining every
 field. That way, the export can be read and cited without the app.
+
+`pathway.json` uses the step numbers and image names of `steps.json`. For every step it gives the screen it
+is on and why it shares that screen with an earlier step (`grouped_by`: `researcher` when you chose it, a
+revisit, a pop-up closing, or a label such as scroll), and what you chose for the step (`screen_choice`,
+`kind_choice`), so your decisions and the automatic ones can be told apart. It has its own `field_notes`.
+The chart itself is not in the zip; save it with **download svg**.
 
 ## 9. Making good recordings
 
@@ -554,7 +636,7 @@ same settings for all recordings you compare, and report the steps you added and
 - **Walkthrough studies:** record signing up for an app, using it day to day and leaving it, and use the
   accepted steps and their notes as the basis for describing the walkthrough.
 - **Usability tests:** one project per study and one recording per participant. Compare where participants
-  paused or went back (revisits show returns to earlier screens).
+  paused or went back (revisits show returns to earlier screens, and the pathway draws them).
 - **Comparing platforms:** one project per app or version, with the same task recorded in each and the same
   settings. Compare the `steps.csv` files side by side.
 - **Changes over time:** record the same task at different dates and compare the exported steps.

@@ -9,6 +9,7 @@ CandidateOrigin = Literal["detected", "manual"]
 RunStatus = Literal["queued", "running", "awaiting_fallback", "completed", "failed", "cancelled"]
 DetectorMode = Literal["content", "adaptive"]
 ExportMode = Literal["accepted", "all"]
+PathwayDetail = Literal["screens", "steps"]
 # scene_v1 and hybrid_v2 are retired: their stored runs still load, review and export, but only stable_v3 runs.
 AnalysisEngine = Literal["scene_v1", "hybrid_v2", "stable_v3"]
 RecordingType = Literal["phone", "desktop"]
@@ -401,6 +402,9 @@ class CandidateFrameResponse(BaseModel):
     revisit_group_id: str | None = None
     similar_to_candidate_id: str | None = None
     similarity_distance: float | None = None
+    # The reviewer's say for the pathway; None leaves it to the automatic grouping.
+    screen_link: str | None = None  # "new", or the id of another step that shows the same screen
+    screen_kind: Literal["screen", "popup"] | None = None
     created_at: str
     updated_at: str
 
@@ -421,6 +425,72 @@ class AcceptedStepResponse(BaseModel):
     similar_to_step_id: str | None = None
     source_candidate_id: str
     export_filename: str
+
+
+class PathwayStepResponse(BaseModel):
+    step_id: str
+    step_index: int
+    screen_id: str
+    visit: int
+    timestamp_ms: int
+    timestamp_tc: str
+    title: str
+    notes: str | None = None
+    transition_type: str | None = None
+    time_on_screen_ms: int | None = None
+    image_path: str
+    image_url: str
+    grouped_by: str | None = None
+    screen_choice: Literal["automatic", "new_screen", "same_screen"] = "automatic"
+    kind_choice: Literal["automatic", "screen", "popup"] = "automatic"
+    source_candidate_id: str
+
+
+class PathwayVisitResponse(BaseModel):
+    visit: int
+    step_ids: list[str]
+    arrived_ms: int
+    time_on_screen_ms: int | None = None
+
+
+class PathwayScreenResponse(BaseModel):
+    id: str
+    index: int
+    title: str
+    title_step_id: str | None = None
+    kind: Literal["screen", "popup"]
+    reached_from: str | None = None
+    image_step_id: str
+    visits: list[PathwayVisitResponse]
+    time_on_screen_ms: int | None = None
+
+
+class PathwayPassResponse(BaseModel):
+    step_id: str
+    step_index: int
+    from_step_id: str
+    at_ms: int
+    transition_type: str | None = None
+
+
+class PathwayTransitionResponse(BaseModel):
+    from_screen: str
+    to_screen: str
+    kind: Literal["forward", "return"]
+    passes: list[PathwayPassResponse]
+
+
+class PathwayResponse(BaseModel):
+    """The accepted steps of a run as screens and the moves between them; see services/pathway.py."""
+
+    format: str
+    detail: PathwayDetail
+    step_count: int
+    screen_count: int
+    steps: list[PathwayStepResponse]
+    screens: list[PathwayScreenResponse]
+    transitions: list[PathwayTransitionResponse]
+    field_notes: dict[str, str]
 
 
 class ExportBundleResponse(BaseModel):
@@ -470,6 +540,9 @@ class CandidateUpdate(BaseModel):
     status: CandidateStatus | None = None
     title: str | None = Field(default=None, max_length=240)
     notes: str | None = Field(default=None, max_length=2_000)
+    # Which screen the step shows, for the pathway: "auto", "new", or the id of another step of the run.
+    screen_link: str | None = Field(default=None, min_length=1, max_length=64)
+    screen_kind: Literal["auto", "screen", "popup"] | None = None
 
 
 class ManualCandidateCreate(BaseModel):

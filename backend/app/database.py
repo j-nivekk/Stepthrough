@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS candidate_frames (
     similar_to_candidate_id TEXT,
     similarity_distance REAL,
     score_breakdown TEXT,
+    -- The reviewer's say on which screen the step shows, for the pathway. `screen_link`: NULL (decided
+    -- automatically), 'new' (a screen of its own) or the id of another step that shows the same screen.
+    -- `screen_kind`: NULL (automatic), 'screen' or 'popup'.
+    screen_link TEXT,
+    screen_kind TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(run_id, detector_index)
@@ -287,6 +292,8 @@ def init_db() -> None:
         _ensure_column(conn, "candidate_frames", "perceptual_hash", "TEXT")
         _ensure_column(conn, "candidate_frames", "ocr_text", "TEXT")
         _ensure_column(conn, "candidate_frames", "score_breakdown", "TEXT")
+        _ensure_column(conn, "candidate_frames", "screen_link", "TEXT")
+        _ensure_column(conn, "candidate_frames", "screen_kind", "TEXT")
         _ensure_column(conn, "recordings", "working_path", "TEXT")
         _ensure_column(conn, "users", "notes", "TEXT")
         _ensure_column(conn, "users", "password_hash", "TEXT")

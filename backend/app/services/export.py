@@ -8,6 +8,7 @@ from pathlib import Path
 from ..models import ExportMode
 from ..storage import absolute_data_path, asset_url, relative_data_path, run_exports_dir
 from ..utils import utc_now
+from .pathway import build_pathway
 from .video import export_filename
 
 
@@ -305,6 +306,14 @@ def create_export_bundle(
         )
         writer.writeheader()
         writer.writerows(exported_manifest_rows)
+
+    # The same steps as a pathway: the screens they show and the moves between them.
+    pathway = build_pathway(export_rows, candidates)
+    for step in pathway["steps"]:
+        step["image_path"] = f"images/{step.pop('export_filename')}"
+    pathway = {"bundle_id": bundle_id, "created_at": manifest["created_at"], "steps_file": "steps.json", **pathway}
+    with (bundle_dir / "pathway.json").open("w", encoding="utf-8") as output:
+        json.dump(pathway, output, indent=2)
 
     archive_path = shutil.make_archive(str(bundle_dir), "zip", root_dir=bundle_dir)
     return relative_data_path(bundle_dir), relative_data_path(Path(archive_path)), len(exported_manifest_rows)

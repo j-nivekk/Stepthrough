@@ -2,11 +2,14 @@ import type {
   AdminUser,
   AdminUserChanges,
   AnalysisMetadata,
+  CandidateChanges,
   CandidateFrame,
   ExportBundle,
   ExportMode,
   HealthResponse,
   LinkDetails,
+  Pathway,
+  PathwayDetail,
   Project,
   ProjectDetail,
   RecordingDetail,
@@ -168,6 +171,10 @@ export function getRun(runId: string): Promise<RunDetail> {
   return request<RunDetail>(`/runs/${runId}`);
 }
 
+export function getRunPathway(runId: string, detail: PathwayDetail): Promise<Pathway> {
+  return request<Pathway>(`/runs/${runId}/pathway?detail=${detail}`);
+}
+
 export function abortRun(runId: string): Promise<RunSummary> {
   return request<RunSummary>(`/runs/${runId}/cancel`, { method: 'POST' });
 }
@@ -180,7 +187,7 @@ export function deleteRun(runId: string): Promise<void> {
 
 export function updateCandidate(
   candidateId: string,
-  payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>>,
+  payload: CandidateChanges,
 ): Promise<CandidateFrame> {
   return request<CandidateFrame>(`/candidates/${candidateId}`, {
     method: 'PATCH',

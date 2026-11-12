@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { absoluteApiUrl } from '../api';
 import { candidateLabelType, transitionLabelText, type SimilarLink } from '../lib/analysis';
 import type { StepHoverState } from '../features/analysis/useHoverClips';
-import type { CandidateFrame, CandidateStatus } from '../types';
+import type { CandidateChanges, CandidateFrame, CandidateStatus } from '../types';
+import { ScreenChoice, screenChoiceSummary } from './ScreenChoice';
 
 /** Hover intent on a step's screenshot: wait, then the clip plays and "play from here" appears. */
 export interface StepHoverProps {
@@ -89,7 +90,7 @@ function useAnnotationDrafts(candidate: CandidateFrame, onUpdate: CandidateCardP
     if (trimmed === currentValue.trim()) {
       return;
     }
-    onUpdate({ [field]: trimmed } as Partial<Pick<CandidateFrame, 'title' | 'notes'>>);
+    onUpdate({ [field]: trimmed });
   }
 
   return { title, setTitle, notes, setNotes, commit };
@@ -212,7 +213,9 @@ export interface CandidateCardProps {
   recordingHeight?: number | null;
   recordingWidth?: number | null;
   similarLink?: SimilarLink | undefined;
-  onUpdate: (payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>>) => void;
+  /** Every step of the run, in order, for choosing which screen this one shows. */
+  steps: CandidateFrame[];
+  onUpdate: (payload: CandidateChanges) => void;
   /** Narrow card: scores and the notes toggle move out of the way until the card is active. */
   compact?: boolean;
   hover?: StepHoverProps;
@@ -232,6 +235,7 @@ export function CandidateCard({
   recordingHeight,
   recordingWidth,
   similarLink,
+  steps,
   onUpdate,
   compact = false,
   hover,
@@ -243,6 +247,7 @@ export function CandidateCard({
   const hasAnnotation = Boolean(candidate.title || candidate.notes);
   const showAnnotation = isAnnotationExpanded;
   const annotationToggleLabel = showAnnotation ? 'hide notes' : hasAnnotation ? 'edit notes' : 'annotate';
+  const screenSummary = screenChoiceSummary(candidate, steps);
 
   const imageAspectRatio =
     recordingWidth && recordingHeight && recordingWidth > 0 && recordingHeight > 0 ? recordingWidth / recordingHeight : 16 / 10;
@@ -405,6 +410,12 @@ export function CandidateCard({
           </div>
         )}
 
+        {screenSummary && !showAnnotation ? (
+          <div className="candidate-secondary-row candidate-screen-summary" title="your choice for the pathway">
+            screen: {screenSummary}
+          </div>
+        ) : null}
+
         {showAnnotation && (
           <div className="candidate-annotation-panel">
             <label className="candidate-field-group">
@@ -430,6 +441,11 @@ export function CandidateCard({
                 value={notes}
               />
             </label>
+
+            <div className="candidate-field-group">
+              <span>screen in the pathway</span>
+              <ScreenChoice candidate={candidate} onUpdate={onUpdate} steps={steps} />
+            </div>
           </div>
         )}
       </div>
@@ -448,6 +464,7 @@ export interface CandidateRowProps {
   onToggleSelection: () => void;
   onUpdate: CandidateCardProps['onUpdate'];
   similarLink?: SimilarLink | undefined;
+  steps: CandidateFrame[];
   thumbHeight: number;
   thumbWidth: number;
   hover?: StepHoverProps;
@@ -465,6 +482,7 @@ export function CandidateRow({
   onToggleSelection,
   onUpdate,
   similarLink,
+  steps,
   thumbHeight,
   thumbWidth,
   hover,
@@ -530,6 +548,7 @@ export function CandidateRow({
             {similarLink.label}
           </button>
         ) : null}
+        <ScreenChoice candidate={candidate} onUpdate={onUpdate} prefix="screen: " steps={steps} />
       </div>
       <div className="candidate-row-duration" role="cell">
         {hasFiniteNumber(onScreenMs) ? formatSeconds(onScreenMs) : '–'}

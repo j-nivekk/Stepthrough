@@ -52,6 +52,8 @@ from .models import (
     DetectionRunSummary,
     HealthResponse,
     ManualCandidateCreate,
+    PathwayDetail,
+    PathwayResponse,
     ProjectCreate,
     ProjectResponse,
     ProjectUpdate,
@@ -101,6 +103,7 @@ from .repository import (
 )
 from .services.export import build_accepted_steps, create_export_bundle
 from .services.ocr import probe_paddleocr_availability
+from .services.pathway import build_pathway
 from .services.run_control import CancellationRequested
 from .services.stable_detection import detect_candidates_stable, resolve_stable_config
 from .services.ingest import ensure_working_copy, working_copy_path
@@ -404,6 +407,8 @@ def _serialize_candidate(row: dict) -> CandidateFrameResponse:
         revisit_group_id=row.get("revisit_group_id"),
         similar_to_candidate_id=row.get("similar_to_candidate_id"),
         similarity_distance=row.get("similarity_distance"),
+        screen_link=row.get("screen_link"),
+        screen_kind=row.get("screen_kind"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -1061,6 +1066,17 @@ def runs_show(run_id: str, user: CurrentUser) -> DetectionRunDetail:
     return _build_run_detail(run_id)
 
 
+@app.get("/runs/{run_id}/pathway", response_model=PathwayResponse)
+def runs_pathway(run_id: str, user: CurrentUser, detail: PathwayDetail = "screens") -> PathwayResponse:
+    """The accepted steps of a run as the screens they show and the moves between them."""
+    _project, recording, _run = _run_for(run_id, user, "viewer")
+    candidates = list_candidates(run_id)
+    pathway = build_pathway(build_accepted_steps(recording["slug"], candidates), candidates, detail)
+    for step in pathway["steps"]:
+        step["image_url"] = asset_url(step["image_path"])
+    return PathwayResponse(**pathway)
+
+
 @app.post("/runs/{run_id}/cancel", response_model=DetectionRunSummary)
 def runs_cancel(run_id: str, user: CurrentUser) -> DetectionRunSummary:
     _project, _recording, run = _run_for(run_id, user, "owner")
@@ -1129,6 +1145,16 @@ def candidates_update(
         updates["title"] = updates["title"].strip() or None
     if "notes" in updates:
         updates["notes"] = updates["notes"].strip() or None
+    if "screen_link" in updates:
+        link = updates["screen_link"]
+        if link == "auto":
+            updates["screen_link"] = None
+        elif link != "new":
+            other = get_candidate(link)
+            if not other or other["run_id"] != candidate["run_id"] or other["id"] == candidate_id:
+                raise HTTPException(status_code=422, detail="Choose another step of the same run.")
+    if updates.get("screen_kind") == "auto":
+        updates["screen_kind"] = None
     candidate = update_candidate(candidate_id, **updates)
     return _serialize_candidate(candidate)
 

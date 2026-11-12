@@ -9,6 +9,8 @@ export interface StepLayout {
    * the cards to the width of the page instead: as many columns as fit at about the default size, stretched to fill.
    */
   size: number | null;
+  /** The strip of accepted steps above the timeline is folded away. */
+  hideAccepted: boolean;
 }
 
 export const STEP_SIZE_MIN = 120;
@@ -25,7 +27,7 @@ const STORAGE_KEY = 'stepthrough.step-layout.v2';
 /** Earlier versions always stored a size, so only the grid / list choice carries over: everyone starts fitted. */
 const LEGACY_STORAGE_KEY = 'stepthrough.step-layout.v1';
 
-export const defaultStepLayout: StepLayout = { view: 'grid', size: null };
+export const defaultStepLayout: StepLayout = { view: 'grid', size: null, hideAccepted: false };
 
 export function clampStepSize(value: number): number {
   return Math.min(STEP_SIZE_MAX, Math.max(STEP_SIZE_MIN, Math.round(value)));
@@ -41,7 +43,7 @@ export function loadStepLayout(): StepLayout {
     const stored = readStored(STORAGE_KEY);
     const view = (stored ?? readStored(LEGACY_STORAGE_KEY))?.view === 'list' ? 'list' : 'grid';
     const size = typeof stored?.size === 'number' && Number.isFinite(stored.size) ? clampStepSize(stored.size) : null;
-    return { view, size };
+    return { view, size, hideAccepted: stored?.hideAccepted === true };
   } catch {
     return { ...defaultStepLayout };
   }

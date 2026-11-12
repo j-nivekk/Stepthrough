@@ -4562,7 +4562,6 @@ button:disabled {
   overflow: hidden;
 }
 
-.candidate-review-head,
 .candidate-review-toolbar {
   display: flex;
   justify-content: space-between;
@@ -4570,21 +4569,9 @@ button:disabled {
   flex-wrap: wrap;
 }
 
-.candidate-review-head {
-  align-items: flex-end;
-}
-
 /* Everything sits on the line of the export name field (30px high); the file name preview hangs below it. */
 .candidate-review-toolbar {
   align-items: flex-start;
-}
-
-.candidate-review-title {
-  margin: 0;
-  color: #000;
-  font-size: 20px;
-  font-weight: 400;
-  line-height: 1.2;
 }
 
 .candidate-review-meta,
@@ -4968,6 +4955,365 @@ button:disabled {
 
 .candidate-size-slider input {
   width: 140px;
+}
+
+/* Which screen a step shows in the pathway: a link that opens a small list to choose from. */
+.screen-choice {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.inline-link-button.screen-choice-trigger {
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.inline-link-button.screen-choice-trigger.chosen,
+.inline-link-button.screen-choice-trigger:hover,
+.inline-link-button.screen-choice-trigger:focus-visible {
+  color: #000;
+}
+
+.screen-choice-prefix {
+  display: inline-block;
+  margin-right: 4px;
+}
+
+.candidate-screen-summary {
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+/* Fixed in the window (placed by ScreenChoice), because a card cuts off what sticks out of it. */
+.screen-choice-popover {
+  position: fixed;
+  z-index: 30;
+  width: 264px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  background: var(--analysis-surface);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
+  color: #000;
+  font-size: 13px;
+  line-height: 1.25;
+  text-align: left;
+}
+
+.screen-choice-heading {
+  margin: 4px 0 0;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.screen-choice-heading:first-child {
+  margin-top: 0;
+}
+
+.screen-choice-option,
+.screen-choice-step {
+  border: none;
+  background: transparent;
+  padding: 5px 6px;
+  margin: 0 -6px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Inside an annotation field group, whose own spans are small grey headings. */
+.screen-choice-popover .screen-choice-option span {
+  color: inherit;
+  font-size: 13px;
+}
+
+.screen-choice-option small {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.screen-choice-option:hover,
+.screen-choice-option:focus-visible,
+.screen-choice-step:hover,
+.screen-choice-step:focus-visible {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.screen-choice-option.active,
+.screen-choice-step.active {
+  background: rgba(205, 109, 30, 0.22);
+}
+
+.screen-choice-steps {
+  display: grid;
+  flex: 0 1 auto;
+  min-height: 80px;
+  max-height: 248px;
+  overflow-y: auto;
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+
+.screen-choice-step {
+  align-items: center;
+  min-width: 0;
+}
+
+.screen-choice-step img {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.screen-choice-step strong {
+  flex: none;
+  min-width: 18px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.screen-choice-popover .screen-choice-step span {
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.screen-choice-popup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+}
+
+/* steps | pathway: what the review area under the selected task shows. */
+.review-mode-switch {
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.review-mode-switch .candidate-filter-tab {
+  font-size: 20px;
+}
+
+/* The heading of the accepted steps folds the strip away, like a group in the task list. */
+.accepted-strip-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  align-self: flex-start;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: #000;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.accepted-strip-toggle:focus-visible {
+  outline: 2px solid rgba(205, 109, 30, 0.6);
+  outline-offset: 2px;
+}
+
+.accepted-strip-title {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.accepted-strip-toggle small {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.accepted-strip-shell.collapsed .analysis-task-group-chevron {
+  transform: rotate(-90deg);
+}
+
+.accepted-strip-toggle:hover .analysis-task-group-chevron,
+.accepted-strip-toggle:focus-visible .analysis-task-group-chevron {
+  border-top-color: #000;
+}
+
+.accepted-strip[hidden] {
+  display: none;
+}
+
+.pathway-panel {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.pathway-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  flex-wrap: wrap;
+}
+
+.pathway-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px 22px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.pathway-control {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.pathway-control-label {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+/* Changes to the selected box of the pathway, in a strip above the figure. It stays in view while a long
+   chart scrolls, so a box picked further down can still be changed. */
+.pathway-editor {
+  position: sticky;
+  top: 8px;
+  z-index: 6;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px 22px;
+  flex-wrap: wrap;
+  min-height: 58px;
+  padding: 10px 12px;
+  /* The soft panel grey, but solid: the chart must not show through while the strip is stuck. */
+  background: #ebebeb;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.pathway-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pathway-editor-field > span,
+.pathway-editor-check {
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.pathway-editor select,
+.pathway-editor-title {
+  height: 30px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.68);
+  color: #000;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.pathway-editor select {
+  min-width: 180px;
+  max-width: 280px;
+}
+
+/* Nothing selected: one quiet line. */
+.pathway-editor.idle {
+  align-items: center;
+  min-height: 0;
+  padding: 8px 12px;
+}
+
+.pathway-editor-title {
+  width: 220px;
+}
+
+.pathway-editor-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  color: #000;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.pathway-editor-steps {
+  display: flex;
+  align-items: center;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  min-height: 30px;
+}
+
+.pathway-editor-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pathway-editor-step b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #111;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pathway-editor-done {
+  margin-left: auto;
+  height: 30px;
+}
+
+.pathway-figure [data-screen] {
+  cursor: pointer;
+}
+
+/* The figure is drawn black on white, as it is exported, whatever the page around it looks like. */
+.pathway-scroll {
+  overflow: auto;
+  max-width: 100%;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+}
+
+.pathway-figure {
+  margin: 0 auto;
+}
+
+.pathway-figure svg {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 /* Width comes from the size slider (area-based, so portrait and landscape recordings both read well). */

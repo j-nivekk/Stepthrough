@@ -206,8 +206,23 @@ export interface CandidateFrame {
   revisit_group_id?: string | null;
   similar_to_candidate_id?: string | null;
   similarity_distance?: number | null;
+  /** The reviewer's say for the pathway: `new` (a screen of its own) or the id of an earlier step that shows
+   *  the same screen. Empty leaves it to the automatic grouping. */
+  screen_link?: string | null;
+  /** The reviewer's say on whether the step is a pop-up. Empty leaves it to the label. */
+  screen_kind?: 'screen' | 'popup' | null;
   created_at: string;
   updated_at: string;
+}
+
+/** What a reviewer can change about a step. */
+export interface CandidateChanges {
+  status?: CandidateStatus;
+  title?: string;
+  notes?: string;
+  /** `auto`, `new`, or the id of an earlier step of the run. */
+  screen_link?: string;
+  screen_kind?: 'auto' | 'screen' | 'popup';
 }
 
 export interface AcceptedStep {
@@ -226,6 +241,77 @@ export interface AcceptedStep {
   similar_to_step_id?: string | null;
   source_candidate_id: string;
   export_filename: string;
+}
+
+/** `screens`: scrolling, typing and small changes stay on one screen; `steps`: every step is its own box. */
+export type PathwayDetail = 'screens' | 'steps';
+
+export interface PathwayStep {
+  step_id: string;
+  step_index: number;
+  screen_id: string;
+  visit: number;
+  timestamp_ms: number;
+  timestamp_tc: string;
+  title: string;
+  notes?: string | null;
+  transition_type?: string | null;
+  time_on_screen_ms?: number | null;
+  image_path: string;
+  image_url: string;
+  /** Why the step shares a screen with an earlier one: `researcher`, `revisit`, `modal_close`, or the label of
+   *  a change that stayed on the screen. Empty for the step that starts a screen. */
+  grouped_by?: string | null;
+  screen_choice: 'automatic' | 'new_screen' | 'same_screen';
+  kind_choice: 'automatic' | 'screen' | 'popup';
+  source_candidate_id: string;
+}
+
+export interface PathwayVisit {
+  visit: number;
+  step_ids: string[];
+  arrived_ms: number;
+  time_on_screen_ms?: number | null;
+}
+
+export interface PathwayScreen {
+  id: string;
+  index: number;
+  title: string;
+  title_step_id?: string | null;
+  kind: 'screen' | 'popup';
+  /** The screen the user was on when they first arrived here; null for the first screen. */
+  reached_from?: string | null;
+  image_step_id: string;
+  visits: PathwayVisit[];
+  time_on_screen_ms?: number | null;
+}
+
+export interface PathwayPass {
+  /** The step the move arrives at. */
+  step_id: string;
+  step_index: number;
+  from_step_id: string;
+  at_ms: number;
+  transition_type?: string | null;
+}
+
+export interface PathwayTransition {
+  from_screen: string;
+  to_screen: string;
+  kind: 'forward' | 'return';
+  passes: PathwayPass[];
+}
+
+/** The accepted steps of a run as the screens they show and the moves between them. */
+export interface Pathway {
+  format: string;
+  detail: PathwayDetail;
+  step_count: number;
+  screen_count: number;
+  steps: PathwayStep[];
+  screens: PathwayScreen[];
+  transitions: PathwayTransition[];
 }
 
 export interface ExportBundle {

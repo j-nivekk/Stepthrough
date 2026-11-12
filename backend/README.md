@@ -85,6 +85,19 @@ breakdown, revisit links and the timing columns `transition_type`, `change_start
 `time_on_screen_ms` and `grouped_states`. Changed regions are in pixels of the recording for every engine.
 `steps.csv` has the same per-step fields without the nested score breakdown.
 
+The zip also has `pathway.json`: the same steps folded into the screens they show and the moves between
+those screens (`app/services/pathway.py`). Steps share a screen when one is a revisit of the other, or when
+the later one was reached by a change that stays on the screen (`scroll`, `text_entry`, `feed_card_swap`,
+`content_update`, `small_ui_change`), or when the later one was reached by a pop-up closing (`modal_close`),
+which leads back to the screen the pop-up opened over. Every candidate of the run takes part in that
+grouping, also rejected ones, because a label describes the change from the detector's previous step.
+`GET /runs/{id}/pathway` returns the same for the accepted steps, and `?detail=steps` joins revisits only.
+
+A reviewer can overrule the grouping per step (`PATCH /candidates/{id}`): `screen_link` is `auto`, `new` (a
+screen of its own) or the id of another step of the run that shows the same screen, and `screen_kind` is
+`auto`, `screen` or `popup`. A step joins at most one earlier step, by the first that applies: the
+reviewer's choice, a revisit, a pop-up closing, a label that stays on the screen.
+
 ## Configuration
 
 | variable | default | meaning |

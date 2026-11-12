@@ -41,6 +41,7 @@ import {
 } from '../../lib/utils';
 import type {
   AnalysisMetadata,
+  CandidateChanges,
   CandidateFrame,
   CandidateStatus,
   ExportMode,
@@ -73,6 +74,7 @@ import {
 import { rangeFillStyle } from '../../lib/rangeFill';
 import { playbackWindows, stepClip } from '../../lib/stepClips';
 import type { StepHoverProps } from '../../components/CandidateCard';
+import { PathwayPanel } from '../pathway/PathwayPanel';
 import { useElementWidth } from './useElementWidth';
 import { useHoverClips } from './useHoverClips';
 import { usePlaybackHighlight } from './usePlaybackHighlight';
@@ -127,7 +129,7 @@ export interface AnalysisScreenProps {
   onStartRun: () => void;
   onUpdateCandidate: (
     candidateId: string,
-    payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>>,
+    payload: CandidateChanges,
   ) => void;
   ocrAvailable: boolean;
   ocrStatus: OcrStatus | null;
@@ -300,6 +302,7 @@ export function AnalysisScreen({
   const [hoveredLegendType, setHoveredLegendType] = useState<string | null>(null);
   const [hiddenSegmentTypes, setHiddenSegmentTypes] = useState<Set<string>>(new Set());
   const [stepLayout, setStepLayout] = useState<StepLayout>(() => loadStepLayout());
+  const [reviewMode, setReviewMode] = useState<'steps' | 'pathway'>('steps');
   const [stepAreaRef, stepAreaWidth] = useElementWidth<HTMLDivElement>();
   const parameterColumnRef = useRef<HTMLElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -355,6 +358,8 @@ export function AnalysisScreen({
       selectedRun.candidates.length > 0 &&
       ['completed', 'failed', 'cancelled'].includes(selectedRun.summary.status),
   );
+  // The pathway takes the place of the whole step review, so its shortcuts are off while it shows.
+  const showPathway = canReviewCandidates && isCompletedReview && reviewMode === 'pathway';
   const previewMatchesSelectedRun = Boolean(
     previewRecording && selectedRun && previewRecording.id === selectedRun.summary.recording_id,
   );
@@ -782,7 +787,7 @@ export function AnalysisScreen({
   }, []);
 
   useEffect(() => {
-    if (!canReviewCandidates) {
+    if (!canReviewCandidates || showPathway) {
       return;
     }
 
@@ -831,7 +836,7 @@ export function AnalysisScreen({
 
     window.addEventListener('keydown', handleReviewKeydown);
     return () => window.removeEventListener('keydown', handleReviewKeydown);
-  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedRun?.summary.id]);
+  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedRun?.summary.id, showPathway]);
 
   useEffect(() => {
     if (!previewVideoUrl) {
@@ -1863,14 +1868,57 @@ export function AnalysisScreen({
               </details>
             ) : null}
 
-            {canReviewCandidates ? (
+            {canReviewCandidates && isCompletedReview ? (
+              <div aria-label="what to review" className="review-mode-switch" role="tablist">
+                {(['steps', 'pathway'] as const).map((mode) => (
+                  <button
+                    aria-selected={reviewMode === mode}
+                    className={`candidate-filter-tab ${reviewMode === mode ? 'active' : ''}`}
+                    key={mode}
+                    onClick={() => setReviewMode(mode)}
+                    role="tab"
+                    title={
+                      mode === 'steps'
+                        ? 'review the steps: accept, reject, title and annotate them'
+                        : 'the accepted steps as a chart of screens and the moves between them'
+                    }
+                    type="button"
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {showPathway ? (
+              <PathwayPanel
+                onUpdateCandidate={onUpdateCandidate}
+                projectName={activeProject?.name ?? ''}
+                recording={selectedRecordingSummary}
+                run={selectedRun}
+              />
+            ) : null}
+
+            {canReviewCandidates && !showPathway ? (
               <>
                 {selectedRun.accepted_steps.length > 0 && (
-                  <div className="accepted-strip-shell" id="analysis-accepted-steps">
-                    <div className="candidate-review-head">
-                      <p className="candidate-review-title">accepted steps</p>
-                    </div>
-                    <div className="accepted-strip">
+                  <div
+                    className={`accepted-strip-shell ${stepLayout.hideAccepted ? 'collapsed' : ''}`}
+                    id="analysis-accepted-steps"
+                  >
+                    <button
+                      aria-controls="analysis-accepted-strip"
+                      aria-expanded={!stepLayout.hideAccepted}
+                      className="accepted-strip-toggle"
+                      onClick={() => setStepLayout((current) => ({ ...current, hideAccepted: !current.hideAccepted }))}
+                      title={stepLayout.hideAccepted ? 'show the accepted steps' : 'hide the accepted steps'}
+                      type="button"
+                    >
+                      <span aria-hidden="true" className="analysis-task-group-chevron" />
+                      <span className="accepted-strip-title">accepted steps</span>
+                      <small>{selectedRun.accepted_steps.length}</small>
+                    </button>
+                    <div className="accepted-strip" hidden={stepLayout.hideAccepted} id="analysis-accepted-strip">
                       {selectedRun.accepted_steps.map((step) => {
                         const similarityLink = acceptedStepSimilarityLinks.get(step.step_id);
                         return (
@@ -2256,7 +2304,7 @@ export function AnalysisScreen({
                         <span className="sr-only">screenshot</span>
                       </span>
                       <span className="candidate-row-step" role="columnheader">step</span>
-                      <span className="candidate-row-label" role="columnheader">label</span>
+                      <span className="candidate-row-label" role="columnheader">label, screen</span>
                       <span className="candidate-row-duration" role="columnheader">on screen</span>
                       <span className="candidate-row-title" role="columnheader">title</span>
                       <span className="candidate-row-notes" role="columnheader">notes</span>
@@ -2279,6 +2327,7 @@ export function AnalysisScreen({
                           onToggleSelection={() => toggleCandidateSelection(candidate.id)}
                           onUpdate={(payload) => onUpdateCandidate(candidate.id, payload)}
                           similarLink={similarityLink}
+                          steps={selectedRun.candidates}
                           thumbHeight={stepThumb.height}
                           thumbWidth={stepThumb.width}
                           hover={stepHover(candidate)}
@@ -2317,6 +2366,7 @@ export function AnalysisScreen({
                           recordingHeight={selectedRecordingSummary?.height}
                           recordingWidth={selectedRecordingSummary?.width}
                           similarLink={similarityLink}
+                          steps={selectedRun.candidates}
                         />
                       );
                     })}

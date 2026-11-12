@@ -68,6 +68,7 @@ import {
 import { workflowViewportMinimums, type ProjectEntryTarget, type WorkflowStage } from './lib/workflow';
 import type {
   AnalysisMetadata,
+  CandidateChanges,
   CandidateFrame,
   CandidateStatus,
   ExportMode,
@@ -630,7 +631,7 @@ function App({ session, onSessionChange }: AppProps) {
       }
       links.set(step.step_id, {
         targetId: `accepted-step-${target.step_id}`,
-        label: `Returns to ${target.step_id}`,
+        label: `returns to ${target.step_id}`,
       });
     });
 
@@ -824,7 +825,7 @@ function App({ session, onSessionChange }: AppProps) {
   });
 
   const updateCandidateMutation = useMutation({
-    mutationFn: ({ candidateId, payload }: { candidateId: string; payload: Partial<Pick<CandidateFrame, 'status' | 'title' | 'notes'>> }) =>
+    mutationFn: ({ candidateId, payload }: { candidateId: string; payload: CandidateChanges }) =>
       updateCandidate(candidateId, payload),
     onSuccess: (candidate) => {
       void refreshRunQueries(candidate.run_id, candidate.recording_id);
