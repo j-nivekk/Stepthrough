@@ -3,6 +3,7 @@
 **Stepthrough** is a local-first research tool designed to automatically turn video screen recordings into clean, chronological walkthrough screenshots. It is built to help researchers, designers, and developers quickly extract key navigational steps from app runs or usability tests.
 
 [![Latest release](https://img.shields.io/github/v/release/j-nivekk/Stepthrough)](https://github.com/j-nivekk/Stepthrough/releases/latest)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24159850.svg)](https://doi.org/10.5281/zenodo.24159850)
 [![Docker image build](https://github.com/j-nivekk/Stepthrough/actions/workflows/docker.yml/badge.svg?branch=main)](https://github.com/j-nivekk/Stepthrough/actions/workflows/docker.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20OpenCV-3776AB.svg)
