@@ -325,6 +325,30 @@ def test_stable_run_export_records_engine_and_timings(client: TestClient, video_
     assert 'pixels of the recording' in manifest['field_notes']['score_breakdown.changed_regions']
 
 
+def test_adding_a_step_by_hand_keeps_the_detectors_revisit_links() -> None:
+    import app.main as main
+
+    def row(index: int, **extra) -> dict:
+        # Every screenshot has the same hashes: compared by hash, each step looks like the first one.
+        return {'id': f'c{index}', 'detector_index': index, 'candidate_origin': 'detected', 'timestamp_ms': index * 1_000,
+                'scene_score': 0.5, 'score_breakdown': None, 'perceptual_hash': 'f' * 16, 'image_hash': 'f' * 16,
+                'ocr_text': None, 'revisit_group_id': None, 'similar_to_candidate_id': None, **extra}
+
+    # The detector found three different screens and one revisit (step 4 shows step 2 again).
+    detected = [row(1), row(2, revisit_group_id='revisit-c2'), row(3),
+                row(4, revisit_group_id='revisit-c2', similar_to_candidate_id='c2')]
+    added = row(5, id='manual', candidate_origin='manual', timestamp_ms=2_500)
+
+    after = {c['id']: c for c in main._resequence_candidates([*detected, added], frozenset({'manual'}))}
+
+    assert [c['id'] for c in sorted(after.values(), key=lambda c: c['detector_index'])] == ['c1', 'c2', 'manual', 'c3', 'c4']
+    assert [after[key]['similar_to_candidate_id'] for key in ('c1', 'c2', 'c3', 'c4')] == [None, None, None, 'c2']
+    assert after['c3']['revisit_group_id'] is None and after['c4']['revisit_group_id'] == 'revisit-c2'
+    # Only the added step is linked to its look-alike, and the two share a group.
+    assert after['manual']['similar_to_candidate_id'] == 'c1'
+    assert after['manual']['revisit_group_id'] == after['c1']['revisit_group_id'] == 'revisit-c1'
+
+
 def test_delete_project_removes_it_and_its_recordings(client: TestClient, video_factory) -> None:
     project = _create_project(client)
     video = video_factory('project-delete.mp4', ['red'])

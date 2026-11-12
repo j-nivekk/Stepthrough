@@ -570,7 +570,18 @@ def _validate_run_settings_for_recording(recording: dict[str, Any], settings: Ru
     resolve_stable_config(settings, fps=recording["fps"], width=recording["width"], height=recording["height"])
 
 
-def _resequence_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _resequence_candidates(candidates: list[dict[str, Any]], added_ids: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
+    """Number the candidates of a run in time order again after steps were added by hand (``added_ids``).
+
+    Only the added steps are linked to an earlier look-alike. The others keep the revisit links they have:
+    the detector's test for a revisit is stricter than the image hashes compared here, and comparing every
+    step again would link screens that only look alike.
+    """
+    kept_links = {
+        candidate["id"]: (candidate.get("revisit_group_id"), candidate.get("similar_to_candidate_id"))
+        for candidate in candidates
+        if candidate["id"] not in added_ids
+    }
     ordered_candidates = sorted(
         candidates,
         key=lambda candidate: (
@@ -597,7 +608,18 @@ def _resequence_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, A
                 "updated_at": updated_at,
             }
         )
-    return annotate_candidate_similarity(normalized)
+    annotated = annotate_candidate_similarity(normalized)
+    by_id = {candidate["id"]: candidate for candidate in annotated}
+    for candidate in annotated:
+        if candidate["id"] in kept_links:
+            candidate["revisit_group_id"], candidate["similar_to_candidate_id"] = kept_links[candidate["id"]]
+    for candidate in annotated:
+        earlier = by_id.get(candidate.get("similar_to_candidate_id") or "")
+        if candidate["id"] in added_ids and earlier is not None:
+            group = earlier.get("revisit_group_id") or f"revisit-{earlier['id'][:8]}"
+            earlier["revisit_group_id"] = group
+            candidate["revisit_group_id"] = group
+    return annotated
 
 
 def _run_artifact_paths(project: dict, recording: dict, run_id: str) -> tuple[Path, Path]:
@@ -1161,7 +1183,7 @@ def runs_add_manual_candidate(
         "updated_at": now,
     }
 
-    updated_candidates = _resequence_candidates([*list_candidates(run_id), manual_candidate])
+    updated_candidates = _resequence_candidates([*list_candidates(run_id), manual_candidate], frozenset({candidate_id}))
     replace_candidates(run_id, recording["id"], updated_candidates)
     clear_export_bundle_for_run(run_id)
     update_run(run_id, candidate_count=len(updated_candidates))
