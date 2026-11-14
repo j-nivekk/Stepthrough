@@ -434,9 +434,16 @@ While the video plays, the card of the step on screen is outlined, so you can se
 
 ### Comparing runs
 
-Under **compare runs**, choose a second finished run of the same recording. You then see which steps both runs
-found, which steps only one of them found, and which were found at slightly different times. This helps you
-see what a change of settings does.
+Changed a setting and ran the analysis again? When a recording has two or more finished runs, **compare** next
+to it in the tasks list shows two of them side by side: the settings that differ, a timeline with each run's
+steps, and the screenshots of the steps only one of the runs found (or found at another moment). Pick other
+runs with the two lists at the top.
+
+To go on with the newer run without reviewing it from scratch, press **review run #2 with the review of run
+#1** (with your run numbers). Your decisions, titles, notes and screen choices go to the steps both runs found,
+and steps you added by hand are added again at the same moment. Only what is still empty in the newer run is
+filled in, so nothing you already did there is lost; the review of steps only the earlier run found stays with
+that run. **review run #2 as it is** and **back to run #1** leave both runs as they are.
 
 ### Pathway
 
@@ -445,9 +452,10 @@ accepted steps as a chart: one box per screen, with a screenshot, and arrows for
 A recording is a straight line in time; the chart shows where that line went back to a screen, left it again
 another way, or took a detour.
 
-New to pathways? **how to work with pathways**, above the chart or under **about**, opens a hands-on tutorial
-of about five minutes. On a practice recording you fold steps into screens, follow the journey, find what the
-automatic grouping got wrong, correct it, and prepare the figure. Nothing in it changes your own runs.
+New to pathways? The first time you open one, an invitation above the chart offers a hands-on tutorial of about
+five minutes (**start the tutorial**); after that it is under **about** at the bottom right, as **how to work with
+pathways**. On a practice recording you fold steps into screens, follow the journey, find what the automatic
+grouping got wrong, correct it, and prepare the figure. Nothing in it changes your own runs.
 
 How to read it:
 

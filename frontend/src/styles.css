@@ -2881,7 +2881,6 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   color: #fff;
 }
 
-
 /* As tall as the full-width "advanced" and "compare runs" bars. */
 .analysis-run-button {
   width: 100%;
@@ -4320,7 +4319,6 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   --timeline-segment-stripe-size: 3px;
 }
 
-
 .timeline-segment {
   --segment-rgb: 111, 102, 90;
   position: absolute;
@@ -4619,8 +4617,18 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 .analysis-detail-header {
   display: flex;
   justify-content: space-between;
+  gap: 8px 24px;
+  /* the time and the logs sit on the file name's line */
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.analysis-detail-side {
+  display: flex;
+  align-items: baseline;
   gap: 16px;
-  align-items: flex-start;
+  margin-left: auto;
+  padding-bottom: 3px;
 }
 
 .analysis-detail-copy {
@@ -4644,14 +4652,6 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   flex-wrap: wrap;
 }
 
-.analysis-detail-meta-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
 .analysis-log-popover-shell {
   position: relative;
   display: flex;
@@ -4665,8 +4665,8 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 .analysis-log-popover {
   position: absolute;
   top: calc(100% + 10px);
-  /* opens rightwards from the link: leftwards, it ran off the page in the narrow run column */
-  left: 0;
+  /* opens leftwards from the link, which sits at the right edge of the page */
+  right: 0;
   width: min(520px, calc(100vw - 120px));
   max-height: 320px;
   overflow: auto;
@@ -5907,12 +5907,108 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.pathway-bar {
+  /* the note (when there is one) above the controls */
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* Across the full width: what the figure shows on the left, its size and the download on the right. */
 .pathway-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 22px;
+  flex-wrap: wrap;
+}
+
+.pathway-controls-group {
   display: flex;
   align-items: center;
   gap: 10px 22px;
   flex-wrap: wrap;
+}
+
+/* The settings keep their size (wrapping inside only when alone on a line too narrow for them); the slider gives
+   way first: the right group starts at its smallest (a short slider, fit, download) and grows into the space
+   left, so the controls only take two rows when even that does not fit. */
+.pathway-controls > .pathway-controls-group:first-child {
+  flex: 0 1 auto;
+}
+
+.pathway-controls-end {
+  flex: 1 1 228px;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  min-width: 0;
   margin-left: auto;
+}
+
+.pathway-controls-end .candidate-size-control,
+.pathway-controls-end .candidate-size-slider {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.pathway-controls-end > .analysis-pill {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.pathway-controls-end .candidate-size-slider input {
+  flex: 1 1 140px;
+  width: auto;
+  min-width: 48px;
+  max-width: 140px;
+}
+
+/* The note after the invitation keeps the invitation's colour, so it reads as easily; a 2px green line along its
+   foot, like the progress line of a running task, drops from right to left, and the note goes when the line is
+   gone. The countdown waits while the pointer is on it. */
+.pathway-invite-after {
+  position: relative;
+}
+
+.pathway-invite-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: #48af7c;
+  transform-origin: left center;
+  animation: pathway-invite-recede 9s linear forwards;
+}
+
+.pathway-invite-after:hover .pathway-invite-fill,
+.pathway-invite-after:focus-within .pathway-invite-fill {
+  animation-play-state: paused;
+}
+
+@keyframes pathway-invite-recede {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.pathway-invite-close {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pathway-invite-close:hover,
+.pathway-invite-close:focus-visible {
+  color: #000;
 }
 
 .pathway-control {
@@ -6947,8 +7043,6 @@ button:disabled {
   }
 
   .analysis-log-popover {
-    left: 0;
-    right: auto;
     width: min(100%, calc(100vw - 40px));
   }
 
@@ -7098,243 +7192,243 @@ button:disabled {
   border-radius: 999px;
 }
 
-/* ── Comparison section (collapsible) ────────────────────────────── */
+/* ── comparing two runs of a recording (RunComparison) ────────────────── */
 
-.analysis-compare-shell {
-  border-top: 1px solid var(--border);
+.analysis-task-group-head {
   display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin-top: 12px;
-  padding-top: 18px;
+  align-items: baseline;
+  gap: 10px;
 }
 
-.analysis-compare-trigger {
-  align-items: center;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.06);
-  color: rgba(0, 0, 0, 0.72);
-  cursor: pointer;
-  display: flex;
-  font-size: 12px;
-  gap: 12px;
-  justify-content: space-between;
-  line-height: 1.2;
-  list-style: none;
-  min-height: 24px;
-  padding: 6px 10px;
-  text-transform: none;
-  transition: background 140ms ease;
-  width: 100%;
+.analysis-task-group-head .analysis-task-group-header {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.analysis-compare-trigger:hover,
-.analysis-compare-trigger:focus-visible {
-  background: rgba(0, 0, 0, 0.1);
-}
-
-.analysis-compare-trigger::-webkit-details-marker {
-  display: none;
-}
-
-.analysis-compare-trigger::marker {
-  content: '';
-}
-
-.analysis-compare-trigger-chevron {
-  width: 0;
-  height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 6px solid currentColor;
-  transition: transform 140ms ease;
-}
-
-.analysis-compare-shell[open] .analysis-compare-trigger-chevron {
-  transform: rotate(180deg);
-}
-
-.analysis-compare-body {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.analysis-compare-head {
-  align-items: end;
-  display: flex;
-  gap: 16px;
-  justify-content: space-between;
-}
-
-.analysis-compare-head-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.analysis-compare-head-eyebrow {
-  margin: 0;
-  color: rgba(0, 0, 0, 0.6);
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 1.2;
-}
-
-.analysis-compare-head h3 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 400;
-  line-height: 1.2;
-}
-
-.analysis-compare-select-wrap {
-  align-items: center;
-  display: flex;
+.analysis-task-compare {
   flex: 0 0 auto;
+  font-size: 12px;
 }
 
-.analysis-compare-select {
-  background: var(--analysis-surface-overlay);
-  border: 1px solid var(--border);
-  color: rgba(0, 0, 0, 0.72);
-  min-width: 280px;
-  padding: 10px 12px;
+.run-compare-runs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 6px 16px;
+  align-items: start;
+}
+
+.run-compare-run {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.run-compare-select {
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 0;
+  background: #d9d9d9;
+  color: #000;
+  font: inherit;
   font-size: 14px;
 }
 
-.analysis-compare-select:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px rgba(72, 175, 124, 0.28);
+.run-compare-arrow {
+  padding-top: 5px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 16px;
 }
 
-.analysis-compare-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.analysis-compare-summary span {
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  padding: 5px 10px;
-  border: none;
-}
-
-.analysis-compare-summary .compare-stat-both {
-  background: rgba(45, 122, 90, 0.12);
-  color: var(--success);
-}
-
-.analysis-compare-summary .compare-stat-timing {
-  background: rgba(162, 105, 27, 0.12);
-  color: var(--warning);
-}
-
-.analysis-compare-summary .compare-stat-left,
-.analysis-compare-summary .compare-stat-right {
-  background: rgba(0, 0, 0, 0.06);
-  color: rgba(0, 0, 0, 0.6);
-}
-
-.analysis-compare-grid {
-  display: grid;
-  gap: 14px;
-}
-
-.analysis-compare-card {
-  background: var(--analysis-surface-overlay);
-  border: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-}
-
-.analysis-compare-card-head {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-}
-
-.analysis-compare-badge {
-  border-radius: 0;
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  padding: 3px 10px;
-  text-transform: uppercase;
-}
-
-.analysis-compare-badge.both {
-  background: rgba(45, 122, 90, 0.14);
-  color: var(--success);
-}
-
-.analysis-compare-badge.timing_shifted {
-  background: rgba(162, 105, 27, 0.14);
-  color: var(--warning);
-}
-
-.analysis-compare-badge.left_only,
-.analysis-compare-badge.right_only {
-  background: rgba(0, 0, 0, 0.06);
-  color: rgba(0, 0, 0, 0.54);
-}
-
-.analysis-compare-card-columns {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-
-.analysis-compare-column {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.analysis-compare-column small {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.analysis-compare-column-label {
-  color: var(--accent-strong);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.1em;
+.run-compare-meta {
   margin: 0;
-  text-transform: uppercase;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
-.analysis-compare-metrics {
-  display: flex;
-  flex-wrap: wrap;
+.run-compare-settings {
+  display: grid;
   gap: 4px;
 }
 
-.analysis-compare-metrics span {
-  background: rgba(0, 0, 0, 0.05);
-  border: none;
-  color: rgba(0, 0, 0, 0.6);
-  font-size: 11px;
-  padding: 3px 7px;
-}
-
-.analysis-compare-image {
-  border: 1px solid var(--border);
-  display: block;
-  max-width: 100%;
-}
-
-.analysis-compare-empty {
-  color: var(--muted);
+.run-compare-settings table {
+  justify-self: start;
+  border-collapse: collapse;
   font-size: 13px;
-  font-style: italic;
+}
+
+.run-compare-settings th {
+  padding: 2px 18px 2px 0;
+  color: rgba(0, 0, 0, 0.6);
+  font-weight: 400;
+  text-align: left;
+}
+
+.run-compare-settings td {
+  padding: 2px 8px 2px 0;
+}
+
+.run-compare-timeline {
+  display: grid;
+  gap: 6px;
+}
+
+.run-compare-lane {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.run-compare-lane-label {
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+}
+
+.run-compare-lane-track {
+  position: relative;
+  height: 18px;
+  background: var(--analysis-surface);
+}
+
+.run-compare-mark {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  margin-left: -1.5px;
+  border-radius: 1px;
+}
+
+/* a step added by hand: brought over by adding it again, so drawn apart */
+.run-compare-mark.manual {
+  width: 7px;
+  margin-left: -3.5px;
+  border: 1.5px solid #8c58f4;
+  background: transparent;
+}
+
+.run-compare-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding-left: 66px;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+}
+
+.run-compare-legend i,
+.run-compare-card-head i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.run-compare-legend i.manual {
+  border: 1.5px solid #8c58f4;
+  background: transparent;
+}
+
+.run-compare-differences {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.run-compare-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 10px;
+  background: var(--analysis-surface-soft);
+}
+
+.run-compare-card-head {
   margin: 0;
-  padding: 20px 0;
+  font-size: 13px;
+}
+
+.run-compare-card-shots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.run-compare-shot {
+  margin: 0;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.run-compare-shot img {
+  width: 100%;
+  max-height: 280px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.run-compare-shot figcaption {
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+.run-compare-shot.empty {
+  min-height: 120px;
+  place-items: center;
+  padding: 8px;
+  border: 1px dashed rgba(0, 0, 0, 0.25);
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  text-align: center;
+}
+
+.run-compare-reviewed {
+  color: #000;
+}
+
+/* Sticks to the bottom of the window while the comparison is in view, so the way on is at hand however many
+   differences there are; below the last one it settles in place. The steps fade out under it rather than meeting a
+   line, and its right end stays clear of the watermark, which sits on the same page colour in that corner. */
+.run-compare-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 10px 220px 14px 0;
+  background: var(--bg);
+}
+
+.run-compare-actions::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 20px;
+  background: linear-gradient(to bottom, rgba(244, 244, 244, 0), var(--bg));
+  pointer-events: none;
+}
+
+.run-compare-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.run-compare-actions .analysis-pill {
+  padding: 6px 12px;
+  font-size: 13px;
 }
 
 .analysis-compare-guidance {
@@ -7602,7 +7696,6 @@ button:disabled {
 .account-gate-hint.warning {
   color: #8c6624;
 }
-
 
 .account-gate-link {
   justify-self: start;

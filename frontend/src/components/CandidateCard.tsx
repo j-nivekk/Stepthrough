@@ -96,23 +96,6 @@ function useAnnotationDrafts(candidate: CandidateFrame, onUpdate: CandidateCardP
   return { title, setTitle, notes, setNotes, commit };
 }
 
-export function ComparisonMetrics({ candidate }: { candidate: CandidateFrame }) {
-  return (
-    <div className="analysis-compare-metrics">
-      <span>overall {candidate.scene_score.toFixed(2)}</span>
-      {candidate.score_breakdown ? (
-        <>
-          {candidate.score_breakdown.transition_type ? <span>{candidate.score_breakdown.transition_type}</span> : null}
-          <span>visual {candidate.score_breakdown.visual.toFixed(2)}</span>
-          <span>text {candidate.score_breakdown.text.toFixed(2)}</span>
-          <span>motion {candidate.score_breakdown.motion.toFixed(2)}</span>
-          <span>{candidate.score_breakdown.changed_regions.length} regions</span>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
 interface CandidateDecisionButtonProps {
   intent: CandidateStatus;
   isActive: boolean;

@@ -551,5 +551,29 @@ class CandidateUpdate(BaseModel):
     screen_kind: Literal["auto", "screen", "popup"] | None = None
 
 
+class ReviewCarryOverPair(BaseModel):
+    source_candidate_id: str = Field(min_length=1, max_length=64)
+    target_candidate_id: str = Field(min_length=1, max_length=64)
+
+
+class ReviewCarryOver(BaseModel):
+    """Which run to bring the review from, and which of its steps match which step of this run."""
+
+    source_run_id: str = Field(min_length=1, max_length=64)
+    pairs: list[ReviewCarryOverPair] = Field(default_factory=list, max_length=20_000)
+
+
+class ReviewCarryOverResult(BaseModel):
+    """What was brought over: counts of what was filled in, steps added again by hand, and reviewed steps of the
+    earlier run that have no match here (their review stays with that run)."""
+
+    decisions: int
+    titles: int
+    notes: int
+    screen_choices: int
+    added_manual: int
+    unmatched: int
+
+
 class ManualCandidateCreate(BaseModel):
     timestamp_ms: int = Field(ge=0)

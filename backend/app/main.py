@@ -52,6 +52,8 @@ from .models import (
     DetectionRunSummary,
     HealthResponse,
     ManualCandidateCreate,
+    ReviewCarryOver,
+    ReviewCarryOverResult,
     PathwayDetail,
     PathwayMerge,
     PathwayResponse,
@@ -1198,22 +1200,15 @@ def candidates_update(
     return _serialize_candidate(candidate)
 
 
-@app.post("/runs/{run_id}/candidates/manual", response_model=CandidateFrameResponse)
-def runs_add_manual_candidate(
-    run_id: str, payload: ManualCandidateCreate, user: CurrentUser
-) -> CandidateFrameResponse:
-    project, recording, run = _run_for(run_id, user, "owner")
-    if run["status"] not in {"completed", "failed", "cancelled"}:
-        raise HTTPException(status_code=409, detail="Manual steps can only be added to completed, failed, or cancelled runs")
-    if payload.timestamp_ms >= recording["duration_ms"]:
-        raise HTTPException(status_code=422, detail="Manual step timestamp must be inside the recording duration")
-
+def _insert_manual_candidate(project: dict, recording: dict, run: dict, timestamp_ms: int) -> str:
+    """Add a step by hand to a finished run at ``timestamp_ms``: a screenshot of that moment, pending review.
+    Returns the new candidate's id."""
+    run_id = run["id"]
     current_run_dir, frames_path = _run_artifact_paths(project, recording, run_id)
     current_run_dir.mkdir(parents=True, exist_ok=True)
     frames_path.mkdir(parents=True, exist_ok=True)
 
     candidate_id = uuid4().hex
-    timestamp_ms = payload.timestamp_ms
     timestamp_tc = display_timecode(timestamp_ms)
     image_path = frames_path / f"manual-{candidate_id[:8]}__{slug_timecode(timestamp_ms)}.png"
 
@@ -1259,8 +1254,99 @@ def runs_add_manual_candidate(
         message=f"Added manual step at {timestamp_tc}",
         progress=run.get("progress"),
     )
+    return candidate_id
+
+
+@app.post("/runs/{run_id}/candidates/manual", response_model=CandidateFrameResponse)
+def runs_add_manual_candidate(
+    run_id: str, payload: ManualCandidateCreate, user: CurrentUser
+) -> CandidateFrameResponse:
+    project, recording, run = _run_for(run_id, user, "owner")
+    if run["status"] not in {"completed", "failed", "cancelled"}:
+        raise HTTPException(status_code=409, detail="Manual steps can only be added to completed, failed, or cancelled runs")
+    if payload.timestamp_ms >= recording["duration_ms"]:
+        raise HTTPException(status_code=422, detail="Manual step timestamp must be inside the recording duration")
+    candidate_id = _insert_manual_candidate(project, recording, run, payload.timestamp_ms)
     manual_row = next(candidate for candidate in list_candidates(run_id) if candidate["id"] == candidate_id)
     return _serialize_candidate(manual_row)
+
+
+def _is_reviewed(candidate: dict) -> bool:
+    return candidate["status"] != "pending" or bool(candidate.get("title")) or bool(candidate.get("notes"))
+
+
+@app.post("/runs/{run_id}/review-from", response_model=ReviewCarryOverResult)
+def runs_carry_over_review(run_id: str, payload: ReviewCarryOver, user: CurrentUser) -> ReviewCarryOverResult:
+    """Bring the review of an earlier run of the same recording over to this one, after a run with other
+    settings: decisions, titles, notes and screen choices go to the steps they were paired with (the pairs the
+    comparison showed), and steps added by hand are added again. Only what is still empty here is filled in, so
+    nothing done on this run is overwritten."""
+    project, recording, run = _run_for(run_id, user, "owner")
+    _source_project, source_recording, source_run = _run_for(payload.source_run_id, user, "owner")
+    if source_run["id"] == run["id"]:
+        raise HTTPException(status_code=422, detail="Choose another run to bring the review from.")
+    if source_recording["id"] != recording["id"]:
+        raise HTTPException(status_code=422, detail="Both runs must be of the same recording.")
+    if run["status"] != "completed" or source_run["status"] != "completed":
+        raise HTTPException(status_code=409, detail="Both runs must be completed.")
+
+    source = {candidate["id"]: candidate for candidate in list_candidates(source_run["id"])}
+    target_ids = {candidate["id"] for candidate in list_candidates(run_id)}
+    pairs: dict[str, str] = {}
+    used_targets: set[str] = set()
+    for pair in payload.pairs:
+        if pair.source_candidate_id not in source or pair.target_candidate_id not in target_ids:
+            raise HTTPException(status_code=422, detail="A pair names a step that is not in these runs.")
+        if pair.source_candidate_id in pairs or pair.target_candidate_id in used_targets:
+            raise HTTPException(status_code=422, detail="Each step can be paired once.")
+        pairs[pair.source_candidate_id] = pair.target_candidate_id
+        used_targets.add(pair.target_candidate_id)
+
+    # Steps added by hand have no counterpart among the detected ones: add them again at the same moment.
+    added_manual = 0
+    for candidate in sorted(source.values(), key=lambda item: item["timestamp_ms"]):
+        if candidate["id"] in pairs or (candidate.get("candidate_origin") or "detected") != "manual":
+            continue
+        if candidate["timestamp_ms"] >= recording["duration_ms"]:
+            continue
+        pairs[candidate["id"]] = _insert_manual_candidate(project, recording, get_run(run_id) or run, candidate["timestamp_ms"])
+        added_manual += 1
+
+    targets = {candidate["id"]: candidate for candidate in list_candidates(run_id)}
+    counts = {"decisions": 0, "titles": 0, "notes": 0, "screen_choices": 0}
+    for source_id, target_id in pairs.items():
+        before, after = source[source_id], targets[target_id]
+        updates: dict[str, Any] = {}
+        if after["status"] == "pending" and before["status"] in {"accepted", "rejected"}:
+            updates["status"] = before["status"]
+            counts["decisions"] += 1
+        for field, counter in (("title", "titles"), ("notes", "notes")):
+            if not after.get(field) and before.get(field):
+                updates[field] = before[field]
+                counts[counter] += 1
+        choice = False
+        if after.get("screen_kind") is None and before.get("screen_kind"):
+            updates["screen_kind"] = before["screen_kind"]
+            choice = True
+        link = before.get("screen_link")
+        if after.get("screen_link") is None and link:
+            mapped = "new" if link == "new" else pairs.get(link)
+            if mapped and mapped != target_id:
+                updates["screen_link"] = mapped
+                choice = True
+        counts["screen_choices"] += int(choice)
+        if updates:
+            update_candidate(target_id, **updates)
+
+    unmatched = sum(1 for candidate in source.values() if candidate["id"] not in pairs and _is_reviewed(candidate))
+    _emit_run_event(
+        run_id,
+        phase=run.get("phase") or "completed",
+        level="info",
+        message=f"Brought over the review of an earlier run ({counts['decisions']} decisions)",
+        progress=run.get("progress"),
+    )
+    return ReviewCarryOverResult(**counts, added_manual=added_manual, unmatched=unmatched)
 
 
 @app.post("/runs/{run_id}/export")

@@ -50,6 +50,8 @@ export interface AnalysisTasksPanelProps {
   onExpandTaskRun: (runId: string) => void;
   onExportAllCompletedTasks: () => void;
   onExportSelectedTasks: () => void;
+  /** Opens the comparison of two finished runs of a recording. */
+  onCompareRuns: (recordingId: string) => void;
   onReviewTaskOutputs: (recordingId: string, runId: string) => void;
   onSelectRun: (recordingId: string, runId: string, anchorId?: string) => void;
   onSetTaskFilter: (filter: AnalysisTaskFilter) => void;
@@ -79,6 +81,7 @@ export function AnalysisTasksPanel({
   onExpandTaskRun,
   onExportAllCompletedTasks,
   onExportSelectedTasks,
+  onCompareRuns,
   onReviewTaskOutputs,
   onSelectRun,
   onSetTaskFilter,
@@ -315,27 +318,39 @@ export function AnalysisTasksPanel({
     const rowsId = `analysis-task-group-rows-${group.recording.id}`;
     return (
       <div className={`analysis-task-group ${isCollapsed ? 'collapsed' : ''}`} key={group.recording.id}>
-        <button
-          aria-controls={rowsId}
-          aria-expanded={!isCollapsed}
-          className="analysis-task-group-header"
-          onClick={() => setGroupCollapsed(group.recording.id, !isCollapsed)}
-          title={`${isCollapsed ? 'show' : 'hide'} runs for ${group.recording.filename}`}
-          type="button"
-        >
-          <span aria-hidden="true" className="analysis-task-group-chevron" />
-          <span className="analysis-task-group-title">{group.recording.filename}</span>
-          <span className="analysis-task-group-count">
-            {isCollapsed && liveCount ? (
-              <span className="analysis-task-group-live">
-                <span aria-hidden="true" className="analysis-task-group-live-dot" />
-                {liveCount} running
-              </span>
-            ) : null}
-            {isCollapsed && queuedCount ? <span>{queuedCount} queued</span> : null}
-            <span>{runCountLabel}</span>
-          </span>
-        </button>
+        <div className="analysis-task-group-head">
+          <button
+            aria-controls={rowsId}
+            aria-expanded={!isCollapsed}
+            className="analysis-task-group-header"
+            onClick={() => setGroupCollapsed(group.recording.id, !isCollapsed)}
+            title={`${isCollapsed ? 'show' : 'hide'} runs for ${group.recording.filename}`}
+            type="button"
+          >
+            <span aria-hidden="true" className="analysis-task-group-chevron" />
+            <span className="analysis-task-group-title">{group.recording.filename}</span>
+            <span className="analysis-task-group-count">
+              {isCollapsed && liveCount ? (
+                <span className="analysis-task-group-live">
+                  <span aria-hidden="true" className="analysis-task-group-live-dot" />
+                  {liveCount} running
+                </span>
+              ) : null}
+              {isCollapsed && queuedCount ? <span>{queuedCount} queued</span> : null}
+              <span>{runCountLabel}</span>
+            </span>
+          </button>
+          {group.runs.filter((item) => item.run.status === 'completed').length >= 2 ? (
+            <button
+              className="analysis-task-link subtle analysis-task-compare"
+              onClick={() => onCompareRuns(group.recording.id)}
+              title="compare two finished runs of this recording: what other settings changed"
+              type="button"
+            >
+              compare
+            </button>
+          ) : null}
+        </div>
         {isCollapsed ? null : (
           <div className="analysis-task-group-rows" id={rowsId}>
             {group.runs.map((item) => renderTaskRow(item))}

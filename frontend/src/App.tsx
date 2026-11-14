@@ -27,6 +27,7 @@ import {
   resetDatabase,
   saveRunSettings,
   forgetRunSettings,
+  carryOverReview,
   updateCandidate,
   updateProject,
   updateRecording,
@@ -697,6 +698,40 @@ function App({ session, onSessionChange }: AppProps) {
     },
     onError: (error: Error) => setAppError(error.message),
   });
+
+  const carryOverReviewMutation = useMutation({
+    mutationFn: ({ pairs, sourceRunId, targetRunId }: { pairs: Array<{ source_candidate_id: string; target_candidate_id: string }>; sourceRunId: string; targetRunId: string }) =>
+      carryOverReview(targetRunId, sourceRunId, pairs),
+    onSuccess: (result, { targetRunId }) => {
+      const parts = [
+        `${result.decisions} ${result.decisions === 1 ? 'decision' : 'decisions'}`,
+        `${result.titles} ${result.titles === 1 ? 'title' : 'titles'}`,
+        `${result.notes} ${result.notes === 1 ? 'note' : 'notes'}`,
+        result.screen_choices ? `${result.screen_choices} screen ${result.screen_choices === 1 ? 'choice' : 'choices'}` : '',
+        result.added_manual ? `${result.added_manual} ${result.added_manual === 1 ? 'step' : 'steps'} added by hand again` : '',
+      ].filter(Boolean);
+      setAnalysisActionMessage(
+        `brought over ${parts.join(', ')}.${result.unmatched ? ` ${result.unmatched} reviewed ${result.unmatched === 1 ? 'step had' : 'steps had'} no match and stayed behind.` : ''}`,
+      );
+      void queryClient.invalidateQueries({ queryKey: ['run', targetRunId] });
+      void queryClient.invalidateQueries({ queryKey: ['recording'] });
+    },
+    onError: (error: Error) => setAppError(error.message),
+  });
+
+  async function handleCarryOverReview(
+    sourceRunId: string,
+    targetRunId: string,
+    pairs: Array<{ source_candidate_id: string; target_candidate_id: string }>,
+  ): Promise<boolean> {
+    clearAnalysisMessages();
+    try {
+      await carryOverReviewMutation.mutateAsync({ pairs, sourceRunId, targetRunId });
+      return true;
+    } catch {
+      return false; // shown by onError
+    }
+  }
 
   // Back to the factory settings: forget the saved universal defaults and this project's, then use the factory ones.
   const restoreFactorySettingsMutation = useMutation({
@@ -1725,6 +1760,9 @@ function App({ session, onSessionChange }: AppProps) {
         onResetToProjectDefaults={handleResetToProjectDefaults}
         onResetToUniversalDefaults={handleResetToUniversalDefaults}
         onRestoreFactorySettings={handleRestoreFactorySettings}
+        onOpenAbout={() => setCornerPanel('about')}
+        onCarryOverReview={handleCarryOverReview}
+        carryOverPending={carryOverReviewMutation.isPending}
         onSaveProjectPreset={handleSaveProjectDefault}
         onSaveUniversalPreset={handleSaveUniversalDefault}
         onSelectRecording={handleSelectRecording}

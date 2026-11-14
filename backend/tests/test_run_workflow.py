@@ -477,3 +477,44 @@ def test_abort_blocks_recording_delete_until_run_stops(client: TestClient, video
 
     delete_response = client.delete(f"/recordings/{recording['id']}")
     assert delete_response.status_code == 204
+
+
+def test_review_carries_over_to_a_new_run_of_the_same_recording(client: TestClient, video_factory, wait_for_run) -> None:
+    # After a run with other settings, the review of the first run goes to the steps it matches; steps added by
+    # hand are added again; nothing already done on the new run is overwritten.
+    project = _create_project(client)
+    recording = _import_video(client, project['id'], video_factory('three.mp4', ['red', 'lime', 'blue']))
+    first = wait_for_run(client, client.post(f"/recordings/{recording['id']}/runs", json={}).json()['id'])
+    second = wait_for_run(client, client.post(f"/recordings/{recording['id']}/runs", json={}).json()['id'])
+    a = sorted(first['candidates'], key=lambda c: c['timestamp_ms'])
+    b = sorted(second['candidates'], key=lambda c: c['timestamp_ms'])
+    assert len(a) == len(b) == 3
+
+    client.patch(f"/candidates/{a[0]['id']}", json={'status': 'accepted', 'title': 'Red', 'notes': 'first screen'})
+    client.patch(f"/candidates/{a[1]['id']}", json={'status': 'rejected', 'title': 'Lime'})
+    client.patch(f"/candidates/{a[2]['id']}", json={'status': 'accepted', 'screen_link': a[0]['id']})
+    manual = client.post(f"/runs/{first['summary']['id']}/candidates/manual", json={'timestamp_ms': 2500}).json()
+    client.patch(f"/candidates/{manual['id']}", json={'status': 'accepted', 'title': 'Blue, later'})
+    # already done on the new run: stays
+    client.patch(f"/candidates/{b[1]['id']}", json={'title': 'Green'})
+
+    pairs = [{'source_candidate_id': x['id'], 'target_candidate_id': y['id']} for x, y in zip(a, b)]
+    response = client.post(f"/runs/{second['summary']['id']}/review-from", json={'source_run_id': first['summary']['id'], 'pairs': pairs})
+    assert response.status_code == 200, response.text
+    assert response.json() == {'decisions': 4, 'titles': 2, 'notes': 1, 'screen_choices': 1, 'added_manual': 1, 'unmatched': 0}
+
+    after = sorted(client.get(f"/runs/{second['summary']['id']}").json()['candidates'], key=lambda c: c['timestamp_ms'])
+    by_time = {c['timestamp_ms']: c for c in after}
+    assert [c['status'] for c in after] == ['accepted', 'rejected', 'accepted', 'accepted']
+    assert [c['title'] for c in after] == ['Red', 'Green', None, 'Blue, later']
+    assert after[0]['notes'] == 'first screen'
+    assert after[2]['screen_link'] == after[0]['id']  # pointed at the new run's own step
+    assert by_time[2500]['candidate_origin'] == 'manual'
+
+    # pairs must name steps of these two runs, each once
+    bad = client.post(
+        f"/runs/{second['summary']['id']}/review-from",
+        json={'source_run_id': first['summary']['id'], 'pairs': [pairs[0], {**pairs[1], 'target_candidate_id': b[0]['id']}]},
+    )
+    assert bad.status_code == 422
+    assert client.post(f"/runs/{second['summary']['id']}/review-from", json={'source_run_id': second['summary']['id'], 'pairs': []}).status_code == 422

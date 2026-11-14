@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { absoluteApiUrl, getRun } from '../../api';
-import { ComparisonMetrics, CandidateCard, CandidateRow } from '../../components/CandidateCard';
+import { absoluteApiUrl } from '../../api';
+import { CandidateCard, CandidateRow } from '../../components/CandidateCard';
 import { EditableName } from '../../components/EditableName';
 import {
   activeRunStatuses,
-  buildCandidateComparison,
   candidateFilters,
   candidateMatchesFilter,
   candidateMatchesLabels,
@@ -56,6 +54,8 @@ import type {
 import { AnalysisParametersPanel } from './components/AnalysisParametersPanel';
 import { AnalysisTasksPanel } from './components/AnalysisTasksPanel';
 import { AnalysisVideosPanel } from './components/AnalysisVideosPanel';
+import { RunComparison, type CarryOverPair } from './components/RunComparison';
+import { defaultComparisonPair } from '../../lib/runComparison';
 import type { ImportQueueItem } from '../../lib/importQueue';
 import type { WorkflowStage } from '../../lib/workflow';
 import { defaultStableSettings, formatStableSummary } from '../../lib/stableSettings';
@@ -127,6 +127,11 @@ export interface AnalysisScreenProps {
   onResetToProjectDefaults: () => void;
   onResetToUniversalDefaults: () => void;
   onRestoreFactorySettings: () => void;
+  /** Brings the review of one run over to another run of the same recording; resolves once it is in. */
+  onCarryOverReview: (sourceRunId: string, targetRunId: string, pairs: CarryOverPair[]) => Promise<boolean>;
+  carryOverPending: boolean;
+  /** Opens the about panel at the bottom right. */
+  onOpenAbout: () => void;
   onSaveProjectPreset: () => void;
   onSaveUniversalPreset: () => void;
   onSelectRecording: (recordingId: string) => void;
@@ -250,6 +255,9 @@ export function AnalysisScreen({
   onResetToProjectDefaults,
   onResetToUniversalDefaults,
   onRestoreFactorySettings,
+  onCarryOverReview,
+  carryOverPending,
+  onOpenAbout,
   onSaveProjectPreset,
   onSaveUniversalPreset,
   onSelectRecording,
@@ -319,7 +327,8 @@ export function AnalysisScreen({
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [showRunLogs]);
-  const [compareRunId, setCompareRunId] = useState<string | null>(null);
+  // Two runs of one recording side by side (RunComparison), opened from the tasks list.
+  const [comparison, setComparison] = useState<{ recordingId: string; left: string; right: string } | null>(null);
   const [presetCopyFeedback, setPresetCopyFeedback] = useState('');
   const [showHints, setShowHints] = useState(false);
   const [taskClockMs, setTaskClockMs] = useState(() => Date.now());
@@ -340,14 +349,8 @@ export function AnalysisScreen({
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const activeManualMarkIdRef = useRef<string | null>(null);
 
-  const compareRunDetailQuery = useQuery({
-    queryKey: ['run', compareRunId, 'compare'],
-    queryFn: () => getRun(compareRunId as string),
-    enabled: Boolean(compareRunId),
-  });
 
   const previewVideoUrl = previewRecording ? absoluteApiUrl(previewRecording.source_url) : null;
-  const comparedRun = compareRunDetailQuery.data ?? null;
   const hintCopy: Record<AnalysisHintKey, string> = {
     load: 'paste stepthrough preset text to load a saved parameter set into the active analysis controls.',
     reset: 'reset the current analysis parameters to this project or universal defaults.',
@@ -626,20 +629,6 @@ export function AnalysisScreen({
     return 'exported';
   }, [selectedRun, taskClockMs]);
   const resolvedExportFilenamePreview = normalizeZipFilename(exportNameDraft);
-  const comparableRuns = useMemo(
-    () =>
-      (selectedRecording?.runs ?? []).filter(
-        (run) => run.id !== selectedRun?.summary.id && run.status === 'completed',
-      ),
-    [selectedRecording?.runs, selectedRun?.summary.id],
-  );
-  const comparisonRows = useMemo(
-    () =>
-      selectedRun && comparedRun
-        ? buildCandidateComparison(selectedRun.candidates, comparedRun.candidates)
-        : [],
-    [comparedRun, selectedRun],
-  );
 
   useEffect(() => {
     if (!expandedTaskRunId) {
@@ -686,18 +675,6 @@ export function AnalysisScreen({
   useEffect(() => {
     setShowRunLogs(false);
   }, [selectedRun?.summary.id]);
-
-  useEffect(() => {
-    if (!compareRunId) {
-      return;
-    }
-    if (
-      compareRunId === selectedRun?.summary.id ||
-      !comparableRuns.some((run) => run.id === compareRunId)
-    ) {
-      setCompareRunId(null);
-    }
-  }, [compareRunId, comparableRuns, selectedRun?.summary.id]);
 
   useEffect(() => {
     setOpenPopover((current) => (current === 'export' ? null : current));
@@ -1311,6 +1288,21 @@ export function AnalysisScreen({
     onSelectRun(recordingId, runId, 'analysis-candidate-review');
   }
 
+  /** Compare two finished runs of a recording: the newest, and the earlier one with the most review. */
+  function handleCompareRuns(recordingId: string) {
+    const runs = analysisTaskItems.filter((item) => item.recording.id === recordingId).map((item) => item.run);
+    const pair = defaultComparisonPair(runs);
+    if (!pair) return;
+    setComparison({ recordingId, ...pair });
+    window.setTimeout(() => jumpToAnchor('analysis-run-compare'), 0);
+  }
+
+  function leaveComparisonFor(runId: string) {
+    const recordingId = comparison?.recordingId;
+    setComparison(null);
+    if (recordingId) handleReviewTaskOutputs(recordingId, runId);
+  }
+
   function handleEnterTaskSelectMode() {
     setTaskSelectMode(true);
     setSelectedTaskRunIds([]);
@@ -1442,6 +1434,7 @@ export function AnalysisScreen({
 
           <AnalysisTasksPanel
             analysisTaskItems={analysisTaskItems}
+            onCompareRuns={handleCompareRuns}
             analysisMetadata={analysisMetadata}
             bulkDeletePending={bulkDeletePending}
             bulkExportPending={bulkExportPending}
@@ -1708,65 +1701,52 @@ export function AnalysisScreen({
           </div>
         )}
 
-        {selectedRun ? (
+        {comparison ? (
+          (() => {
+            const items = analysisTaskItems.filter((item) => item.recording.id === comparison.recordingId);
+            const recording = items[0]?.recording;
+            return recording ? (
+              <RunComparison
+                analysisMetadata={analysisMetadata}
+                carryOverPending={carryOverPending}
+                key={comparison.recordingId}
+                leftRunId={comparison.left}
+                onCarryOver={(source, target, pairs) =>
+                  void onCarryOverReview(source, target, pairs).then((done) => done && leaveComparisonFor(target))
+                }
+                onChangeRuns={(left, right) => setComparison({ ...comparison, left, right })}
+                onClose={() => setComparison(null)}
+                onReview={leaveComparisonFor}
+                recording={recording}
+                rightRunId={comparison.right}
+                runs={items.map((item) => item.run)}
+              />
+            ) : null;
+          })()
+        ) : selectedRun ? (
           <section className="analysis-detail-section stack-gap" id="analysis-run-detail">
+            {/* One title row: the file name on the left, when it ran and its logs on the right. Its settings are in the
+                tasks list (details), so they are not repeated here. */}
             <div className="analysis-detail-header">
               <div className="analysis-detail-copy">
-                <p className="analysis-section-eyebrow">selected task</p>
-                {isCompletedReview ? (
+                <p className="analysis-section-eyebrow">
+                  selected task{runNumberById.has(selectedRun.summary.id) ? ` · run #${runNumberById.get(selectedRun.summary.id)}` : ''}
+                </p>
+                <div className="run-title-row">
                   <h2>{selectedRecordingSummary?.filename ?? selectedRun.summary.recording_id}</h2>
-                ) : (
-                  <div className="run-title-row">
-                    <h2>{selectedRecordingSummary?.filename ?? selectedRun.summary.recording_id}</h2>
+                  {!isCompletedReview ? (
                     <span className={`status-pill ${selectedRun.summary.status}`}>
                       {selectedRun.summary.status.replace('_', ' ')}
                     </span>
-                  </div>
-                )}
-                <p className="analysis-detail-meta">
-                  {formatRunSummaryLabel(selectedRun.summary, analysisMetadata)}
-                </p>
+                  ) : null}
+                </div>
                 {!isCompletedReview && selectedRun.summary.message ? (
                   <p className="muted">{selectedRun.summary.message}</p>
                 ) : null}
-                <div className="analysis-detail-meta-row">
-                  <p className="analysis-detail-meta">{formatRunTiming(selectedRun.summary)}</p>
-                  <div className="analysis-log-popover-shell" ref={logShellRef}>
-                    <button
-                      className="analysis-task-link subtle analysis-log-toggle"
-                      id="analysis-run-logs"
-                      onClick={() => setShowRunLogs((current) => !current)}
-                      type="button"
-                    >
-                      {showRunLogs ? 'hide logs' : 'view logs'}
-                    </button>
-                    {showRunLogs ? (
-                      <div className="analysis-log-popover">
-                        <div className="analysis-log-lines">
-                          {selectedRun.events.map((event) => (
-                            <p className={`analysis-log-line ${event.level}`} key={event.id}>
-                              <span className="analysis-log-line-meta">
-                                {new Date(event.created_at).toLocaleTimeString().toLocaleLowerCase()} · {formatPhase(event.phase)}
-                              </span>
-                              <span>{event.message}</span>
-                              {typeof event.progress === 'number' ? (
-                                <span className="analysis-log-line-progress">
-                                  {formatPercent(event.progress)}
-                                </span>
-                              ) : null}
-                            </p>
-                          ))}
-                          {!selectedRun.events.length && (
-                            <p className="empty-copy">progress messages will appear here once the run starts.</p>
-                          )}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
               </div>
-              {selectedRun.summary.is_abortable ? (
-                <div className="action-row">
+              <div className="analysis-detail-side">
+                <p className="analysis-detail-meta">{formatRunTiming(selectedRun.summary)}</p>
+                {selectedRun.summary.is_abortable ? (
                   <button
                     className="analysis-task-link danger"
                     disabled={abortRunPending}
@@ -1775,127 +1755,46 @@ export function AnalysisScreen({
                   >
                     end
                   </button>
+                ) : null}
+                <div className="analysis-log-popover-shell" ref={logShellRef}>
+                  <button
+                    className="analysis-task-link subtle analysis-log-toggle"
+                    id="analysis-run-logs"
+                    onClick={() => setShowRunLogs((current) => !current)}
+                    type="button"
+                  >
+                    {showRunLogs ? 'hide logs' : 'view logs'}
+                  </button>
+                  {showRunLogs ? (
+                    <div className="analysis-log-popover">
+                      <div className="analysis-log-lines">
+                        {selectedRun.events.map((event) => (
+                          <p className={`analysis-log-line ${event.level}`} key={event.id}>
+                            <span className="analysis-log-line-meta">
+                              {new Date(event.created_at).toLocaleTimeString().toLocaleLowerCase()} · {formatPhase(event.phase)}
+                            </span>
+                            <span>{event.message}</span>
+                            {typeof event.progress === 'number' ? (
+                              <span className="analysis-log-line-progress">
+                                {formatPercent(event.progress)}
+                              </span>
+                            ) : null}
+                          </p>
+                        ))}
+                        {!selectedRun.events.length && (
+                          <p className="empty-copy">progress messages will appear here once the run starts.</p>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
+              </div>
             </div>
 
             {!isCompletedReview ? (
               <div className="analysis-task-bar" aria-hidden="true">
                 <div className="analysis-task-bar-fill" style={{ width: formatPercent(selectedRun.summary.progress) }} />
               </div>
-            ) : null}
-
-            {selectedRun.summary.status === 'completed' ? (
-              <details className="analysis-compare-shell">
-                <summary className="analysis-compare-trigger">
-                  <span>compare runs</span>
-                  <span aria-hidden="true" className="analysis-compare-trigger-chevron" />
-                </summary>
-                <div className="analysis-compare-body">
-                  <div className="analysis-compare-head">
-                    <div className="analysis-compare-head-copy">
-                      <p className="analysis-compare-head-eyebrow">comparison</p>
-                      <h3>compare completed runs</h3>
-                    </div>
-                    <label className="analysis-compare-select-wrap">
-                      <span className="sr-only">compare with another completed run</span>
-                      <select
-                        className="analysis-compare-select"
-                        onChange={(event) => setCompareRunId(event.target.value || null)}
-                        value={compareRunId ?? ''}
-                      >
-                        <option value="">select another completed run</option>
-                        {comparableRuns.map((run) => (
-                          <option key={run.id} value={run.id}>
-                            {formatRunSummaryLabel(run, analysisMetadata)} · {formatRunShortTimestamp(run.created_at)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  {comparedRun ? (
-                    <>
-                      <div className="analysis-compare-summary">
-                        <span className="compare-stat-both">
-                          {comparisonRows.filter((row) => row.badge === 'both').length} matched
-                        </span>
-                        <span className="compare-stat-timing">
-                          {comparisonRows.filter((row) => row.badge === 'timing_shifted').length} timing shifted
-                        </span>
-                        <span className="compare-stat-left">
-                          {comparisonRows.filter((row) => row.badge === 'left_only').length} only in selected
-                        </span>
-                        <span className="compare-stat-right">
-                          {comparisonRows.filter((row) => row.badge === 'right_only').length} only in comparison
-                        </span>
-                      </div>
-                      <div className="analysis-compare-grid">
-                        {comparisonRows.map((row, index) => {
-                          const badgeLabel =
-                            row.badge === 'both'
-                              ? 'both'
-                              : row.badge === 'timing_shifted'
-                                ? 'timing shifted'
-                                : row.badge === 'left_only'
-                                  ? 'selected only'
-                                  : 'comparison only';
-                          return (
-                            <article
-                              className="analysis-compare-card"
-                              key={`${row.left?.id ?? 'left-none'}-${row.right?.id ?? 'right-none'}-${index}`}
-                            >
-                              <div className="analysis-compare-card-head">
-                                <span className={`analysis-compare-badge ${row.badge}`}>{badgeLabel}</span>
-                                {typeof row.timeDeltaMs === 'number' ? <small>{row.timeDeltaMs}ms apart</small> : null}
-                              </div>
-                              <div className="analysis-compare-card-columns">
-                                <div className="analysis-compare-column">
-                                  <p className="analysis-compare-column-label">selected</p>
-                                  {row.left ? (
-                                    <>
-                                      <img
-                                        alt={`selected run candidate at ${row.left.timestamp_tc}`}
-                                        className="analysis-compare-image"
-                                        src={absoluteApiUrl(row.left.image_url)}
-                                      />
-                                      <small>{row.left.timestamp_tc}</small>
-                                      <ComparisonMetrics candidate={row.left} />
-                                    </>
-                                  ) : (
-                                    <p className="analysis-compare-empty">no matching candidate</p>
-                                  )}
-                                </div>
-                                <div className="analysis-compare-column">
-                                  <p className="analysis-compare-column-label">comparison</p>
-                                  {row.right ? (
-                                    <>
-                                      <img
-                                        alt={`comparison run candidate at ${row.right.timestamp_tc}`}
-                                        className="analysis-compare-image"
-                                        src={absoluteApiUrl(row.right.image_url)}
-                                      />
-                                      <small>{row.right.timestamp_tc}</small>
-                                      <ComparisonMetrics candidate={row.right} />
-                                    </>
-                                  ) : (
-                                    <p className="analysis-compare-empty">no matching candidate</p>
-                                  )}
-                                </div>
-                              </div>
-                            </article>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : compareRunId ? (
-                    <p className="analysis-compare-guidance">loading comparison run…</p>
-                  ) : (
-                    <p className="analysis-compare-guidance">
-                      select another completed run from this recording to compare outputs side by side.
-                    </p>
-                  )}
-                </div>
-              </details>
             ) : null}
 
             {canReviewCandidates && isCompletedReview ? (
@@ -1922,6 +1821,7 @@ export function AnalysisScreen({
 
             {showPathway ? (
               <PathwayPanel
+                onOpenAbout={onOpenAbout}
                 onUpdateCandidate={onUpdateCandidate}
                 projectName={activeProject?.name ?? ''}
                 recording={selectedRecordingSummary}

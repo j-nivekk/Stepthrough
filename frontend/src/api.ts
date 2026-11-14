@@ -220,6 +220,24 @@ export function forgetRunSettings(projectId: string | null): Promise<void> {
   return request<void>(path, { method: 'DELETE' });
 }
 
+export interface ReviewCarryOverResult {
+  decisions: number;
+  titles: number;
+  notes: number;
+  screen_choices: number;
+  added_manual: number;
+  unmatched: number;
+}
+
+/** Bring the review of `sourceRunId` over to `runId` (another run of the same recording), along `pairs`. */
+export function carryOverReview(
+  runId: string,
+  sourceRunId: string,
+  pairs: Array<{ source_candidate_id: string; target_candidate_id: string }>,
+): Promise<ReviewCarryOverResult> {
+  return request<ReviewCarryOverResult>(`/runs/${runId}/review-from`, jsonBody('POST', { source_run_id: sourceRunId, pairs }));
+}
+
 export function createManualRun(recordingId: string): Promise<RunSummary> {
   return request<RunSummary>(`/recordings/${recordingId}/runs/manual`, { method: 'POST' });
 }
