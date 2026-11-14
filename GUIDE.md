@@ -255,8 +255,12 @@ To come back to a project later, pick it from the list. When you point at a proj
 
 Drag the video onto the drop area, or click the area to choose a file. Stepthrough accepts `.mp4`, `.mov`,
 `.m4v`, `.webm` and `.mkv` files. Videos upload straight away, one after the other: each shows how far it is,
-then **uploaded**. **cancel** stops a video that is still on its way. Press **done** to go to the analysis; videos
-still uploading carry on and appear in the videos column when they are in. Keep the page open until then.
+then **uploaded**. **cancel** stops a video that is still on its way, and **retry** sends one again if its upload
+failed. Press **done** to go to the analysis; videos still uploading carry on and appear in the videos column when
+they are in. Keep the page open until then.
+
+To delete a video, point at it here or in the videos column of the analysis and press **delete**. Every run,
+screenshot and export made from it goes with it, so Stepthrough asks first.
 
 In the background, Stepthrough now makes a *working copy* of each recording (see
 [section 5](#5-how-stepthrough-finds-steps)). If the first run starts before the copy is ready, it waits for
@@ -402,7 +406,9 @@ settings for a short explanation of each one.
   you log in from, and other people in a shared project keep their own.
 - **preset text** shows the settings as a short piece of text that you can copy, for example into a methods
   section or to share with others. **load** reads such a text back in.
-- The **reset** button (★) goes back to the project's or the universal defaults.
+- The **reset** button (★) goes back to the project's or the universal defaults. **restore factory settings…**
+  in the same menu forgets the settings you saved, for this project and as universal defaults, and goes back to
+  Stepthrough's own.
 
 ## 7. Reviewing steps
 
@@ -436,14 +442,15 @@ While the video plays, the card of the step on screen is outlined, so you can se
 
 Changed a setting and ran the analysis again? When a recording has two or more finished runs, **compare** next
 to it in the tasks list shows two of them side by side: the settings that differ, a timeline with each run's
-steps, and the screenshots of the steps only one of the runs found (or found at another moment). Pick other
-runs with the two lists at the top.
+steps, and the screenshots of the steps only one of the runs found (or found at another moment). It starts with
+the newest run and the earlier one with the most accepted steps; pick other runs with the two lists at the top.
 
-To go on with the newer run without reviewing it from scratch, press **review run #2 with the review of run
-#1** (with your run numbers). Your decisions, titles, notes and screen choices go to the steps both runs found,
-and steps you added by hand are added again at the same moment. Only what is still empty in the newer run is
-filled in, so nothing you already did there is lost; the review of steps only the earlier run found stays with
-that run. **review run #2 as it is** and **back to run #1** leave both runs as they are.
+To go on with the newer run without reviewing it from scratch, press **review run #2 with the review of
+run #1** (with your run numbers) at the bottom of the window. Your decisions, titles, notes and screen choices go
+to the steps both runs found, and steps you added by hand are added again at the same moment. Only what is still
+empty in the newer run is filled in, so nothing you already did there is lost; the review of steps only the
+earlier run found stays with that run. **review run #2 as it is** and **back to run #1** leave both runs as they
+are.
 
 ### Pathway
 
@@ -527,7 +534,11 @@ own too, which you can move or resize in a drawing program.
 
 Every run is listed under **tasks** with its number of steps. Runs of the same recording are grouped; click
 the arrow next to a recording's name to fold its runs away or show them again. **details** shows the settings
-a run used, **review outputs** opens it, and **select** lets you delete or export several runs at once.
+a run used, **review outputs** opens it, **compare** sets two runs of a recording side by side (see
+[Comparing runs](#comparing-runs)), and **select** lets you delete or export several runs at once.
+
+A run you opened shows its number and when it finished at the top. **view logs**, at the right, lists what the
+analysis did, step by step, which helps when a run failed or took longer than expected.
 
 ## 8. Exports
 
@@ -645,7 +656,9 @@ section could say, for example:
 > accepted and K added manually.
 
 Copy the **preset text** of your settings into an appendix, so that others can repeat the analysis. Use the
-same settings for all recordings you compare, and report the steps you added and rejected by hand.
+same settings for all recordings you compare, and report the steps you added and rejected by hand. Name the
+version of Stepthrough as well: **about**, at the bottom right, shows it with the commit it was built from, and
+the DOI to cite.
 
 ### Typical uses
 

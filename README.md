@@ -16,6 +16,8 @@
 - **Local-First & Private**: Everything stays on your machine. Data, recordings, and extracted frames process and save directly to your local `./data` folder.
 - **Optional OCR**: Reads the text of each screenshot into exports with local PaddleOCR.
 - **Chronological Review Board**: An intuitive GUI to accept, reject, rename, and add notes to candidate screenshots while preserving original chronology.
+- **Pathways**: The accepted steps drawn as a chart of screens and the moves between them, ready to finish as an SVG figure, with a hands-on tutorial in the app.
+- **Run Comparison**: Run a recording again with other settings, see side by side what changed, and carry your review over to the new run.
 - **Rich Exports**: Bundle your accepted walkthrough steps seamlessly into `PNG`s + `CSV` + `JSON` manifests.
 
 ---
@@ -116,7 +118,7 @@ and how to upgrade. The Docker images are at `ghcr.io/j-nivekk/stepthrough`:
 | tag | what it is |
 |---|---|
 | `stable` (`stable-ocr` with text recognition) | the latest release |
-| `1.0.2`, `1.0` (and `-ocr`) | a release, or the latest of a series, to stay on a known version |
+| `1.1.0`, `1.1` (and `-ocr`) | a release, or the latest of a series, to stay on a known version |
 | `edge` (`edge-ocr`) | the latest build of `main`; the app shows `edge` at the bottom right and its commit under **about** |
 
 The [Docker image workflow](.github/workflows/docker.yml) builds the image, runs the backend tests and an end-to-end
@@ -124,12 +126,13 @@ smoke test in it, and only then publishes. It runs for:
 
 - a push to `main` that changes the app, its tests or the image (it publishes `edge`). Changes to documentation and
   other files outside the image skip it, and so does any commit with `[skip ci]` in its message;
-- a version tag such as `v1.0.2` (it publishes the release images and moves `stable`);
+- a version tag such as `v1.1.0` (it publishes the release images and moves `stable`);
 - pull requests that change the app (tests only).
 
 **To release:** set the new version in `backend/app/__init__.py`, `backend/pyproject.toml` and
-`frontend/package.json` (a test checks they match), commit, push a tag such as `v1.0.2`, and write the release notes
-on GitHub.
+`frontend/package.json` (a test checks they match), commit, push a tag such as `v1.1.0`, and write the release notes
+on GitHub. `DEPLOY.md` names the latest release in its checkout commands, and `README_IF_DOWNLOADED_FROM_ZENODO.md`
+the archived version: update both.
 
 ---
 
@@ -145,11 +148,12 @@ on GitHub.
 
 - [`GUIDE.md`](GUIDE.md): how Stepthrough works and how to use it, with a first tutorial, settings,
   review, exports, recording tips and notes on research use.
-- In the app, **about → how it works** shows the analysis of a sample recording, step by step.
+- In the app, **about → how it works** shows the analysis of a sample recording, step by step, and **about → how
+  to work with pathways** is a hands-on tutorial on the pathway chart.
 - [`docs/evaluation.md`](docs/evaluation.md): how well the detection works, how it was tested, and where it
   fails.
-- [`backend/README.md`](backend/README.md): the detection engine, its settings and the export format, for
-  developers.
+- [`backend/README.md`](backend/README.md): the detection engine, its settings, the export format and parts of the
+  API, for developers.
 - [`DEPLOY.md`](DEPLOY.md): running the Docker image on a server.
 
 ---

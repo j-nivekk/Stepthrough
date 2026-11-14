@@ -22,6 +22,9 @@ The working copy is:
 
 Recording `fps`, `duration_ms`, `width` and `height` describe the working copy once it exists.
 
+Deleting a recording while its working copy is still being made stops ffmpeg and waits for it before the folder
+is removed, so the copy cannot write the folder back; a deleted recording's copy cannot start later either.
+
 ## Detection engine
 
 Runs use **`stable_v3` ("stable screens")**, in `app/services/stable_detection.py`. A step is a screen that
@@ -103,6 +106,21 @@ by default). It moves every member of the source box to the target together, inc
 so accepting one later preserves the merge. Both candidates must belong to that run, and the caller must
 be a project owner.
 
+## Carrying a review over
+
+After a run with other settings, `POST /runs/{id}/review-from` brings the review of another completed run of the
+same recording over to run `{id}`. The body names `source_run_id` and `pairs`, each a `source_candidate_id` and a
+`target_candidate_id`: steps of the two runs that show the same moment. The app pairs detected steps by time, as
+its comparison shows them (at most 750 ms apart; `buildCandidateComparison` in `frontend/src/lib/analysis.ts`),
+and leaves steps added by hand out of the pairs. Each step can be in one pair.
+
+For every pair, only what is still empty on the target is filled in: the decision of a pending step, the title,
+the notes, the pop-up choice (`screen_kind`) and the screen choice (`screen_link`, `new` or mapped through the
+pairs). Steps of the source run that were added by hand and are not paired are added again at the same moment.
+The answer counts what was filled in (`decisions`, `titles`, `notes`, `screen_choices`), the steps added again
+(`added_manual`), and `unmatched`: reviewed steps of the source run without a match, whose review stays there.
+The caller must be an owner of both runs' project.
+
 ## Configuration
 
 | variable | default | meaning |
@@ -139,7 +157,8 @@ project with other people or a tag works in the data model but has no page yet.
 Settings saved for new runs (`saved_run_settings`) belong to the person who saved them: their own defaults, and
 theirs for any project they may open, as a viewer too. They are deleted with the account or the project; resetting
 the database keeps everyone's own defaults. Earlier versions kept them in the browser; the app moves those to the
-first account that opens it there.
+first account that opens it there. `DELETE /me/run-settings/default` and `DELETE /me/run-settings/projects/{id}`
+forget a person's own defaults and their settings for one project (**restore factory settings** in the app).
 
 With `STEPTHROUGH_AUTH=none` (the desktop app) there are no logins: every request comes from the built-in user
 `local`, an administrator, who also owns every project made before users existed.
