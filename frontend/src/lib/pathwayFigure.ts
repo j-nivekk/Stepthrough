@@ -37,6 +37,11 @@ export interface PathwayFigureInput {
   version: string;
   /** A screen to mark as selected on the page; left out of files. */
   highlight?: string | null;
+  /**
+   * On the page: mark the step numbers under each screen, so that resting the pointer on one can show that step's
+   * screenshot in the box (see PathwayPanel). Left out of files.
+   */
+  peek?: boolean;
   /** Address of a step's screenshot: a URL on the page, a data URI in a file that has to stand alone. */
   imageFor: (step: PathwayStep) => string;
   measure?: TextMeasurer;
@@ -272,6 +277,7 @@ function buildCard(
   options: PathwayFigureOptions,
   imageFor: (step: PathwayStep) => string,
   measure: TextMeasurer,
+  peek: boolean,
 ): Card {
   const screenSteps = screen.visits.flatMap((visit) => visit.step_ids).map((id) => steps.get(id)).filter((step): step is PathwayStep => Boolean(step));
   const stack = screen.visits.some((visit) => visit.step_ids.length > 1) ? STACK : 0;
@@ -289,9 +295,17 @@ function buildCard(
   svg += `<rect width="${width}" height="${height}" fill="#f3f3f0"/>`;
   const image = steps.get(screen.image_step_id);
   if (image) {
-    svg += `<image xlink:href="${esc(imageFor(image))}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
+    svg += `<image${peek ? ' data-screenshot=""' : ''} xlink:href="${esc(imageFor(image))}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid slice"/>`;
   }
   svg += `<rect width="${width}" height="${height}" fill="none" stroke="${INK}" stroke-width="0.75"${screen.kind === 'popup' ? ' stroke-dasharray="4 3"' : ''}/>`;
+  // Which step the box shows while the pointer rests on a step number; hidden until then.
+  if (peek) {
+    svg +=
+      '<g class="pathway-peek-tag" visibility="hidden">' +
+      `<rect x="5" y="5" width="44" height="16" rx="8" fill="${INK}"/>` +
+      text(27, 16, '', { size: 9.5, bold: true, fill: '#fff', anchor: 'middle' }) +
+      '</g>';
+  }
 
   // Step numbers, one pill per visit, each with the time the visit began.
   let x = 0;
@@ -308,8 +322,12 @@ function buildCard(
       x = 0;
       cy += 20;
     }
-    svg += pill(x, cy, label);
-    if (time) svg += text(x + pillW + 4, cy + 3.5, time, { size: 10, fill: SUB });
+    const number = pill(x, cy, label) + (time ? text(x + pillW + 4, cy + 3.5, time, { size: 10, fill: SUB }) : '');
+    // The steps of the visit, for the pointer preview. A transparent rect makes the gaps between the pill and its
+    // time part of the target.
+    svg += peek
+      ? `<g data-peek="${esc(visit.step_ids.join(' '))}"><rect x="${n1(x - 2)}" y="${n1(cy - 9.5)}" width="${n1(pillW + timeWidth + 4)}" height="19" fill="transparent"/>${number}</g>`
+      : number;
     x += pillW + timeWidth + (time ? 9 : 3);
   }
   if (screen.kind === 'popup') {
@@ -388,7 +406,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   const steps = new Map(pathway.steps.map((step) => [step.step_id, step]));
   const { placed, rows, cols } = placeScreens(pathway.screens, maxCols);
   const cards = new Map<string, Card>();
-  for (const screen of pathway.screens) cards.set(screen.id, buildCard(screen, steps, width, height, options, imageFor, measure));
+  for (const screen of pathway.screens) cards.set(screen.id, buildCard(screen, steps, width, height, options, imageFor, measure, Boolean(input.peek)));
 
   // Moves that do not follow the tree run over the top of a row, and between rows through a margin. Their
   // tracks are found first, in columns and rows, because the tracks decide how much room the figure needs.

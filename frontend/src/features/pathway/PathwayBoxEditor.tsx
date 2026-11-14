@@ -52,7 +52,8 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
       <div className="pathway-editor idle">
         {pick}
         <span className="candidate-view-note">
-          or click one in the chart, to rename it, mark it as a pop-up or move its steps to another box
+          or click one in the chart, to rename it, mark it as a pop-up or move its steps to another box. rest the
+          pointer on a step number under a box to see that step
         </span>
       </div>
     );

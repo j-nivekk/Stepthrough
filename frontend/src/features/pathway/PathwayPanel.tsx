@@ -2,6 +2,7 @@ import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 
 import { absoluteApiUrl, getRunPathway, mergePathwayScreens } from '../../api';
+import { markPathwayTutorialSeen, PathwayTutorial, pathwayTutorialSeen } from '../../components/pathwayTutorial/PathwayTutorial';
 import { downloadText } from '../../lib/accountLinks';
 import { APP_VERSION } from '../../lib/buildInfo';
 import { buildPathwayFigure, formatPathwayTime, type PathwayFigureOptions, type PathwayNotesPlacement } from '../../lib/pathwayFigure';
@@ -20,6 +21,7 @@ import { splitFilename } from '../../lib/utils';
 import type { CandidateChanges, Pathway, PathwayDetail, PathwayStep, RecordingSummary, RunDetail } from '../../types';
 import { useElementWidth } from '../analysis/useElementWidth';
 import { PathwayBoxEditor } from './PathwayBoxEditor';
+import { usePathwayPeek } from './usePathwayPeek';
 
 interface PathwayPanelProps {
   onUpdateCandidate: (candidateId: string, changes: CandidateChanges) => void;
@@ -74,6 +76,9 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
   const [areaRef, areaWidth] = useElementWidth<HTMLDivElement>();
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState('');
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+  // Shown once, until the tutorial is started or the invitation dismissed.
+  const [invite, setInvite] = useState(() => !pathwayTutorialSeen());
   // The selected box, kept as one of its steps: boxes are numbered again whenever the grouping changes.
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
 
@@ -111,7 +116,8 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
     return (step && pathway?.screens.find((screen) => screen.id === step.screen_id)) || null;
   }, [pathway, selectedCandidateId]);
 
-  function figureFor(source: Pathway, imageFor: (step: PathwayStep) => string, highlight: string | null = null) {
+  /** The figure of a pathway: on the page with the selected box marked and the step numbers ready for a preview. */
+  function figureFor(source: Pathway, imageFor: (step: PathwayStep) => string, page?: { highlight: string | null }) {
     const counts = `${plural(source.step_count, 'step', 'steps')} on ${plural(source.screen_count, 'screen', 'screens')}`;
     const parts = [projectName, counts, recording ? formatPathwayTime(recording.duration_ms) : ''].filter(Boolean);
     return buildPathwayFigure({
@@ -123,18 +129,20 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
       date: localDate(),
       version: APP_VERSION,
       imageFor,
-      highlight,
+      highlight: page?.highlight ?? null,
+      peek: Boolean(page),
     });
   }
 
   const figure = useMemo(
     () =>
       pathway && pathway.screens.length
-        ? figureFor(pathway, (step) => absoluteApiUrl(step.image_url), selectedScreen?.id ?? null)
+        ? figureFor(pathway, (step) => absoluteApiUrl(step.image_url), { highlight: selectedScreen?.id ?? null })
         : null,
     // figureFor reads only what is listed here
     [pathway, options, aspect, filename, projectName, recording?.duration_ms, selectedScreen?.id],
   );
+  const peek = usePathwayPeek(pathway, figure?.svg);
 
   /** A click on a screen selects its box for editing; a click anywhere else lets go of it. */
   function handleFigureClick(event: MouseEvent<HTMLDivElement>) {
@@ -169,18 +177,58 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
     }
   }
 
+  function openTutorial() {
+    markPathwayTutorialSeen();
+    setInvite(false);
+    setTutorialOpen(true);
+  }
+
+  const tutorialLink = (
+    <button className="analysis-task-link subtle" onClick={openTutorial} type="button">
+      how to work with pathways
+    </button>
+  );
+  const tutorial = tutorialOpen ? <PathwayTutorial onClose={() => setTutorialOpen(false)} /> : null;
+  const invitation = invite ? (
+    <div className="pathway-invite">
+      <span>
+        <b>new to pathways?</b> a hands-on tutorial on a practice recording shows how to read, check and correct a
+        pathway. it takes about 5 minutes.
+      </span>
+      <button className="analysis-pill success" onClick={openTutorial} type="button">
+        start the tutorial
+      </button>
+      <button
+        className="analysis-task-link subtle"
+        onClick={() => {
+          markPathwayTutorialSeen();
+          setInvite(false);
+        }}
+        type="button"
+      >
+        not now
+      </button>
+    </div>
+  ) : null;
+
   if (run.accepted_steps.length === 0) {
     return (
-      <p className="entry-empty-copy candidate-empty-copy">
-        a pathway is drawn from the accepted steps. accept the steps that belong in the walkthrough under <b>steps</b>,
-        then come back here.
-      </p>
+      <div className="pathway-panel">
+        {invitation}
+        <p className="entry-empty-copy candidate-empty-copy">
+          a pathway is drawn from the accepted steps. accept the steps that belong in the walkthrough under <b>steps</b>,
+          then come back here. new to pathways? {tutorialLink}.
+        </p>
+        {tutorial}
+      </div>
     );
   }
 
   const zoomPercent = Math.round(scale * 100);
   return (
     <div className="pathway-panel">
+      {invitation}
+      {tutorial}
       <div className="pathway-bar" ref={areaRef}>
         <span className="candidate-view-note">
           {pathwayQuery.isError
@@ -199,6 +247,8 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
           ) : null}
           {downloadError ? ` · ${downloadError}` : ''}
           {mergeMutation.isError ? ` · could not merge the screens: ${mergeMutation.error.message}` : ''}
+          {' · '}
+          {tutorialLink}
         </span>
         <div className="pathway-controls">
           <div aria-label="boxes of the pathway" className="pathway-control" role="group">
@@ -305,6 +355,8 @@ export function PathwayPanel({ onUpdateCandidate, projectName, recording, run }:
             // The markup is built by buildPathwayFigure, which escapes every title, note and address it places.
             dangerouslySetInnerHTML={{ __html: figure.svg }}
             onClick={handleFigureClick}
+            onPointerLeave={peek.onPointerLeave}
+            onPointerOver={peek.onPointerOver}
             style={{ width: `${Math.round(figure.width * scale)}px` }}
           />
         </div>

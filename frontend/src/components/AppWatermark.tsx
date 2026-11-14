@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { APP_VERSION, BUILD_LABEL, VERSION_LABEL } from '../lib/buildInfo';
 import { HowItWorksDemo } from './howItWorks/HowItWorksDemo';
+import { PathwayTutorial } from './pathwayTutorial/PathwayTutorial';
 
 const APP_IDENTITY = `stepthrough, ${VERSION_LABEL}`;
 
@@ -21,6 +22,7 @@ interface AppWatermarkProps {
 export function AppWatermark({ accountLabel, withSettings = false, openPanel, onOpenPanel }: AppWatermarkProps) {
   const [ownPanel, setOwnPanel] = useState<CornerPanel | null>(null);
   const [showDemo, setShowDemo] = useState(false);
+  const [showPathways, setShowPathways] = useState(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const panel = onOpenPanel ? openPanel ?? null : ownPanel;
   const setPanel = onOpenPanel ?? setOwnPanel;
@@ -89,6 +91,16 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
           >
             how it works
           </button>
+          <button
+            className="analysis-task-link subtle app-watermark-demo-link"
+            onClick={() => {
+              setPanel(null);
+              setShowPathways(true);
+            }}
+            type="button"
+          >
+            how to work with pathways
+          </button>
           <p>
             version {APP_VERSION}
             {BUILD_LABEL ? ` (${BUILD_LABEL})` : ''}
@@ -96,6 +108,7 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
         </div>
       ) : null}
       {showDemo ? <HowItWorksDemo onClose={() => setShowDemo(false)} /> : null}
+      {showPathways ? <PathwayTutorial onClose={() => setShowPathways(false)} /> : null}
     </div>
   );
 }

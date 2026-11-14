@@ -967,6 +967,594 @@ a {
   }
 }
 
+/* ── pathways tutorial: lessons beside a practice pathway that responds to what you do ─────────── */
+
+.demo-panel.pt-panel {
+  width: min(1180px, 100%);
+}
+
+/* When a lesson is taller than the window, the panel scrolls but the lessons and next stay in reach. */
+.pt-panel .demo-footer {
+  position: sticky;
+  bottom: -20px;
+  z-index: 4;
+  margin-bottom: -20px;
+  padding: 12px 0 20px;
+  background: var(--bg);
+  box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.pt-body {
+  display: grid;
+  /* The lesson takes less of a narrow window, so the practice pathway stays readable. */
+  grid-template-columns: minmax(240px, min(300px, 28%)) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+
+.pt-lesson {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pt-lesson h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.pt-text p,
+.pt-points {
+  margin: 0 0 8px;
+  color: rgba(0, 0, 0, 0.75);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.pt-points {
+  padding-left: 18px;
+}
+
+.pt-points li + li {
+  margin-top: 3px;
+}
+
+.pt-lesson code,
+.pt-json th,
+.pt-json td {
+  font-family: 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+}
+
+/* The task: what to do on the practice pathway, ticked off once it is done. */
+.pt-task {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 4px 8px;
+  padding: 10px 12px;
+  background: var(--analysis-surface-soft);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.pt-task-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid rgba(0, 0, 0, 0.35);
+  border-radius: 50%;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.pt-task.done {
+  background: rgba(72, 175, 124, 0.14);
+}
+
+.pt-task.done .pt-task-mark {
+  border-color: #48af7c;
+  background: #48af7c;
+  color: #fff;
+}
+
+.pt-show-me {
+  grid-column: 2;
+  justify-self: start;
+  font-size: 12px;
+}
+
+.pt-feedback,
+.pt-aside {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.pt-feedback {
+  padding-left: 10px;
+  border-left: 3px solid #48af7c;
+  color: rgba(0, 0, 0, 0.8);
+}
+
+.pt-aside {
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.pt-below {
+  padding: 10px 14px 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.pt-json {
+  width: 100%;
+  border-collapse: collapse;
+  color: #222;
+  text-align: left;
+}
+
+.pt-json caption {
+  padding-bottom: 6px;
+  color: rgba(0, 0, 0, 0.6);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.pt-json th,
+.pt-json td {
+  padding: 3px 10px 3px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  white-space: nowrap;
+}
+
+.pt-json th {
+  color: rgba(0, 0, 0, 0.5);
+  font-weight: 400;
+}
+
+.pt-choice {
+  display: flex;
+  gap: 8px;
+}
+
+.pt-choice .analysis-pill,
+.pt-finish .analysis-pill,
+.pt-panel .demo-controls .analysis-pill {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.pt-panel .demo-controls .analysis-pill:not(.success) {
+  background: rgba(0, 0, 0, 0.08);
+  color: #000;
+}
+
+.pt-finish {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 10px 12px;
+  background: rgba(72, 175, 124, 0.14);
+}
+
+.pt-finish p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* The practice pathway: drawn black on white, like the figure in the app. */
+.pt-practice {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+}
+
+.pt-tools {
+  position: relative;
+  z-index: 2;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: #fafafa;
+}
+
+.pt-switch,
+.pt-figure-tools {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.pt-figure-tools .analysis-pill {
+  margin-left: auto;
+}
+
+.pt-tool-hint {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.pt-walk {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pt-walk-text {
+  flex: 1;
+  font-size: 14px;
+}
+
+/* The editing strip of the practice pathway, as above the chart in the app. */
+.pt-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  min-height: 30px;
+}
+
+.pt-strip-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.pt-strip-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.pt-strip-step {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pt-strip-step b {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #111;
+  color: #fff;
+  font-size: 11px;
+}
+
+.pt-strip-step .inline-link-button {
+  font-size: 13px;
+  color: #000;
+}
+
+.pt-strip-done {
+  margin-left: auto;
+}
+
+.pt-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 220px;
+  padding: 8px;
+  background: var(--analysis-surface);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
+}
+
+.pt-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border: none;
+  background: transparent;
+  color: #000;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pt-menu button:hover,
+.pt-menu button:focus-visible {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+.pt-menu.to-left {
+  left: auto;
+  right: 0;
+}
+
+.pt-menu-heading {
+  margin-top: 4px;
+  padding: 0 6px;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.pt-menu-screen svg {
+  flex: none;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+}
+
+.pt-menu-screen b {
+  font-weight: 500;
+}
+
+.pt-mock {
+  display: block;
+  width: 100%;
+  height: auto;
+  font-family: inherit;
+}
+
+/* Cards, numbers and frames glide to their new place; arrows come back once they have arrived. */
+.pt-move {
+  transition: transform 650ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 300ms ease;
+}
+
+.pt-fade {
+  transition: opacity 350ms ease;
+}
+
+.pt-fade.out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pt-arrow {
+  animation: pt-arrive 420ms ease 520ms both;
+}
+
+/* What a step's number means: over the drawing, wrapped like any text, never cut off by the chart's edge. */
+.pt-mock-wrap {
+  position: relative;
+}
+
+.pt-bubble {
+  position: absolute;
+  z-index: 3;
+  width: 228px;
+  padding: 7px 10px;
+  background: #fff;
+  border: 1px solid #bdbdb6;
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  color: #111;
+  font-size: 12.5px;
+  line-height: 1.4;
+  animation: pt-arrive 200ms ease both;
+}
+
+.pt-bubble.up {
+  transform: translateY(-100%);
+}
+
+.pt-spotlight {
+  animation: pt-arrive 250ms ease both;
+}
+
+/* Inside a checked box: the screenshots of all its steps, side by side, under the chart. */
+.pt-inside-wrap {
+  display: grid;
+  gap: 8px;
+}
+
+.pt-inside-title {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 12px;
+}
+
+.pt-inside {
+  display: flex;
+  gap: 14px;
+}
+
+.pt-inside figure {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  margin: 0;
+}
+
+.pt-inside svg {
+  display: block;
+  width: 64px;
+  height: auto;
+}
+
+.pt-inside figcaption {
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 11px;
+}
+
+.pt-feedback p {
+  margin: 0;
+}
+
+@keyframes pt-arrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.pt-clickable {
+  cursor: pointer;
+  outline: none;
+}
+
+.pt-box:hover rect[stroke='transparent'],
+.pt-box:focus-visible rect[stroke='transparent'] {
+  stroke: rgba(0, 0, 0, 0.35);
+}
+
+.pt-clickable:focus-visible > g > rect,
+g.pt-clickable:not(.pt-box):hover > g > rect {
+  fill: #cd6d1e;
+}
+
+/* Lesson 4: the two kinds of mistakes, ticked off when found. */
+.pt-found {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.pt-found li {
+  display: flex;
+  gap: 8px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.pt-found li.found {
+  color: #1f6b45;
+}
+
+/* Lesson 4: the steps inside a box, and the question whether the box is right. */
+.pt-inside {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.pt-inside figure.picked svg {
+  outline: 2.5px solid #cd6d1e;
+  outline-offset: 2px;
+}
+
+.pt-verdict {
+  display: grid;
+  flex: 1 1 280px;
+  gap: 6px;
+  align-content: start;
+}
+
+.pt-verdict p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.pt-verdict-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pt-verdict-buttons .analysis-pill {
+  padding: 5px 10px;
+  font-size: 12.5px;
+}
+
+.pt-verdict-buttons .analysis-pill:not(.success):not(.danger) {
+  background: rgba(0, 0, 0, 0.07);
+  color: #000;
+}
+
+.pt-verdict .pt-verdict-result {
+  padding-left: 10px;
+  border-left: 3px solid #bf2725;
+  color: rgba(0, 0, 0, 0.8);
+  line-height: 1.45;
+}
+
+.pt-verdict .pt-verdict-result.ok {
+  border-left-color: #48af7c;
+}
+
+/* A step number that shows its screenshot when the pointer rests on it. */
+.pt-peek {
+  cursor: help;
+}
+
+/* What "show me" is about to use: a soft green shade that breathes, so the eye finds it before it is used. */
+.pt-panel .pt-demo {
+  border-radius: 4px;
+  background: rgba(72, 175, 124, 0.22);
+  box-shadow: 0 0 0 3px rgba(72, 175, 124, 0.32);
+  color: #1f6b45;
+  animation: pt-demo-breathe 1.1s ease-in-out infinite;
+}
+
+.pt-panel .demo-icon-button.pt-demo {
+  border-radius: 50%;
+  background: #48af7c;
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(72, 175, 124, 0.35);
+}
+
+.pt-panel .analysis-pill.pt-demo {
+  background: rgba(72, 175, 124, 0.3);
+  color: #1f6b45;
+}
+
+.pt-demo-halo {
+  fill: rgba(72, 175, 124, 0.4);
+  stroke: #48af7c;
+  stroke-width: 2;
+  animation: pt-demo-fade 1.1s ease-in-out infinite;
+}
+
+.pt-demo-box {
+  animation: pt-demo-fade 1.1s ease-in-out infinite;
+}
+
+@keyframes pt-demo-breathe {
+  50% {
+    box-shadow: 0 0 0 6px rgba(72, 175, 124, 0.14);
+  }
+}
+
+@keyframes pt-demo-fade {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (max-width: 860px) {
+  .pt-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pt-move,
+  .pt-fade {
+    transition: none;
+  }
+
+  .pt-arrow,
+  .pt-bubble,
+  .pt-spotlight,
+  .pt-panel .pt-demo,
+  .pt-demo-halo,
+  .pt-demo-box {
+    animation: none;
+  }
+}
+
 /* ── app settings panel ─────────────────────────────────────────────────── */
 
 .app-settings-panel {
@@ -5299,6 +5887,36 @@ button:disabled {
 
 .pathway-figure [data-screen] {
   cursor: pointer;
+}
+
+/* A step number under a box: resting the pointer on it shows that step in the box (usePathwayPeek). */
+.pathway-figure [data-peek] {
+  cursor: help;
+}
+
+.pathway-figure [data-peek].active rect[rx] {
+  fill: #cd6d1e;
+}
+
+/* Shown once, the first time a pathway is opened: an invitation to the hands-on tutorial. */
+.pathway-invite {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 12px;
+  background: rgba(72, 175, 124, 0.14);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.pathway-invite span {
+  flex: 1 1 360px;
+}
+
+.pathway-invite .analysis-pill {
+  padding: 6px 12px;
+  font-size: 13px;
 }
 
 /* The figure is drawn black on white, as it is exported, whatever the page around it looks like. */

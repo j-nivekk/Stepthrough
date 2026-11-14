@@ -57,6 +57,18 @@ test('long export headers and note titles stay within the SVG and preserve their
   }
 });
 
+test('step numbers are marked for the pointer preview on the page only, never in a file', () => {
+  const page = buildPathwayFigure({ ...input, peek: true });
+  assert.match(page.svg, /<g data-peek="step-001">/);
+  assert.match(page.svg, /<image data-screenshot="" xlink:href=/);
+  assert.match(page.svg, /class="pathway-peek-tag" visibility="hidden"/);
+  const file = buildPathwayFigure(input);
+  for (const mark of ['data-peek', 'data-screenshot', 'pathway-peek-tag']) assert.ok(!file.svg.includes(mark), mark);
+  // the preview adds nothing that moves the figure
+  assert.equal(page.width, file.width);
+  assert.equal(page.height, file.height);
+});
+
 test('SVG text escapes markup and removes characters forbidden in XML', () => {
   const figure = buildPathwayFigure({ ...input, title: 'Example\u0000 <script> & "quote"' });
   assert.ok(!figure.svg.includes('\u0000'));

@@ -444,6 +444,10 @@ accepted steps as a chart: one box per screen, with a screenshot, and arrows for
 A recording is a straight line in time; the chart shows where that line went back to a screen, left it again
 another way, or took a detour.
 
+New to pathways? **how to work with pathways**, above the chart or under **about**, opens a hands-on tutorial
+of about five minutes. On a practice recording you fold steps into screens, follow the journey, find what the
+automatic grouping got wrong, correct it, and prepare the figure. Nothing in it changes your own runs.
+
 How to read it:
 
 - The black numbers are step numbers, the same as in the step list and in `steps.csv`. A screen shows the
@@ -451,6 +455,8 @@ How to read it:
   follow the journey from 1 onwards.
 - A solid arrow goes onwards; a dashed arrow goes back to a screen that was first seen earlier.
 - A doubled frame means several steps in a row on that screen (for example `6–7` after scrolling).
+- A box shows the screenshot of its first step. Rest the pointer on a step number under the box to see that
+  step instead; a number for several steps in a row, such as `6–7`, shows them in turn.
 - A dashed frame is a pop-up, when the change that led to it was labelled as one (**modal**).
 - A screen takes the title of its first step that has one. Notes appear under the screen, with the step
   number in front when the screen has several steps.
@@ -492,6 +498,7 @@ Everything you change here is stored on the steps, exactly as if you had chosen 
 
 | to | do this |
 | --- | --- |
+| see another step of a box | rest the pointer on its number under the box |
 | give every step its own box | **boxes: steps** (the default, **screens**, groups them) |
 | move the notes | **notes: under screens** (cut after four lines), **in a key** below the chart (in full), or **off** |
 | leave out the times, or the title and legend | **show: times** and **title and legend** |
