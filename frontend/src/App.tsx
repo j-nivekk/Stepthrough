@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
@@ -20,17 +20,20 @@ import {
   getSavedRunSettings,
   health,
   importRecording,
+  isAbortError,
   listProjects,
   logOut,
   recheckOcr,
   resetDatabase,
   saveRunSettings,
+  forgetRunSettings,
   updateCandidate,
   updateProject,
   updateRecording,
 } from './api';
 import { AppSettings } from './components/AppSettings';
 import { AppWatermark, type CornerPanel } from './components/AppWatermark';
+import { useConfirm } from './components/ConfirmDialog';
 import { AccountPanel } from './features/account/AccountPanel';
 import { UsersScreen } from './features/account/UsersScreen';
 import { PerformanceMonitor } from './components/PerformanceMonitor';
@@ -48,8 +51,10 @@ import { downloadExportBundle, jumpToAnchor, sleep } from './lib/utils';
 import { formatCalendarDate } from './lib/formatters';
 import {
   collectImportQueueItems,
-  createImportQueueItemFromFile,
   getUploadedImportItems,
+  importsInFlight,
+  markImportUploaded,
+  nextImportUpload,
   syncImportQueueWithRecordings,
   type ImportQueueItem,
 } from './lib/importQueue';
@@ -121,6 +126,17 @@ function App({ session, onSessionChange }: AppProps) {
   const [runSettings, setRunSettingsState] = useState<RunSettings>(defaultRunSettings);
   const [settingsFeedback, setSettingsFeedback] = useState('');
   const [importQueue, setImportQueue] = useState<ImportQueueItem[]>([]);
+  // Asking before acting happens in the page: some embedded browsers block window.confirm.
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  /** The upload under way, by row, so that it can be cancelled. */
+  const uploadControllers = useRef(new Map<string, AbortController>());
+  // An upload can take minutes: when it ends, it needs the selection as it is then, not as it was at its start.
+  const selectedProjectIdRef = useRef(selectedProjectId);
+  const selectedRecordingIdRef = useRef(selectedRecordingId);
+  useEffect(() => {
+    selectedProjectIdRef.current = selectedProjectId;
+    selectedRecordingIdRef.current = selectedRecordingId;
+  }, [selectedProjectId, selectedRecordingId]);
   const [importSelectionFeedback, setImportSelectionFeedback] = useState('');
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const [liveMessage, setLiveMessage] = useState('');
@@ -240,6 +256,7 @@ function App({ session, onSessionChange }: AppProps) {
     if (!selectedProjectId) {
       setRunSettings(defaultRunSettings);
       setSettingsFeedback('');
+      uploadControllers.current.forEach((controller) => controller.abort());
       setImportQueue([]);
       setImportSelectionFeedback('');
       setPendingAnalysisProjectId(null);
@@ -307,7 +324,9 @@ function App({ session, onSessionChange }: AppProps) {
     if (!selectedProjectId) {
       return;
     }
-    setImportQueue((current) => syncImportQueueWithRecordings(current, projectDetailQuery.data?.recordings ?? []));
+    setImportQueue((current) =>
+      syncImportQueueWithRecordings(current, projectDetailQuery.data?.recordings ?? [], selectedProjectId),
+    );
   }, [projectDetailQuery.data?.recordings, selectedProjectId]);
 
   useEffect(() => {
@@ -537,7 +556,14 @@ function App({ session, onSessionChange }: AppProps) {
   }
   const presetText = useMemo(() => serializeRunPresetText(runSettings), [runSettings]);
   const uploadedImportItems = useMemo(() => getUploadedImportItems(importQueue), [importQueue]);
-  const canCompleteImport = uploadedImportItems.length > 0;
+  const projectImportRows = useMemo(
+    () => importQueue.filter((item) => item.projectId === null || item.projectId === selectedProjectId),
+    [importQueue, selectedProjectId],
+  );
+  const projectImportsInFlight = useMemo(() => importsInFlight(importQueue, selectedProjectId), [importQueue, selectedProjectId]);
+  // Done once a video is in, or on its way: uploads carry on while the analysis page is open.
+  const canCompleteImport =
+    uploadedImportItems.some((item) => item.projectId === selectedProjectId) || projectImportsInFlight.length > 0;
   const analysisRecordingsLoading =
     workflowStage === 'analysis' &&
     pendingAnalysisProjectId === selectedProjectId &&
@@ -672,6 +698,21 @@ function App({ session, onSessionChange }: AppProps) {
     onError: (error: Error) => setAppError(error.message),
   });
 
+  // Back to the factory settings: forget the saved universal defaults and this project's, then use the factory ones.
+  const restoreFactorySettingsMutation = useMutation({
+    mutationFn: async ({ projectId }: { projectId: string | null }) => {
+      await forgetRunSettings(null);
+      if (projectId) await forgetRunSettings(projectId);
+    },
+    onSuccess: (_result, { projectId }) => {
+      queryClient.setQueryData<SavedRunSettings[]>(SAVED_RUN_SETTINGS_KEY, (current = []) =>
+        current.filter((item) => item.project_id !== null && item.project_id !== projectId),
+      );
+      applyAnalysisSettings(defaultRunSettings, 'restored the factory settings, and forgot the saved defaults.');
+    },
+    onError: (error: Error) => setAppError(error.message),
+  });
+
   const deleteProjectMutation = useMutation({
     mutationFn: ({ projectId }: { projectId: string }) => deleteProject(projectId),
     onSuccess: (_result, variables) => {
@@ -702,49 +743,83 @@ function App({ session, onSessionChange }: AppProps) {
   });
 
   const importRecordingMutation = useMutation({
-    mutationFn: ({ file, filename, projectId }: { file: File; filename?: string; localId?: string; projectId: string }) =>
-      importRecording(projectId, file, filename),
+    mutationFn: ({ file, filename, localId, projectId }: { file: File; filename?: string; localId: string; projectId: string }) => {
+      const controller = new AbortController();
+      uploadControllers.current.set(localId, controller);
+      let shown = -1;
+      return importRecording(projectId, file, filename, {
+        signal: controller.signal,
+        onProgress: (fraction) => {
+          // one update per whole percent is plenty
+          const percent = Math.floor(fraction * 100);
+          if (percent === shown) return;
+          shown = percent;
+          setImportQueue((current) =>
+            current.map((item) => (item.localId === localId && item.status === 'uploading' ? { ...item, progress: fraction } : item)),
+          );
+        },
+      }).finally(() => uploadControllers.current.delete(localId));
+    },
     onSuccess: (recording, variables) => {
-      if (variables.localId) {
-        setImportQueue((current) =>
-          current.map((item) =>
-            item.localId === variables.localId
-              ? {
-                  ...item,
-                  filename: recording.filename,
-                  file: null,
-                  status: 'uploaded',
-                  recordingId: recording.id,
-                  error: null,
-                  signature: null,
-                }
-              : item,
-          ),
-        );
+      setImportQueue((current) => markImportUploaded(current, variables.localId, recording));
+      // The first video of a project becomes the selection; later ones do not take it from what is being worked on.
+      if (recording.project_id === selectedProjectIdRef.current && !selectedRecordingIdRef.current) {
+        setSelectedRecordingId(recording.id);
+        setSelectedRunId(null);
       }
-      setSelectedRecordingId(recording.id);
-      setSelectedRunId(null);
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['project', recording.project_id] });
       queryClient.invalidateQueries({ queryKey: ['recording', recording.id] });
     },
     onError: (error: Error, variables) => {
-      setAppError(error.message);
-      if (variables.localId) {
-        setImportQueue((current) =>
-          current.map((item) =>
-            item.localId === variables.localId
-              ? {
-                  ...item,
-                  status: 'error',
-                  error: error.message,
-                }
-              : item,
-          ),
-        );
+      if (isAbortError(error)) {
+        // cancelled: the row goes
+        setImportQueue((current) => current.filter((item) => item.localId !== variables.localId));
+        return;
       }
+      setAppError(error.message);
+      setImportQueue((current) =>
+        current.map((item) =>
+          item.localId === variables.localId
+            ? {
+                ...item,
+                status: 'error',
+                progress: null,
+                error: error.message,
+              }
+            : item,
+        ),
+      );
     },
   });
+
+  // Closing or reloading the page would drop the videos still on their way: the browser asks first.
+  const uploadsUnderWay = importQueue.some((item) => item.status === 'queued' || item.status === 'uploading');
+  useEffect(() => {
+    if (!uploadsUnderWay) {
+      return;
+    }
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [uploadsUnderWay]);
+
+  // Chosen videos upload by themselves, one at a time, in the order they were chosen.
+  useEffect(() => {
+    const next = nextImportUpload(importQueue);
+    if (!next?.file || !next.projectId) {
+      return;
+    }
+    setImportQueue((current) =>
+      current.map((item) => (item.localId === next.localId ? { ...item, status: 'uploading', progress: 0, error: null } : item)),
+    );
+    importRecordingMutation.mutate({ projectId: next.projectId, file: next.file, filename: next.filename, localId: next.localId });
+    // importRecordingMutation is stable enough: mutate() always runs the latest options
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importQueue]);
 
   const updateRecordingMutation = useMutation({
     mutationFn: ({ filename, recordingId }: { filename: string; recordingId: string }) =>
@@ -974,6 +1049,22 @@ function App({ session, onSessionChange }: AppProps) {
     applyAnalysisSettings(universalDefaultSettings, 'reset the current settings to the universal defaults.');
   }
 
+  async function handleRestoreFactorySettings() {
+    const others = (savedRunSettings ?? []).filter((item) => item.project_id !== null && item.project_id !== selectedProjectId).length;
+    const confirmed = await confirm({
+      message: "restore stepthrough's factory settings?",
+      detail: [
+        `this forgets the settings you saved as universal defaults${selectedProjectId ? ' and for this project' : ''}.`,
+        others ? `settings saved for ${others} other ${others === 1 ? 'project stay' : 'projects stay'}.` : '',
+      ].filter(Boolean).join(' '),
+      confirmLabel: 'restore',
+    });
+    if (!confirmed) {
+      return;
+    }
+    restoreFactorySettingsMutation.mutate({ projectId: selectedProjectId });
+  }
+
   function handleApplyImportedPreset(settings: RunSettings) {
     applyAnalysisSettings(settings, 'applied preset text to the active analysis parameters.');
   }
@@ -989,16 +1080,32 @@ function App({ session, onSessionChange }: AppProps) {
     await createManualRunMutation.mutateAsync(recordingId);
   }
 
-  function confirmDeleteRecording(recordingId: string, filename: string) {
-    if (!window.confirm(`delete ${filename} and every run, screenshot, and export created from it?`)) {
+  /** Ask before deleting a recording: it takes every run, screenshot and export made from it along. */
+  function confirmRecordingDeletion(filename: string): Promise<boolean> {
+    return confirm({
+      message: `delete ${filename}?`,
+      detail: 'every run, screenshot and export made from it goes too. this cannot be undone.',
+      confirmLabel: 'delete',
+      danger: true,
+    });
+  }
+
+  async function confirmDeleteRecording(recordingId: string, filename: string) {
+    if (!(await confirmRecordingDeletion(filename))) {
       return;
     }
     clearAnalysisMessages();
     deleteRecordingMutation.mutate({ recordingId });
   }
 
-  function confirmDeleteProject(projectId: string, projectName: string) {
-    if (!window.confirm(`delete ${projectName} and every recording, run, screenshot, and export in it?`)) {
+  async function confirmDeleteProject(projectId: string, projectName: string) {
+    const confirmed = await confirm({
+      message: `delete ${projectName}?`,
+      detail: 'every recording, run, screenshot and export in it goes too. this cannot be undone.',
+      confirmLabel: 'delete',
+      danger: true,
+    });
+    if (!confirmed) {
       return;
     }
     clearAnalysisMessages();
@@ -1063,7 +1170,7 @@ function App({ session, onSessionChange }: AppProps) {
       return;
     }
 
-    handleNavigateToAnalysis(true);
+    void handleNavigateToAnalysis(true);
   }
 
   function jumpToAnalysisAnchor(anchorId: string) {
@@ -1092,7 +1199,10 @@ function App({ session, onSessionChange }: AppProps) {
   }
 
   function handleImportFileSelection(files: FileList | File[]) {
-    const { ignoredCount, queueItems } = collectImportQueueItems(importQueue, files);
+    if (!selectedProjectId) {
+      return;
+    }
+    const { ignoredCount, queueItems } = collectImportQueueItems(importQueue, files, selectedProjectId);
     if (!queueItems.length && ignoredCount === 0) {
       return;
     }
@@ -1113,7 +1223,7 @@ function App({ session, onSessionChange }: AppProps) {
       return;
     }
 
-    const { ignoredCount, queueItems } = collectImportQueueItems(importQueue, files);
+    const { ignoredCount, queueItems } = collectImportQueueItems(importQueue, files, selectedProjectId);
     if (!queueItems.length && ignoredCount === 0) {
       return;
     }
@@ -1127,15 +1237,7 @@ function App({ session, onSessionChange }: AppProps) {
       return;
     }
 
-    setImportQueue((current) => [
-      ...current,
-      ...queueItems.map((item) => ({
-        ...item,
-        status: 'uploading' as const,
-        error: null,
-      })),
-    ]);
-
+    setImportQueue((current) => [...current, ...queueItems]);
     setAnalysisActionMessage(
       `importing ${queueItems.length} ${queueItems.length === 1 ? 'video' : 'videos'}${
         ignoredCount > 0
@@ -1143,56 +1245,37 @@ function App({ session, onSessionChange }: AppProps) {
           : ''
       }.`,
     );
-
-    queueItems.forEach((item) => {
-      if (!item.file) {
-        return;
-      }
-      importRecordingMutation.mutate({
-        projectId: selectedProjectId,
-        file: item.file,
-        filename: item.filename,
-        localId: item.localId,
-      });
-    });
   }
 
-  function handleUploadImportItem(localId: string) {
-    if (!selectedProjectId) {
-      return;
-    }
-    const queueItem = importQueue.find((item) => item.localId === localId);
-    if (!queueItem?.file || queueItem.status === 'uploading') {
-      return;
-    }
-
+  /** Try a failed upload again: back in the queue. */
+  function handleRetryImportItem(localId: string) {
     clearAnalysisMessages();
     setImportQueue((current) =>
       current.map((item) =>
-        item.localId === localId
-          ? {
-              ...item,
-              status: 'uploading',
-              error: null,
-            }
+        item.localId === localId && item.status === 'error' && item.file
+          ? { ...item, status: 'queued', progress: null, error: null }
           : item,
       ),
     );
-    importRecordingMutation.mutate({
-      projectId: selectedProjectId,
-      file: queueItem.file,
-      filename: queueItem.filename,
-      localId,
-    });
   }
 
-  function handleDeleteImportItem(localId: string) {
+  /**
+   * The row's one action besides retry: cancel a video on its way (waiting or uploading), remove one that failed,
+   * or delete an uploaded recording with everything made from it.
+   */
+  async function handleDeleteImportItem(localId: string) {
     const queueItem = importQueue.find((item) => item.localId === localId);
-    if (!queueItem || queueItem.status === 'uploading') {
+    if (!queueItem) {
+      return;
+    }
+    if (queueItem.status === 'uploading') {
+      // the row goes when the request has stopped (onError); a request that had already finished on the server
+      // still becomes a recording, and shows up with the next reload of the project
+      uploadControllers.current.get(localId)?.abort();
       return;
     }
     if (queueItem.recordingId) {
-      if (!window.confirm(`delete ${queueItem.filename} and every run, screenshot, and export created from it?`)) {
+      if (!(await confirmRecordingDeletion(queueItem.filename))) {
         return;
       }
       deleteRecordingMutation.mutate({ localId, recordingId: queueItem.recordingId });
@@ -1201,28 +1284,40 @@ function App({ session, onSessionChange }: AppProps) {
     setImportQueue((current) => current.filter((item) => item.localId !== localId));
   }
 
-  function handleNavigateToAnalysis(promptWhenEmpty: boolean) {
+  async function handleNavigateToAnalysis(promptWhenEmpty: boolean) {
     if (!selectedProjectId) {
       return;
     }
-    const uploadedRows = getUploadedImportItems(importQueue);
-    if (!uploadedRows.length) {
+    const uploadedRows = getUploadedImportItems(importQueue).filter((item) => item.projectId === selectedProjectId);
+    const inFlight = importsInFlight(importQueue, selectedProjectId);
+    if (!uploadedRows.length && !inFlight.length) {
       if (!promptWhenEmpty) {
         return;
       }
-      const confirmed = window.confirm(
-        'analysis is usually most useful after at least one uploaded video. continue without any uploaded videos?',
-      );
+      const confirmed = await confirm({
+        message: 'continue without any uploaded videos?',
+        detail: 'analysis is usually most useful after at least one uploaded video.',
+      });
       if (!confirmed) {
         return;
       }
     }
+    const failed = importQueue.filter((item) => item.projectId === selectedProjectId && item.status === 'error');
+    if (
+      failed.length &&
+      !(await confirm({
+        message: `${failed.length} ${failed.length === 1 ? 'video' : 'videos'} could not be uploaded.`,
+        detail: 'continue without them? you can upload them again later.',
+      }))
+    ) {
+      return;
+    }
 
-    const persistedRows = uploadedRows;
     const nextRecordingId =
-      persistedRows[persistedRows.length - 1]?.recordingId ?? projectDetailQuery.data?.recordings[0]?.id ?? null;
+      uploadedRows[uploadedRows.length - 1]?.recordingId ?? projectDetailQuery.data?.recordings[0]?.id ?? null;
     setPendingAnalysisProjectId(null);
-    setImportQueue(persistedRows);
+    // Failed rows go; uploads still on their way carry on and join the videos column when they are in.
+    setImportQueue((current) => current.filter((item) => item.status !== 'error' || item.projectId !== selectedProjectId));
     setSelectedRecordingId(nextRecordingId);
     setSelectedRunId(null);
     setPendingTaskNavigation(null);
@@ -1361,7 +1456,7 @@ function App({ session, onSessionChange }: AppProps) {
           activeTasks.length === 1 ? 'task will' : 'tasks will'
         } be ended first, then deleted.`
       : `delete ${tasks.length} selected ${tasks.length === 1 ? 'task' : 'tasks'}?`;
-    if (!window.confirm(confirmCopy)) {
+    if (!(await confirm({ message: confirmCopy, confirmLabel: 'delete', danger: true }))) {
       return null;
     }
 
@@ -1512,6 +1607,7 @@ function App({ session, onSessionChange }: AppProps) {
       )}
       {appPrefs.showPerfMonitor && <PerformanceMonitor />}
       {viewportWarning}
+      {confirmDialog}
     </>
   );
 
@@ -1578,9 +1674,9 @@ function App({ session, onSessionChange }: AppProps) {
           onNavigateStage={setProjectStage}
           onRenameProject={handleRenameProject}
           onRenameRow={handleRenameImportItem}
-          onUploadRow={handleUploadImportItem}
+          onRetryRow={handleRetryImportItem}
           project={activeProject}
-          rows={importQueue}
+          rows={projectImportRows}
           selectionFeedback={importSelectionFeedback}
         />
         {chrome}
@@ -1615,6 +1711,8 @@ function App({ session, onSessionChange }: AppProps) {
         onCreateManualRun={handleCreateManualRun}
         onDeleteRecording={confirmDeleteRecording}
         onDropFiles={handleQuickImportDrop}
+        onCancelUpload={handleDeleteImportItem}
+        uploads={projectImportsInFlight}
         onDeleteSelectedRuns={handleDeleteSelectedRuns}
         onExportRun={handleExportRun}
         onExportTaskRuns={handleExportTaskRuns}
@@ -1626,6 +1724,7 @@ function App({ session, onSessionChange }: AppProps) {
         onRenameRecording={handleRenameRecording}
         onResetToProjectDefaults={handleResetToProjectDefaults}
         onResetToUniversalDefaults={handleResetToUniversalDefaults}
+        onRestoreFactorySettings={handleRestoreFactorySettings}
         onSaveProjectPreset={handleSaveProjectDefault}
         onSaveUniversalPreset={handleSaveUniversalDefault}
         onSelectRecording={handleSelectRecording}

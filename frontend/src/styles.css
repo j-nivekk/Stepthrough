@@ -200,7 +200,7 @@ a {
   position: absolute;
   right: 0;
   bottom: calc(100% + 10px);
-  width: 260px;
+  width: 300px;
   padding: 10px 12px;
   background: #d9d9d9;
   color: #000;
@@ -217,6 +217,84 @@ a {
 .app-watermark-demo-link {
   justify-self: start;
   font-size: 12px;
+}
+
+.app-watermark-facts {
+  margin: 4px 0 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 3px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.app-watermark-facts dt {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.app-watermark-facts dd {
+  margin: 0;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.app-watermark-facts .analysis-task-link {
+  font-size: 12px;
+}
+
+.app-watermark-commit {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── asking before acting (ConfirmDialog) ─────────────────────────────── */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.confirm-dialog {
+  width: min(400px, 100%);
+  padding: 18px 20px 16px;
+  background: #f3f3f3;
+  color: #000;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
+  display: grid;
+  gap: 8px;
+}
+
+.confirm-dialog-message {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.confirm-dialog-detail {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.62);
+  font-size: 12.5px;
+  line-height: 1.4;
+  white-space: pre-line;
+}
+
+.confirm-dialog-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+}
+
+.confirm-dialog-actions .analysis-pill {
+  padding: 6px 14px;
+  font-size: 13px;
 }
 
 /* ── "how it works" demo ─────────────────────────────────────────────── */
@@ -2468,6 +2546,11 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   cursor: pointer;
 }
 
+.import-dropzone-note {
+  margin-top: 6px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
 .import-dropzone input {
   position: absolute;
   inset: 0;
@@ -2530,14 +2613,19 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   line-height: 1.2;
 }
 
+/* Status and action sit in fixed columns, so a row does not shift while its video uploads. */
 .import-row-actions {
-  position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: 132px 52px;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  column-gap: 10px;
   margin-left: auto;
-  overflow: visible;
+  flex: 0 0 auto;
+}
+
+.import-row-status {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .import-pill {
@@ -2559,27 +2647,55 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   color: #000;
 }
 
+.import-pill.muted {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.import-progress {
+  position: relative;
+  width: 132px;
+  height: 20px;
+  background: #d9d9d9;
+  overflow: hidden;
+}
+
+.import-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(72, 175, 124, 0.55);
+  transition: width 200ms linear;
+}
+
+.import-progress-label {
+  position: relative;
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 
 .import-delete-button {
-  position: absolute;
-  left: calc(100% + 8px);
-  top: 50%;
-  transform: translateY(-50%);
+  justify-self: start;
+}
+
+/* Deleting an uploaded video shows on hover, as elsewhere; cancel and remove are always there. */
+.import-row.uploaded .import-delete-button {
   opacity: 0;
-  pointer-events: none;
   transition: opacity 140ms ease;
 }
 
-.import-row:hover .import-delete-button,
-.import-row:focus-within .import-delete-button {
+.import-row.uploaded:hover .import-delete-button,
+.import-row.uploaded:focus-within .import-delete-button {
   opacity: 1;
-  pointer-events: auto;
 }
 
 .import-row.error {
   background: rgba(191, 39, 37, 0.05);
-  padding: 4px 6px;
-  margin: -4px -6px;
+  box-shadow: 0 0 0 6px rgba(191, 39, 37, 0.05);
 }
 
 .import-empty-copy {
@@ -2692,6 +2808,21 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  /* One line, always: the three heads and the rules under them line up at any width. */
+  flex-wrap: nowrap;
+  height: 24px;
+}
+
+.analysis-column-head p {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.analysis-column-head > .analysis-task-link {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .analysis-column-head p,
@@ -2779,20 +2910,18 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   scrollbar-gutter: auto;
 }
 
-.analysis-task-toolbar {
+/* Below the rule, as the load / save row of parameters: the filters, and what to do with a selection. */
+.analysis-task-tools {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 8px;
   min-height: 20px;
 }
 
-.analysis-task-head-tools {
+.analysis-task-toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 14px;
+  gap: 4px 12px;
   flex-wrap: wrap;
 }
 
@@ -2925,6 +3054,15 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   justify-content: flex-end;
   gap: 8px;
   min-height: 17px;
+}
+
+/* A video still on its way in: greyed until it is a recording of the project. */
+.analysis-video-upload .analysis-video-name-text {
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.analysis-video-upload .analysis-video-duration {
+  font-variant-numeric: tabular-nums;
 }
 
 .analysis-video-hover-link {
@@ -3447,6 +3585,15 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 .analysis-toolbar-popover-purple .analysis-toolbar-copy,
 .analysis-toolbar-popover-purple .analysis-toolbar-feedback {
   color: rgba(255, 255, 255, 0.88);
+}
+
+.analysis-toolbar-divider {
+  height: 1px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.analysis-toolbar-popover-purple .analysis-toolbar-divider {
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .analysis-toolbar-feedback.error {
@@ -4518,7 +4665,8 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 .analysis-log-popover {
   position: absolute;
   top: calc(100% + 10px);
-  right: 0;
+  /* opens rightwards from the link: leftwards, it ran off the page in the narrow run column */
+  left: 0;
   width: min(520px, calc(100vw - 120px));
   max-height: 320px;
   overflow: auto;
@@ -6703,14 +6851,12 @@ button:disabled {
 
   .entry-project-browser,
   .entry-project-tools,
-  .analysis-task-head-tools,
   .candidate-review-toolbar,
   .candidate-review-nav-group {
     width: 100%;
   }
 
   .entry-project-tools,
-  .analysis-task-head-tools,
   .candidate-review-toolbar,
   .candidate-review-nav-group {
     justify-content: flex-start;

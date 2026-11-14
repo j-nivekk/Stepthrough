@@ -327,6 +327,17 @@ def save_run_settings(user_id: str, project_id: str | None, settings: RunSetting
     return saved
 
 
+def forget_run_settings(user_id: str, project_id: str | None) -> bool:
+    """Forget what this user saved as their defaults (``project_id`` None) or for one project. True when there
+    was something to forget."""
+    with connect() as conn:
+        cursor = conn.execute(
+            "DELETE FROM saved_run_settings WHERE user_id = ? AND IFNULL(project_id, '') = IFNULL(?, '')",
+            (user_id, project_id),
+        )
+    return cursor.rowcount > 0
+
+
 def users_due_for_deletion(today: str) -> list[dict[str, Any]]:
     """Users whose ``delete_after`` date (YYYY-MM-DD) is ``today`` or earlier."""
     with connect() as conn:

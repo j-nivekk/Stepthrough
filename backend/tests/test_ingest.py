@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
+from threading import Thread
 
 import cv2
 import numpy as np
@@ -12,8 +14,10 @@ from app.services.ingest import (
     LUT_FILENAME,
     _pq_to_nits,
     build_working_copy,
+    ensure_working_copy,
     hdr_signal_to_sdr,
     inspect_source,
+    stop_working_copy,
 )
 from app.services.run_control import CancellationRequested
 from app.services.stable_detection import _analysis_size, _decode, resolve_stable_config
@@ -138,6 +142,36 @@ def test_cancelled_working_copy_leaves_no_partial_file(tmp_path: Path) -> None:
     assert not working.exists()
     assert not list(working.parent.glob('*.partial.mp4'))
 
+
+def test_deleting_a_recording_stops_its_working_copy_for_good(tmp_path: Path) -> None:
+    # A recording deleted while its working copy is being made: the delete waits until ffmpeg has stopped, so
+    # nothing writes into the folder after it is removed, and a late start for the same recording does nothing.
+    source = tmp_path / 'long.mp4'
+    _ffmpeg('-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=30:d=60', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', str(source))
+    working = tmp_path / 'recording' / 'working.mp4'
+    stopped: list[BaseException] = []
+
+    def make() -> None:
+        try:
+            ensure_working_copy(source, working, key='deleted-recording')
+        except CancellationRequested as exc:
+            stopped.append(exc)
+
+    thread = Thread(target=make)
+    thread.start()
+    deadline = time.monotonic() + 20
+    while not list(working.parent.glob('*.partial.mp4')) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert list(working.parent.glob('*.partial.mp4')), 'ffmpeg never started'
+    assert stop_working_copy('deleted-recording', timeout=15)
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert stopped
+    assert not working.exists()
+    assert not list(working.parent.glob('*.partial.mp4'))
+    with pytest.raises(CancellationRequested):
+        ensure_working_copy(source, working, key='deleted-recording')
+    assert not working.exists()
 
 
 def test_working_copy_keeps_light_screens_light(tmp_path: Path) -> None:

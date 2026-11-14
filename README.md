@@ -117,7 +117,7 @@ and how to upgrade. The Docker images are at `ghcr.io/j-nivekk/stepthrough`:
 |---|---|
 | `stable` (`stable-ocr` with text recognition) | the latest release |
 | `1.0.2`, `1.0` (and `-ocr`) | a release, or the latest of a series, to stay on a known version |
-| `edge` (`edge-ocr`) | the latest build of `main`; the app shows its commit at the bottom right |
+| `edge` (`edge-ocr`) | the latest build of `main`; the app shows `edge` at the bottom right and its commit under **about** |
 
 The [Docker image workflow](.github/workflows/docker.yml) builds the image, runs the backend tests and an end-to-end
 smoke test in it, and only then publishes. It runs for:

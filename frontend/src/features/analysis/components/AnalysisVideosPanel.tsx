@@ -1,8 +1,10 @@
 import { EditableName } from '../../../components/EditableName';
 import { formatRecordingContextBadge } from '../../../lib/formatters';
+import type { ImportQueueItem } from '../../../lib/importQueue';
 import type { RecordingSummary } from '../../../types';
 
 export interface AnalysisVideosPanelProps {
+  onCancelUpload: (localId: string) => void;
   onDeleteRecording: (recordingId: string, filename: string) => void;
   onFilesDropped: (files: FileList | File[]) => void;
   onJumpToSelection: () => void;
@@ -14,10 +16,13 @@ export interface AnalysisVideosPanelProps {
   recordings: RecordingSummary[];
   recordingsLoading: boolean;
   selectedRecordingId: string | null;
+  /** Videos still on their way in: they join the list when they are in. */
+  uploads: ImportQueueItem[];
   videoRenameRequest: { id: string; nonce: number } | null;
 }
 
 export function AnalysisVideosPanel({
+  onCancelUpload,
   onDeleteRecording,
   onFilesDropped,
   onJumpToSelection,
@@ -29,6 +34,7 @@ export function AnalysisVideosPanel({
   recordings,
   recordingsLoading,
   selectedRecordingId,
+  uploads,
   videoRenameRequest,
 }: AnalysisVideosPanelProps) {
   function isFileDrag(event: React.DragEvent<HTMLElement>) {
@@ -115,7 +121,27 @@ export function AnalysisVideosPanel({
             </div>
           );
         })}
-        {!recordings.length && (
+        {uploads.map((upload) => {
+          const percent = Math.round((upload.progress ?? 0) * 100);
+          return (
+            <div className="analysis-video-row analysis-video-upload" key={upload.localId}>
+              <div className="analysis-video-row-button">
+                <span className="analysis-video-name-text">{upload.filename}</span>
+                <div className="analysis-video-meta">
+                  <span className="analysis-video-duration">
+                    {upload.status === 'queued' ? 'waiting to upload' : percent >= 100 ? 'processing…' : `uploading ${percent}%`}
+                  </span>
+                </div>
+              </div>
+              <div className="analysis-video-actions">
+                <button className="analysis-task-link danger" onClick={() => onCancelUpload(upload.localId)} type="button">
+                  cancel
+                </button>
+              </div>
+            </div>
+          );
+        })}
+        {!recordings.length && !uploads.length && (
           <p className="entry-empty-copy">
             {recordingsLoading ? 'loading videos…' : 'uploaded videos will appear here.'}
           </p>

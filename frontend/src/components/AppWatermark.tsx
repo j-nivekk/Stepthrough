@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { APP_VERSION, BUILD_LABEL, VERSION_LABEL } from '../lib/buildInfo';
+import { APP_COMMIT, APP_VERSION, BUILD_LABEL, DOI, REPOSITORY_URL, VERSION_LABEL } from '../lib/buildInfo';
 import { HowItWorksDemo } from './howItWorks/HowItWorksDemo';
 import { PathwayTutorial } from './pathwayTutorial/PathwayTutorial';
 
@@ -101,10 +101,31 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
           >
             how to work with pathways
           </button>
-          <p>
-            version {APP_VERSION}
-            {BUILD_LABEL ? ` (${BUILD_LABEL})` : ''}
-          </p>
+          <dl className="app-watermark-facts">
+            <dt>version</dt>
+            <dd>
+              {APP_VERSION}
+              {BUILD_LABEL ? ` · ${BUILD_LABEL}` : ''}
+              {APP_COMMIT ? (
+                <span className="app-watermark-commit" title="the commit this copy was built from">
+                  {' '}
+                  · {APP_COMMIT}
+                </span>
+              ) : null}
+            </dd>
+            <dt>source</dt>
+            <dd>
+              <a className="analysis-task-link subtle" href={REPOSITORY_URL} rel="noreferrer" target="_blank">
+                {REPOSITORY_URL.replace(/^https:\/\//, '')}
+              </a>
+            </dd>
+            <dt>cite as</dt>
+            <dd>
+              <a className="analysis-task-link subtle" href={`https://doi.org/${DOI}`} rel="noreferrer" target="_blank">
+                doi:{DOI}
+              </a>
+            </dd>
+          </dl>
         </div>
       ) : null}
       {showDemo ? <HowItWorksDemo onClose={() => setShowDemo(false)} /> : null}

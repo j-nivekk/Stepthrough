@@ -12,6 +12,8 @@ try {
     entryPoints: names.map((name) => join('tests', name)),
     outdir: output, bundle: true, platform: 'node', format: 'cjs', outExtension: { '.js': '.cjs' },
     logLevel: 'warning',
+    // modules that read Vite's build settings (api.ts) see none, as in a build without a .env
+    define: { 'import.meta.env': '{}' },
   });
   const result = spawnSync(process.execPath, ['--test', ...names.map((name) => join(output, name.replace(/\.ts$/, '.cjs')))], { stdio: 'inherit' });
   if (result.error) throw result.error;

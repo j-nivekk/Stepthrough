@@ -86,6 +86,24 @@ def test_saving_again_replaces_what_was_saved(client: TestClient) -> None:
     }
 
 
+def test_forgetting_saved_settings_goes_back_to_the_factory_settings(client: TestClient, act_as) -> None:
+    project = client.post('/projects', json={'name': 'Notes'}).json()
+    other = client.post('/projects', json={'name': 'Other'}).json()
+    for scope in ('default', f"projects/{project['id']}", f"projects/{other['id']}"):
+        assert client.put(f'/me/run-settings/{scope}', json=DESKTOP).status_code == 200
+    assert client.delete(f"/me/run-settings/projects/{project['id']}").status_code == 204
+    assert client.delete('/me/run-settings/default').status_code == 204
+    # what was saved for another project stays; forgetting nothing is no error
+    assert set(saved(client)) == {other['id']}
+    assert client.delete('/me/run-settings/default').status_code == 204
+    # someone else's project: as with saving, no access
+    stranger = make_user('stranger')
+    act_as(stranger)
+    assert client.delete(f"/me/run-settings/projects/{other['id']}").status_code == 404
+    act_as(None)
+    assert set(saved(client)) == {other['id']}
+
+
 def test_settings_for_a_project_need_access_to_it(client: TestClient, act_as) -> None:
     project = client.post('/projects', json={'name': 'Private'}).json()
     url = f"/me/run-settings/projects/{project['id']}"

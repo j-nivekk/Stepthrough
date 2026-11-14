@@ -56,6 +56,7 @@ import type {
 import { AnalysisParametersPanel } from './components/AnalysisParametersPanel';
 import { AnalysisTasksPanel } from './components/AnalysisTasksPanel';
 import { AnalysisVideosPanel } from './components/AnalysisVideosPanel';
+import type { ImportQueueItem } from '../../lib/importQueue';
 import type { WorkflowStage } from '../../lib/workflow';
 import { defaultStableSettings, formatStableSummary } from '../../lib/stableSettings';
 import {
@@ -110,6 +111,9 @@ export interface AnalysisScreenProps {
   onCreateManualRun: (recordingId: string) => Promise<void>;
   onDeleteRecording: (recordingId: string, filename: string) => void;
   onDropFiles: (files: FileList | File[]) => void;
+  /** Videos of the project still on their way in, and how to stop one. */
+  uploads: ImportQueueItem[];
+  onCancelUpload: (localId: string) => void;
   onDeleteSelectedRuns: (runIds: string[]) => Promise<string[] | null>;
   onExportRun: (runId: string, mode: ExportMode, downloadName?: string) => Promise<void>;
   onExportTaskRuns: (runIds: string[]) => Promise<void>;
@@ -122,6 +126,7 @@ export interface AnalysisScreenProps {
   onRenameRecording: (recordingId: string, filename: string) => Promise<void>;
   onResetToProjectDefaults: () => void;
   onResetToUniversalDefaults: () => void;
+  onRestoreFactorySettings: () => void;
   onSaveProjectPreset: () => void;
   onSaveUniversalPreset: () => void;
   onSelectRecording: (recordingId: string) => void;
@@ -231,6 +236,8 @@ export function AnalysisScreen({
   onCreateManualRun,
   onDeleteRecording,
   onDropFiles,
+  uploads,
+  onCancelUpload,
   onDeleteSelectedRuns,
   onExportRun,
   onExportTaskRuns,
@@ -242,6 +249,7 @@ export function AnalysisScreen({
   onRenameRecording,
   onResetToProjectDefaults,
   onResetToUniversalDefaults,
+  onRestoreFactorySettings,
   onSaveProjectPreset,
   onSaveUniversalPreset,
   onSelectRecording,
@@ -292,6 +300,25 @@ export function AnalysisScreen({
   const [previewSizeKey, setPreviewSizeKey] = useState<PreviewSizeKey>('md');
   const [previewBg, setPreviewBg] = useState<'dark' | 'light'>('dark');
   const [showRunLogs, setShowRunLogs] = useState(false);
+  const logShellRef = useRef<HTMLDivElement | null>(null);
+  // The logs close like the other pop-overs: a click elsewhere or Escape.
+  useEffect(() => {
+    if (!showRunLogs) {
+      return;
+    }
+    function handlePointerDown(event: PointerEvent) {
+      if (!logShellRef.current?.contains(event.target as Node)) setShowRunLogs(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setShowRunLogs(false);
+    }
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showRunLogs]);
   const [compareRunId, setCompareRunId] = useState<string | null>(null);
   const [presetCopyFeedback, setPresetCopyFeedback] = useState('');
   const [showHints, setShowHints] = useState(false);
@@ -1356,6 +1383,7 @@ export function AnalysisScreen({
         <div className={`analysis-grid ${taskSelectMode ? 'tasks-widened' : ''}`}>
           <AnalysisVideosPanel
             onDeleteRecording={onDeleteRecording}
+            onCancelUpload={onCancelUpload}
             onFilesDropped={onDropFiles}
             onJumpToSelection={onJumpToSelection}
             onPreviewRecording={onPreviewRecording}
@@ -1366,6 +1394,7 @@ export function AnalysisScreen({
             recordings={recordings}
             recordingsLoading={recordingsLoading}
             selectedRecordingId={selectedRecordingId}
+            uploads={uploads}
             videoRenameRequest={videoRenameRequest}
           />
 
@@ -1384,6 +1413,7 @@ export function AnalysisScreen({
             }}
             onResetToProjectDefaults={onResetToProjectDefaults}
             onResetToUniversalDefaults={onResetToUniversalDefaults}
+            onRestoreFactorySettings={onRestoreFactorySettings}
             onSaveProjectPreset={onSaveProjectPreset}
             onSaveUniversalPreset={onSaveUniversalPreset}
             onStartRun={onStartRun}
@@ -1701,7 +1731,7 @@ export function AnalysisScreen({
                 ) : null}
                 <div className="analysis-detail-meta-row">
                   <p className="analysis-detail-meta">{formatRunTiming(selectedRun.summary)}</p>
-                  <div className="analysis-log-popover-shell">
+                  <div className="analysis-log-popover-shell" ref={logShellRef}>
                     <button
                       className="analysis-task-link subtle analysis-log-toggle"
                       id="analysis-run-logs"

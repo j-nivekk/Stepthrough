@@ -126,7 +126,8 @@ ends analyses that are still running; they show as interrupted and can be starte
 using it. To stay on a known version, set `STEPTHROUGH_TAG` to a release number instead of `stable`.
 
 To see which version a server runs, look at the bottom right of the app: a release shows `v 1.0.0`, a build of
-`main` adds `edge` and its commit (`v 1.0.0 · edge 80892ff`). `/health` reports the same as `version` and `build`.
+`main` adds `edge` (`v 1.0.0 · edge`). **about** there also names the commit it was built from (`80892ff`, or
+`80892ff modified` for a checkout with uncommitted changes). `/health` reports the same as `version` and `build`.
 
 ## Back up and restore
 

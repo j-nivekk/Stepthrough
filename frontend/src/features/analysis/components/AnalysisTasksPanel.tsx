@@ -347,62 +347,64 @@ export function AnalysisTasksPanel({
 
   return (
     <section className="analysis-column">
+      {/* As the other two columns: the title and one link in the head, the rest below the rule (like parameters'
+          load / save row), so that the three heads and rules stay on one line whatever the width. */}
       <div className="analysis-column-head">
         <p>tasks</p>
-        <div className="analysis-task-head-tools">
-          <div className="analysis-task-filter-tabs">
-            {analysisTaskFilters.map((filter) => (
-              <button
-                className={`analysis-task-filter-button ${taskFilter === filter ? 'active' : ''}`}
-                key={filter}
-                onClick={() => onSetTaskFilter(filter)}
-                type="button"
-              >
-                {filter}
-              </button>
-            ))}
-          </div>
-          <div className="analysis-task-toolbar">
-            {taskSelectMode ? (
-              <>
-                <span className="analysis-task-selection-count">{selectedTaskRunIds.length} selected</span>
-                <button
-                  className="analysis-task-link danger"
-                  disabled={!selectedTaskRunIds.length || bulkDeletePending}
-                  onClick={onDeleteSelectedTasks}
-                  type="button"
-                >
-                  {bulkDeletePending ? 'deleting...' : 'delete selected'}
-                </button>
-                <button
-                  className="analysis-task-link subtle"
-                  disabled={!selectedTaskRunIds.length || bulkExportPending}
-                  onClick={onExportSelectedTasks}
-                  type="button"
-                >
-                  {bulkExportPending ? 'exporting...' : 'export selected'}
-                </button>
-                <button
-                  className="analysis-task-link subtle"
-                  disabled={!analysisTaskItems.some((item) => item.run.status === 'completed') || bulkExportPending}
-                  onClick={onExportAllCompletedTasks}
-                  type="button"
-                >
-                  export all completed
-                </button>
-                <button className="analysis-task-link subtle" onClick={onExitTaskSelectMode} type="button">
-                  done
-                </button>
-              </>
-            ) : (
-              <button className="analysis-task-link subtle" onClick={onEnterTaskSelectMode} type="button">
-                select
-              </button>
-            )}
-          </div>
-        </div>
+        {taskSelectMode ? (
+          <button className="analysis-task-link subtle" onClick={onExitTaskSelectMode} type="button">
+            done
+          </button>
+        ) : (
+          <button className="analysis-task-link subtle" onClick={onEnterTaskSelectMode} type="button">
+            select
+          </button>
+        )}
       </div>
       <div className="analysis-divider" />
+      <div className="analysis-task-tools">
+        <div className="analysis-task-filter-tabs">
+          {analysisTaskFilters.map((filter) => (
+            <button
+              className={`analysis-task-filter-button ${taskFilter === filter ? 'active' : ''}`}
+              key={filter}
+              onClick={() => onSetTaskFilter(filter)}
+              type="button"
+            >
+              {filter}
+            </button>
+          ))}
+        </div>
+        {taskSelectMode ? (
+          <div className="analysis-task-toolbar">
+            <span className="analysis-task-selection-count">{selectedTaskRunIds.length} selected</span>
+            <button
+              className="analysis-task-link danger"
+              disabled={!selectedTaskRunIds.length || bulkDeletePending}
+              onClick={onDeleteSelectedTasks}
+              type="button"
+            >
+              {bulkDeletePending ? 'deleting...' : 'delete selected'}
+            </button>
+            <button
+              className="analysis-task-link subtle"
+              disabled={!selectedTaskRunIds.length || bulkExportPending}
+              onClick={onExportSelectedTasks}
+              type="button"
+            >
+              {bulkExportPending ? 'exporting...' : 'export selected'}
+            </button>
+            <button
+              className="analysis-task-link subtle"
+              disabled={!analysisTaskItems.some((item) => item.run.status === 'completed') || bulkExportPending}
+              onClick={onExportAllCompletedTasks}
+              type="button"
+            >
+              export all completed
+            </button>
+          </div>
+        ) : null}
+      </div>
       <div className="analysis-tasks">
         {groupedTaskItems.map((group) => renderTaskGroup(group))}
         {!analysisTaskItems.length && <p className="entry-empty-copy">run summaries will appear here once analysis starts.</p>}

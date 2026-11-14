@@ -115,17 +115,68 @@ export function getProject(projectId: string): Promise<ProjectDetail> {
   return request<ProjectDetail>(`/projects/${projectId}`);
 }
 
-export function importRecording(projectId: string, file: File, filename?: string): Promise<RecordingSummary> {
+export interface UploadOptions {
+  /** Share of the file sent so far, 0 to 1. */
+  onProgress?: (fraction: number) => void;
+  /** Aborting it cancels the upload; the promise then rejects with an `AbortError`. */
+  signal?: AbortSignal;
+}
+
+/** Upload a video into a project. Sent with XMLHttpRequest, because fetch cannot report upload progress. */
+export function importRecording(projectId: string, file: File, filename?: string, options: UploadOptions = {}): Promise<RecordingSummary> {
   const formData = new FormData();
   formData.set('project_id', projectId);
   if (filename) {
     formData.set('filename', filename);
   }
   formData.set('file', file);
-  return request<RecordingSummary>('/recordings/import', {
-    method: 'POST',
-    body: formData,
+  return new Promise<RecordingSummary>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const abort = () => xhr.abort();
+    if (options.signal?.aborted) {
+      reject(new DOMException('upload cancelled', 'AbortError'));
+      return;
+    }
+    options.signal?.addEventListener('abort', abort, { once: true });
+    const done = () => options.signal?.removeEventListener('abort', abort);
+    xhr.open('POST', apiUrl('/recordings/import').toString());
+    // as `credentials: 'include'` in request(): the session cookie also goes to a backend on another port
+    xhr.withCredentials = true;
+    xhr.responseType = 'text';
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable && event.total > 0) options.onProgress?.(event.loaded / event.total);
+    });
+    xhr.addEventListener('abort', () => {
+      done();
+      reject(new DOMException('upload cancelled', 'AbortError'));
+    });
+    xhr.addEventListener('error', () => {
+      done();
+      reject(new Error('the upload was interrupted. check the connection and retry.'));
+    });
+    xhr.addEventListener('load', () => {
+      done();
+      let payload: unknown = xhr.responseText;
+      try {
+        payload = JSON.parse(xhr.responseText);
+      } catch {
+        // not JSON: keep the text
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload as RecordingSummary);
+        return;
+      }
+      const detail = typeof payload === 'string' ? payload : (payload as { detail?: unknown } | null)?.detail;
+      if (xhr.status === 401) window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+      reject(new ApiError(xhr.status, typeof detail === 'string' && detail ? detail : 'Request failed'));
+    });
+    xhr.send(formData);
   });
+}
+
+/** Whether an error is a cancelled request rather than a failure. */
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
 }
 
 export function updateRecording(recordingId: string, filename: string): Promise<RecordingSummary> {
@@ -161,6 +212,12 @@ export function getSavedRunSettings(): Promise<SavedRunSettings[]> {
 export function saveRunSettings(projectId: string | null, settings: RunSettings): Promise<SavedRunSettings> {
   const path = projectId ? `/me/run-settings/projects/${projectId}` : '/me/run-settings/default';
   return request<SavedRunSettings>(path, jsonBody('PUT', settings));
+}
+
+/** Forget the logged-in person's saved defaults (`projectId` null) or theirs for one project. */
+export function forgetRunSettings(projectId: string | null): Promise<void> {
+  const path = projectId ? `/me/run-settings/projects/${projectId}` : '/me/run-settings/default';
+  return request<void>(path, { method: 'DELETE' });
 }
 
 export function createManualRun(recordingId: string): Promise<RunSummary> {

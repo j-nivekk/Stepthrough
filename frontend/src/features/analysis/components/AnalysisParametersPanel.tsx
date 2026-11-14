@@ -22,6 +22,7 @@ export interface AnalysisParametersPanelProps {
   onCopyPresetText: () => void;
   onResetToProjectDefaults: () => void;
   onResetToUniversalDefaults: () => void;
+  onRestoreFactorySettings: () => void;
   onSaveProjectPreset: () => void;
   onSaveUniversalPreset: () => void;
   onStartRun: () => void;
@@ -61,6 +62,7 @@ export function AnalysisParametersPanel({
   onCopyPresetText,
   onResetToProjectDefaults,
   onResetToUniversalDefaults,
+  onRestoreFactorySettings,
   onSaveProjectPreset,
   onSaveUniversalPreset,
   onStartRun,
@@ -233,6 +235,22 @@ export function AnalysisParametersPanel({
                   reset to universal defaults
                 </button>
               </div>
+              <div className="analysis-toolbar-divider" />
+              <div className="analysis-toolbar-option-list">
+                <button
+                  className="analysis-task-link subtle"
+                  onClick={() => {
+                    closePopover();
+                    onRestoreFactorySettings();
+                  }}
+                  type="button"
+                >
+                  restore factory settings…
+                </button>
+              </div>
+              <p className="analysis-toolbar-copy">
+                forgets the saved universal defaults and this project's, and starts again from stepthrough's own.
+              </p>
             </div>
           ) : null}
         </div>

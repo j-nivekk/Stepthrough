@@ -18,7 +18,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from threading import BoundedSemaphore, Lock
+from threading import BoundedSemaphore, Event, Lock
 from typing import Callable
 
 import numpy as np
@@ -41,6 +41,8 @@ CancellationCallback = Callable[[], bool]
 _global_slots = BoundedSemaphore(2)
 _recording_locks: dict[str, Lock] = {}
 _recording_locks_guard = Lock()
+# Recordings whose working copy should stop being made (the recording is being deleted).
+_stopping: dict[str, Event] = {}
 
 
 @dataclass(frozen=True)
@@ -223,6 +225,33 @@ def _recording_lock(key: str) -> Lock:
         return _recording_locks.setdefault(key, Lock())
 
 
+class _SlotHeld:
+    """Releases a slot of `_global_slots` taken with `acquire` when the block ends."""
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *_exc: object) -> None:
+        _global_slots.release()
+
+
+def stop_working_copy(key: str, timeout: float = 30.0) -> bool:
+    """Stop making the working copy of recording `key`, and wait until nothing is writing it any more.
+
+    For deleting a recording: its folder may only go once ffmpeg has stopped, or the copy being made would
+    bring the folder back. Returns False when the work did not stop within `timeout` seconds.
+    """
+    with _recording_locks_guard:
+        stopping = _stopping.setdefault(key, Event())
+    stopping.set()
+    # The mark stays: a thread that looked the recording up just before it was deleted must not start later.
+    lock = _recording_lock(key)
+    stopped = lock.acquire(timeout=timeout)
+    if stopped:
+        lock.release()
+    return stopped
+
+
 def build_working_copy(
     source: Path,
     destination: Path,
@@ -257,7 +286,11 @@ def build_working_copy(
         "-movflags", "+faststart",
         str(partial.resolve()),
     ]
-    with _global_slots, tempfile.TemporaryFile() as stderr:
+    # Wait for a free slot, but give up when the work is no longer wanted.
+    while not _global_slots.acquire(timeout=0.25):
+        if cancellation_callback():
+            raise CancellationRequested("Stopped while waiting to prepare the recording.")
+    with _SlotHeld(), tempfile.TemporaryFile() as stderr:
         # cwd lets the filter graph name the LUT without escaping an arbitrary absolute path.
         process = subprocess.Popen(
             command, cwd=destination.parent, stdout=subprocess.PIPE, stderr=stderr, text=True
@@ -297,13 +330,21 @@ def ensure_working_copy(
     cancellation_callback: CancellationCallback | None = None,
 ) -> bool:
     """Build the working copy unless it exists. Returns True when it was built by this call."""
+
+    def cancelled() -> bool:
+        with _recording_locks_guard:
+            stopping = _stopping.get(key)
+        return bool(stopping and stopping.is_set()) or bool(cancellation_callback and cancellation_callback())
+
     with _recording_lock(key):
+        if cancelled():
+            raise CancellationRequested("The recording is being deleted.")
         if destination.exists() and destination.stat().st_size > 0:
             return False
         build_working_copy(
             source,
             destination,
             progress_callback=progress_callback,
-            cancellation_callback=cancellation_callback,
+            cancellation_callback=cancelled,
         )
         return True

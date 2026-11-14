@@ -91,6 +91,7 @@ from .repository import (
     list_recordings,
     list_run_events,
     list_runs,
+    forget_run_settings,
     list_saved_run_settings,
     project_has_active_runs,
     recording_has_active_runs,
@@ -108,7 +109,7 @@ from .services.ocr import probe_paddleocr_availability
 from .services.pathway import build_pathway, pathway_screen_members
 from .services.run_control import CancellationRequested
 from .services.stable_detection import detect_candidates_stable, resolve_stable_config
-from .services.ingest import ensure_working_copy, working_copy_path
+from .services.ingest import ensure_working_copy, stop_working_copy, working_copy_path
 from .services.jobs import JobManager
 from .services.similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string
 from .services.video import (
@@ -676,6 +677,9 @@ def _prepare_recording_in_background(recording_id: str) -> None:
     try:
         project, recording = _recording_context(recording_id)
         _ensure_recording_working_copy(project, recording)
+    except (CancellationRequested, HTTPException):
+        # deleted before or while its working copy was made
+        logger.info("Stopped preparing recording %s: it was deleted", recording_id)
     except Exception:  # pragma: no cover - the first run retries and reports the error
         logger.exception("Background preparation failed for recording %s", recording_id)
 
@@ -928,6 +932,21 @@ def my_run_settings_save_for_project(
     return SavedRunSettingsResponse(**save_run_settings(user.id, project_id, settings))
 
 
+@app.delete("/me/run-settings/default", status_code=204)
+def my_run_settings_forget_default(user: CurrentUser) -> Response:
+    """Back to the factory settings for new runs: forget this person's own defaults."""
+    forget_run_settings(user.id, None)
+    return Response(status_code=204)
+
+
+@app.delete("/me/run-settings/projects/{project_id}", status_code=204)
+def my_run_settings_forget_for_project(project_id: str, user: CurrentUser) -> Response:
+    """Forget what this person saved for a project: new runs there start from their own defaults again."""
+    _project_for(project_id, user, "viewer")
+    forget_run_settings(user.id, project_id)
+    return Response(status_code=204)
+
+
 @app.get("/projects", response_model=list[ProjectResponse])
 def projects_index(user: CurrentUser) -> list[ProjectResponse]:
     # Administrators may open every project, but their list shows only the ones they belong to.
@@ -1037,6 +1056,10 @@ def recordings_delete(recording_id: str, user: CurrentUser) -> Response:
         raise HTTPException(status_code=409, detail="Abort active runs before deleting this recording")
     recording_path = recording_dir(project["slug"], project["id"], recording["slug"], recording["id"])
     delete_recording_record(recording_id)
+    # The working copy may still be in the making (it starts right after upload): stop it first, or it would
+    # write into the folder after it is gone.
+    if not stop_working_copy(recording_id):
+        logger.warning("Preparation of deleted recording %s did not stop in time", recording_id)
     shutil.rmtree(recording_path, ignore_errors=True)
     return Response(status_code=204)
 

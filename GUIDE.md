@@ -254,8 +254,9 @@ To come back to a project later, pick it from the list. When you point at a proj
 ### Step 2: import the recording
 
 Drag the video onto the drop area, or click the area to choose a file. Stepthrough accepts `.mp4`, `.mov`,
-`.m4v`, `.webm` and `.mkv` files. Each file shows **uploaded** when it is ready. Press **done** to go to the
-analysis.
+`.m4v`, `.webm` and `.mkv` files. Videos upload straight away, one after the other: each shows how far it is,
+then **uploaded**. **cancel** stops a video that is still on its way. Press **done** to go to the analysis; videos
+still uploading carry on and appear in the videos column when they are in. Keep the page open until then.
 
 In the background, Stepthrough now makes a *working copy* of each recording (see
 [section 5](#5-how-stepthrough-finds-steps)). If the first run starts before the copy is ready, it waits for
