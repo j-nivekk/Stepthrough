@@ -2,10 +2,13 @@ import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 
 import { absoluteApiUrl, getRunPathway, mergePathwayScreens } from '../../api';
+import interItalicUrl from '../../assets/fonts/InterVariable-Italic.ttf?url';
+import interUrl from '../../assets/fonts/InterVariable.ttf?url';
 import { markPathwayTutorialSeen, PathwayTutorial, pathwayTutorialSeen } from '../../components/pathwayTutorial/PathwayTutorial';
-import { downloadText } from '../../lib/accountLinks';
+import { downloadBlob, downloadText } from '../../lib/accountLinks';
 import { APP_VERSION } from '../../lib/buildInfo';
 import { buildPathwayFigure, formatPathwayTime, type PathwayFigureOptions, type PathwayNotesPlacement } from '../../lib/pathwayFigure';
+import { renderPathwayPng } from '../../lib/pathwayPng';
 import {
   clampPathwayZoom,
   loadPathwayView,
@@ -35,6 +38,11 @@ interface PathwayPanelProps {
 const DETAILS: Array<[PathwayDetail, string, string]> = [
   ['screens', 'screens', 'one box per screen: scrolling, typing and small changes stay in the same box'],
   ['steps', 'steps', 'one box per step; a step that returns to an earlier screen still shares its box'],
+];
+type FigureFormat = 'svg' | 'png';
+const FORMATS: Array<[FigureFormat, string]> = [
+  ['svg', 'a drawing to finish in a design program: sharp at any size, text stays text, every screen is a group'],
+  ['png', "a picture at twice the figure's size, for slides, documents and the web"],
 ];
 const NOTES: Array<[PathwayNotesPlacement, string, string]> = [
   ['under', 'under screens', 'notes under each screen, cut after four lines'],
@@ -76,7 +84,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   const editingCandidates = useIsMutating({ mutationKey: ['candidate-update'] }) > 0;
   const [view, setView] = useState<PathwayView>(() => loadPathwayView());
   const [areaRef, areaWidth] = useElementWidth<HTMLDivElement>();
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading] = useState<FigureFormat | null>(null);
   const [downloadError, setDownloadError] = useState('');
   const [tutorialOpen, setTutorialOpen] = useState(false);
   // Shown once, until the tutorial is started or the invitation dismissed.
@@ -161,9 +169,9 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   const fitScale = figure && areaWidth > 0 ? Math.min(1, areaWidth / figure.width) : 1;
   const scale = view.zoom ?? fitScale;
 
-  async function handleDownload() {
+  async function handleDownload(format: FigureFormat) {
     if (!pathway || updating) return;
-    setDownloading(true);
+    setDownloading(format);
     setDownloadError('');
     try {
       const shown = new Map(pathway.steps.map((step) => [step.step_id, step]));
@@ -175,11 +183,13 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
         if (step) images.set(step.step_id, await embedImage(absoluteApiUrl(step.image_url), maxWidth));
       }
       const file = figureFor(pathway, (step) => images.get(step.step_id) ?? '');
-      downloadText(`${splitFilename(filename).base}-pathway.svg`, `<?xml version="1.0" encoding="UTF-8"?>\n${file.svg}\n`, 'image/svg+xml');
+      const name = `${splitFilename(filename).base}-pathway.${format}`;
+      if (format === 'svg') downloadText(name, `<?xml version="1.0" encoding="UTF-8"?>\n${file.svg}\n`, 'image/svg+xml');
+      else downloadBlob(name, await renderPathwayPng(file, { regular: interUrl, italic: interItalicUrl }));
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : 'could not make the figure.');
     } finally {
-      setDownloading(false);
+      setDownloading(null);
     }
   }
 
@@ -378,9 +388,28 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
                 fit
               </button>
             </div>
-            <button className="analysis-pill success" disabled={!figure || downloading || updating} onClick={() => void handleDownload()} type="button">
-              {downloading ? 'preparing…' : 'download svg'}
-            </button>
+            <div aria-label="download the figure" className="pathway-control pathway-download" role="group">
+              {/* "preparing…" takes the place of the label, which keeps room for it, so nothing moves while it works */}
+              <span aria-live="polite" className="pathway-control-label pathway-download-label">
+                <span>{downloading ? 'preparing…' : 'download'}</span>
+                <span aria-hidden="true" className="pathway-download-room">
+                  preparing…
+                </span>
+              </span>
+              {FORMATS.map(([format, hint]) => (
+                <button
+                  aria-busy={downloading === format}
+                  className="analysis-pill success"
+                  disabled={!figure || downloading !== null || updating}
+                  key={format}
+                  onClick={() => void handleDownload(format)}
+                  title={hint}
+                  type="button"
+                >
+                  {format}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

@@ -16,7 +16,7 @@
 - **Local-First & Private**: Everything stays on your machine. Data, recordings, and extracted frames process and save directly to your local `./data` folder.
 - **Optional OCR**: Reads the text of each screenshot into exports with local PaddleOCR.
 - **Chronological Review Board**: An intuitive GUI to accept, reject, rename, and add notes to candidate screenshots while preserving original chronology.
-- **Pathways**: The accepted steps drawn as a chart of screens and the moves between them, ready to finish as an SVG figure, with a hands-on tutorial in the app.
+- **Pathways**: The accepted steps drawn as a chart of screens and the moves between them, ready to finish as an SVG figure or to use as a PNG image, with a hands-on tutorial in the app.
 - **Run Comparison**: Run a recording again with other settings, see side by side what changed, and carry your review over to the new run.
 - **Rich Exports**: Bundle your accepted walkthrough steps seamlessly into `PNG`s + `CSV` + `JSON` manifests.
 

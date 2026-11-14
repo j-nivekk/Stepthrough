@@ -1251,7 +1251,7 @@ a {
   gap: 8px 16px;
 }
 
-.pt-figure-tools .analysis-pill {
+.pt-figure-tools .pathway-download {
   margin-left: auto;
 }
 
@@ -5930,14 +5930,14 @@ button:disabled {
 }
 
 /* The settings keep their size (wrapping inside only when alone on a line too narrow for them); the slider gives
-   way first: the right group starts at its smallest (a short slider, fit, download) and grows into the space
-   left, so the controls only take two rows when even that does not fit. */
+   way first: the right group starts at its smallest (a short slider, fit, download svg and png) and grows into
+   the space left, so the controls only take two rows when even that does not fit. */
 .pathway-controls > .pathway-controls-group:first-child {
   flex: 0 1 auto;
 }
 
 .pathway-controls-end {
-  flex: 1 1 228px;
+  flex: 1 1 294px;
   justify-content: flex-end;
   flex-wrap: nowrap;
   min-width: 0;
@@ -5951,9 +5951,37 @@ button:disabled {
   min-width: 0;
 }
 
-.pathway-controls-end > .analysis-pill {
+.pathway-controls-end > .pathway-download {
   flex: 0 0 auto;
+}
+
+.pathway-control.pathway-download {
+  align-items: center;
+  gap: 6px;
   white-space: nowrap;
+}
+
+.pathway-download .pathway-control-label {
+  margin-right: 4px;
+}
+
+.pathway-download-label {
+  display: inline-grid;
+  justify-items: end;
+}
+
+.pathway-download-label > span {
+  grid-area: 1 / 1;
+}
+
+.pathway-download-room {
+  visibility: hidden;
+}
+
+/* the format being prepared stays bright; the other waits, dimmed */
+.pathway-download .analysis-pill[aria-busy='true'] {
+  opacity: 1;
+  cursor: progress;
 }
 
 .pathway-controls-end .candidate-size-slider input {

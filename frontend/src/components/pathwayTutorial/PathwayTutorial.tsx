@@ -184,7 +184,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   const [notes, setNotes] = useState<MockNotes>('hidden');
   const [times, setTimes] = useState(false);
   const [caption, setCaption] = useState(false);
-  const [downloadNote, setDownloadNote] = useState(false);
+  const [downloadNote, setDownloadNote] = useState<'svg' | 'png' | null>(null);
   // What "show me" is about to use (`view:chart`, `pill:3`, `box:6`, `menu:new` ...), shaded green.
   const [demo, setDemo] = useState<string | null>(null);
   const viewRef = useRef(view);
@@ -238,7 +238,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     setNotes(index === 6 ? 'under' : 'hidden');
     setTimes(false);
     setCaption(index === 6);
-    setDownloadNote(false);
+    setDownloadNote(null);
   }
 
   useEffect(() => () => clearTimers(), []);
@@ -771,8 +771,8 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
       <>
         <p>
           <b>download svg</b> saves one file with the screenshots inside, ready to finish in figma, inkscape or
-          illustrator: text stays text, every screen is a group. a badge records the date and the version of
-          stepthrough, and where to cite it.
+          illustrator: text stays text, every screen is a group. <b>png</b> saves it as a picture at twice the size,
+          for slides and documents. a badge records the date and the version of stepthrough, and where to cite it.
         </p>
         <p>
           the export zip holds <code>pathway.json</code>: the same screens and moves, for your own analysis.
@@ -804,14 +804,19 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
             title and legend
           </button>
         </span>
-        <button className="analysis-pill success" onClick={() => setDownloadNote((value) => !value)} type="button">
-          download svg
-        </button>
+        <span className="pathway-control pathway-download" role="group" aria-label="download">
+          <span className="pathway-control-label">download</span>
+          {(['svg', 'png'] as const).map((format) => (
+            <button className="analysis-pill success" key={format} onClick={() => setDownloadNote((value) => (value === format ? null : format))} type="button">
+              {format}
+            </button>
+          ))}
+        </span>
       </div>
     );
     after = (
       <>
-        {downloadNote ? <p className="pt-aside">in the app, this saves the chart as it is shown here, as pathway.svg.</p> : null}
+        {downloadNote ? <p className="pt-aside">in the app, this saves the chart as it is shown here, as pathway.{downloadNote}.</p> : null}
         {done.has(6) ? (
           <div className="pt-finish">
             <p>

@@ -519,11 +519,17 @@ Everything you change here is stored on the steps, exactly as if you had chosen 
 | move the notes | **notes: under screens** (cut after four lines), **in a key** below the chart (in full), or **off** |
 | leave out the times, or the title and legend | **show: times** and **title and legend** |
 | change the size on the page | the slider; **fit** fills the width of the window |
-| save the chart | **download svg** |
+| save the chart | **download: svg** or **png** |
 
-The downloaded file is one SVG image with the screenshots inside it, so it needs no other files. Its text
-stays text and every screen is a group of its own, so you can finish the figure in a drawing program such as
-Inkscape, Illustrator or Affinity. The title and legend are separate groups that are easy to delete.
+**svg** saves one SVG image with the screenshots inside it, so it needs no other files. Its text stays text
+and every screen is a group of its own, so you can finish the figure in a drawing program such as Inkscape,
+Illustrator or Affinity. The title and legend are separate groups that are easy to delete.
+
+**png** saves the same figure as a picture, to put straight into slides, a document or a web page. It is
+drawn at twice the size the figure has on the page at 100%, and records that resolution (192 dpi), so a word
+processor places it at the figure's own size and it stays sharp when printed. The text is set in the app's
+own typeface, so it looks the same on every computer. A very large figure is drawn somewhat smaller, so that
+every browser can make it.
 
 At the bottom right, every figure carries a small badge: a QR code that leads to Stepthrough's repository,
 the date the figure was made, the version of Stepthrough that made it, and the addresses to find and cite
@@ -565,7 +571,7 @@ field. That way, the export can be read and cited without the app.
 is on and why it shares that screen with an earlier step (`grouped_by`: `researcher` when you chose it, a
 revisit, a pop-up closing, or a label such as scroll), and what you chose for the step (`screen_choice`,
 `kind_choice`), so your decisions and the automatic ones can be told apart. It has its own `field_notes`.
-The chart itself is not in the zip; save it with **download svg**.
+The chart itself is not in the zip; save it with **download: svg** or **png**.
 
 ## 9. Making good recordings
 
