@@ -230,6 +230,8 @@ one server process:
   and `PATCH /recordings/{id}` take `previous_name` and `previous_filename`: in a shared account a change made from
   text that someone else has changed since is refused (409) instead of written over theirs. Decisions and screen
   choices are simply the latest.
+- **Passwords.** `POST /me/password` is refused (403) for a shared account, since it logs out the other browsers;
+  an administrator gives the account a new link instead.
 - **Exports** of a shared account are all kept (`export_bundles.retained`) until their task is deleted, so two
   people exporting the same task at once each download their own.
 

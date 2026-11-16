@@ -179,8 +179,15 @@ def auth_link_password(payload: LinkPasswordRequest, request: Request, response:
 
 @router.post("/me/password", status_code=204)
 def me_change_password(payload: PasswordChangeRequest, request: Request, user: CurrentUser) -> Response:
-    """Change your own password. Other browsers logged in to the account are logged out; this one stays in."""
+    """Change your own password. Other browsers logged in to the account are logged out; this one stays in.
+    Not for a shared account, where that would log out everyone else in the group: an administrator gives it a new
+    link instead."""
     _require_passwords(request)
+    if user.is_shared:
+        raise HTTPException(
+            status_code=403,
+            detail="This account is shared, so only an administrator can give it a new password: changing it here would log everyone else out.",
+        )
     # Someone holding a stolen session must not be able to guess the password at leisure.
     address = client_address(request)
     if refusal := login_limiter.refusal(user.name, address):

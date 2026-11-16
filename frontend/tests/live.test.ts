@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { busyElsewhere, busyRunIds, patchCandidate, staleQueries, stepEditor, uploadsElsewhere } from '../src/lib/live';
-import type { CandidateFrame, LiveBusy, LiveEvent, LivePresence, RunDetail } from '../src/types';
+import { busyElsewhere, busyRunIds, isSharedAccount, patchCandidate, staleQueries, stepEditor, uploadsElsewhere } from '../src/lib/live';
+import type { CandidateFrame, LiveBusy, LiveEvent, LivePresence, RunDetail, SessionUser } from '../src/types';
 
 const event = (kind: LiveEvent['kind'], ids: Partial<LiveEvent> = {}): LiveEvent => ({
   seq: 1, kind, project_id: 'p', recording_id: 'r', run_id: 'run', by: 'other', ...ids,
@@ -52,4 +52,12 @@ test('uploads and busy work elsewhere leave out this browser', () => {
   ];
   assert.deepEqual(busyElsewhere(busy, 'run', 'me').map((entry) => entry.label), ['adding a step by hand to this task']);
   assert.deepEqual(busyRunIds(busy, 'me').sort(), ['run', 'run-2']);
+});
+
+test('only a regular account with the shared tag is shared', () => {
+  const user = (tags: string[], is_admin = false): SessionUser => ({ id: 'u', name: 'g1', display_name: null, tags, is_admin, delete_after: null });
+  assert.equal(isSharedAccount(user(['shared'])), true);
+  assert.equal(isSharedAccount(user(['shared', 'admin'], true)), false);
+  assert.equal(isSharedAccount(user(['group-a'])), false);
+  assert.equal(isSharedAccount(null), false);
 });

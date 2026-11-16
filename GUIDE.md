@@ -704,6 +704,9 @@ A rename made from a name that someone else changed meanwhile is refused, with t
 Every export of a shared account stays downloadable until its task is deleted, so two people exporting the same
 task at the same time each get their own. A browser that loses its connection catches up when it is back.
 
+The password of a shared account cannot be changed from the app, because that would log everyone else out.
+An administrator gives the account a new link instead; setting a password with it logs every other browser out.
+
 ### Privacy and consent
 
 Screen recordings often show names, messages, notifications and account details. Ask for consent before you

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { changePassword } from '../../api';
 import { formatCalendarDate } from '../../lib/formatters';
+import { isSharedAccount } from '../../lib/live';
 import type { SessionUser } from '../../types';
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -98,49 +99,59 @@ export function AccountPanel({ isLoggingOut, open, user, onClose, onLogOut, onOp
         </div>
       )}
 
-      <form className="app-settings-section" onSubmit={handleChangePassword}>
-        <p className="app-settings-section-label">password</p>
-        <input autoComplete="username" hidden readOnly value={user.name} />
-        <input
-          aria-label="current password"
-          autoComplete="current-password"
-          className="app-settings-field"
-          onChange={(event) => setCurrent(event.target.value)}
-          placeholder="current password"
-          type="password"
-          value={current}
-        />
-        <input
-          aria-label="new password"
-          autoComplete="new-password"
-          className="app-settings-field"
-          onChange={(event) => setNext(event.target.value)}
-          placeholder="new password"
-          type="password"
-          value={next}
-        />
-        <div className="app-settings-action-row">
+      {isSharedAccount(user) ? (
+        <div className="app-settings-section">
+          <p className="app-settings-section-label">password</p>
+          <p className="app-settings-hint">
+            this account is shared, so only an administrator can give it a new password. changing it here would log
+            everyone else out.
+          </p>
+        </div>
+      ) : (
+        <form className="app-settings-section" onSubmit={handleChangePassword}>
+          <p className="app-settings-section-label">password</p>
+          <input autoComplete="username" hidden readOnly value={user.name} />
           <input
-            aria-label="new password again"
+            aria-label="current password"
+            autoComplete="current-password"
+            className="app-settings-field"
+            onChange={(event) => setCurrent(event.target.value)}
+            placeholder="current password"
+            type="password"
+            value={current}
+          />
+          <input
+            aria-label="new password"
             autoComplete="new-password"
             className="app-settings-field"
-            onChange={(event) => setAgain(event.target.value)}
-            placeholder="again"
+            onChange={(event) => setNext(event.target.value)}
+            placeholder="new password"
             type="password"
-            value={again}
+            value={next}
           />
-          <button
-            className="app-settings-action-btn"
-            disabled={!current || next.length < MIN_PASSWORD_LENGTH || !again || pending}
-            type="submit"
-          >
-            {pending ? 'changing…' : 'change'}
-          </button>
-        </div>
-        <p className={`app-settings-hint ${message?.tone === 'error' ? 'account-panel-error' : ''}`}>
-          {message?.text ?? `at least ${MIN_PASSWORD_LENGTH} characters, not a common password. other browsers are logged out.`}
-        </p>
-      </form>
+          <div className="app-settings-action-row">
+            <input
+              aria-label="new password again"
+              autoComplete="new-password"
+              className="app-settings-field"
+              onChange={(event) => setAgain(event.target.value)}
+              placeholder="again"
+              type="password"
+              value={again}
+            />
+            <button
+              className="app-settings-action-btn"
+              disabled={!current || next.length < MIN_PASSWORD_LENGTH || !again || pending}
+              type="submit"
+            >
+              {pending ? 'changing…' : 'change'}
+            </button>
+          </div>
+          <p className={`app-settings-hint ${message?.tone === 'error' ? 'account-panel-error' : ''}`}>
+            {message?.text ?? `at least ${MIN_PASSWORD_LENGTH} characters, not a common password. other browsers are logged out.`}
+          </p>
+        </form>
+      )}
 
       <div className="app-settings-section">
         <div className="app-settings-action-row">

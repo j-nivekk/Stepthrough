@@ -261,6 +261,15 @@ def test_an_administrator_cannot_be_shared(logins):
     assert tab.get("/me/live").status_code == 403
 
 
+def test_nobody_changes_the_password_for_the_whole_group(group, logins):
+    a, b = group
+    refused = a.post("/me/password", json={"current_password": PASSWORD, "new_password": "a brand new passphrase"})
+    assert refused.status_code == 403
+    assert "administrator" in refused.json()["detail"]
+    assert b.get("/me").status_code == 200  # nobody was logged out
+    logins("group", "browser-c")  # and the password is the same
+
+
 def test_the_hub_shows_busy_work_only_while_it_runs():
     hub = live.LiveHub()
     with hub.busy({"group"}, {"run_id": "run-1", "label": "merging two screens"}):

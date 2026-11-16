@@ -7,6 +7,7 @@ import { AppWatermark } from './components/AppWatermark';
 import { LoginScreen } from './features/account/LoginScreen';
 import { SetPasswordScreen } from './features/account/SetPasswordScreen';
 import { forgetLinkToken, readLinkToken } from './lib/accountLinks';
+import { isSharedAccount } from './lib/live';
 import type { SessionInfo } from './types';
 
 const SESSION_KEY = ['session'];
@@ -71,7 +72,7 @@ export function Root() {
   }
   // Without an answer (the backend is not running yet), the app's own notices explain what is wrong.
   // Many people signed in to one shared account see each other's changes as they happen.
-  const shared = Boolean(session?.mode === 'password' && session.user && !session.user.is_admin && session.user.tags.includes('shared'));
+  const shared = session?.mode === 'password' && isSharedAccount(session.user);
   return (
     <LiveProvider enabled={shared}>
       <App onSessionChange={enter} session={session} />

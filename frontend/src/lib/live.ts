@@ -1,7 +1,12 @@
 // Shared accounts: what a change from another browser means for this one (see backend/app/live.py and
 // features/live/LiveProvider.tsx, which applies it). Pure functions, so they can be tested without a browser.
 
-import type { CandidateFrame, LiveBusy, LiveEvent, LivePresence, RunDetail } from '../types';
+import type { CandidateFrame, LiveBusy, LiveEvent, LivePresence, RunDetail, SessionUser } from '../types';
+
+/** Whether many people may be signed in to this account at once (the `shared` tag; never an administrator). */
+export function isSharedAccount(user: SessionUser | null | undefined): boolean {
+  return Boolean(user && !user.is_admin && user.tags.includes('shared'));
+}
 
 export type QueryKeyPrefix = readonly unknown[];
 
