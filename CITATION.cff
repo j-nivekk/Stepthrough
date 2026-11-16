@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use Stepthrough in research, cite the Zenodo record for the version you used."
 type: software
 title: "Stepthrough: screen recordings to walkthrough steps and interface pathways"
-version: "1.2.0"
+version: "1.2.1"
 authors:
   - family-names: Jin
     given-names: 'H. "Kevin"'
