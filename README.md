@@ -3,7 +3,7 @@
 **Stepthrough** is a local-first research tool designed to automatically turn video screen recordings into clean, chronological walkthrough screenshots. It is built to help researchers, designers, and developers quickly extract key navigational steps from app runs or usability tests.
 
 [![Latest release](https://img.shields.io/github/v/release/j-nivekk/Stepthrough)](https://github.com/j-nivekk/Stepthrough/releases/latest)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24159850.svg)](https://doi.org/10.5281/zenodo.24159850)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24159849.svg)](https://doi.org/10.5281/zenodo.24159849)
 [![Docker image build](https://github.com/j-nivekk/Stepthrough/actions/workflows/docker.yml/badge.svg?branch=main)](https://github.com/j-nivekk/Stepthrough/actions/workflows/docker.yml)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python Backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20OpenCV-3776AB.svg)
@@ -118,7 +118,7 @@ and how to upgrade. The Docker images are at `ghcr.io/j-nivekk/stepthrough`:
 | tag | what it is |
 |---|---|
 | `stable` (`stable-ocr` with text recognition) | the latest release |
-| `1.1.2`, `1.1` (and `-ocr`) | a release, or the latest of a series, to stay on a known version |
+| `1.1.3`, `1.1` (and `-ocr`) | a release, or the latest of a series, to stay on a known version |
 | `edge` (`edge-ocr`) | the latest build of `main`; the app shows `edge` at the bottom right and its commit under **about** |
 
 The [Docker image workflow](.github/workflows/docker.yml) builds the image, runs the backend tests and an end-to-end
@@ -126,11 +126,11 @@ smoke test in it, and only then publishes. It runs for:
 
 - a push to `main` that changes the app, its tests or the image (it publishes `edge`). Changes to documentation and
   other files outside the image skip it, and so does any commit with `[skip ci]` in its message;
-- a version tag such as `v1.1.2` (it publishes the release images and moves `stable`);
+- a version tag such as `v1.1.3` (it publishes the release images and moves `stable`);
 - pull requests that change the app (tests only).
 
 **To release:** set the new version in `backend/app/__init__.py`, `backend/pyproject.toml` and
-`frontend/package.json` (a test checks they match), commit, push a tag such as `v1.1.2`, and write the release notes
+`frontend/package.json` (a test checks they match), commit, push a tag such as `v1.1.3`, and write the release notes
 on GitHub. `DEPLOY.md` names the latest release in its checkout commands, and `README_IF_DOWNLOADED_FROM_ZENODO.md`
 the archived version: update both.
 

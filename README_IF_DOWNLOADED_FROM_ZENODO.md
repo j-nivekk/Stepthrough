@@ -1,6 +1,6 @@
 # Downloaded Stepthrough from Zenodo?
 
-**This is an archival copy of Stepthrough 1.1.2. For the latest versions, fixes, documentation and support, visit [Stepthrough on GitHub](https://github.com/j-nivekk/Stepthrough).**
+**This is an archival copy of Stepthrough 1.1.3. For the latest versions, fixes, documentation and support, visit [Stepthrough on GitHub](https://github.com/j-nivekk/Stepthrough).**
 
 - [Latest release](https://github.com/j-nivekk/Stepthrough/releases/latest)
 - [All releases and release notes](https://github.com/j-nivekk/Stepthrough/releases)
@@ -30,7 +30,7 @@ build output and Git history are not included. The evaluation code generates its
 
 ## Run this archived version
 
-Extract the ZIP and open a terminal in its `Stepthrough-1.1.2` directory. The commands below use the source in
+Extract the ZIP and open a terminal in its `Stepthrough-1.1.3` directory. The commands below use the source in
 this download. The main README also describes getting the current code or a published container image; those
 routes can select a different version.
 
@@ -39,9 +39,9 @@ routes can select a different version.
 With Docker running, build the image from the extracted files:
 
 ```bash
-docker build -f docker/Dockerfile --build-arg VERSION=1.1.2 -t stepthrough-archive:1.1.2 .
-docker volume create stepthrough-archive-1-1-2-data
-docker run --rm --name stepthrough-archive-1-1-2 -p 127.0.0.1:8080:8000 -e STEPTHROUGH_AUTH=none -v stepthrough-archive-1-1-2-data:/data stepthrough-archive:1.1.2
+docker build -f docker/Dockerfile --build-arg VERSION=1.1.3 -t stepthrough-archive:1.1.3 .
+docker volume create stepthrough-archive-1-1-3-data
+docker run --rm --name stepthrough-archive-1-1-3 -p 127.0.0.1:8080:8000 -e STEPTHROUGH_AUTH=none -v stepthrough-archive-1-1-3-data:/data stepthrough-archive:1.1.3
 ```
 
 Open <http://localhost:8080>. These settings are for one person's local computer. For a shared server with
