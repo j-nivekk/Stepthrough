@@ -5,7 +5,7 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 from uuid import uuid4
 
-from .database import LOCAL_USER_ID, connect
+from .database import ADMIN_TAG, LOCAL_USER_ID, SHARED_TAG, connect
 from .models import RunSettings
 from .utils import slugify, utc_now
 
@@ -142,6 +142,28 @@ def set_project_member(project_id: str, member: str, role: str = "owner") -> Non
             """,
             (project_id, member, role, utc_now()),
         )
+
+
+def shared_accounts_for_project(project_id: str) -> list[str]:
+    """The shared accounts that can open a project, as a member themselves or through a tag they carry: whose
+    browsers to tell about a change in it."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT u.id, u.tags FROM users u
+            WHERE u.is_disabled = 0 AND EXISTS (
+                SELECT 1 FROM project_members m
+                WHERE m.project_id = ? AND (m.member = u.id OR m.member IN (SELECT 'tag:' || value FROM json_each(u.tags)))
+            )
+            """,
+            (project_id,),
+        ).fetchall()
+    accounts = []
+    for row in rows:
+        tags = json.loads(row["tags"] or "[]")
+        if SHARED_TAG in tags and ADMIN_TAG not in tags:
+            accounts.append(row["id"])
+    return accounts
 
 
 def list_project_members(project_id: str) -> list[dict[str, Any]]:
@@ -673,6 +695,7 @@ def delete_run_record(run_id: str) -> None:
 
 
 def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str, Any]]) -> None:
+    """Replace the steps and update the run's summary together, retaining shared download snapshots."""
     with connect() as conn:
         conn.execute("DELETE FROM candidate_frames WHERE run_id = ?", (run_id,))
         if candidates:
@@ -709,6 +732,11 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
                     for candidate in candidates
                 ],
             )
+        conn.execute("DELETE FROM export_bundles WHERE run_id = ? AND retained = 0", (run_id,))
+        conn.execute(
+            "UPDATE detection_runs SET candidate_count = ?, export_bundle_id = NULL, updated_at = ? WHERE id = ?",
+            (len(candidates), utc_now(), run_id),
+        )
 
 
 def list_candidates(run_id: str) -> list[dict[str, Any]]:
@@ -740,6 +768,16 @@ def update_candidate(candidate_id: str, **fields: Any) -> dict[str, Any] | None:
     return get_candidate(candidate_id)
 
 
+def set_candidate_statuses(run_id: str, candidate_ids: Sequence[str], status: str) -> None:
+    """Several steps of one run to one status, together."""
+    now = utc_now()
+    with connect() as conn:
+        conn.executemany(
+            "UPDATE candidate_frames SET status = ?, updated_at = ? WHERE run_id = ? AND id = ?",
+            [(status, now, run_id, candidate_id) for candidate_id in candidate_ids],
+        )
+
+
 def set_candidate_screen_links(run_id: str, candidate_ids: Sequence[str], target_id: str) -> None:
     """Move an entire pathway box together; a failed write must not leave a partial merge."""
     with connect() as conn:
@@ -749,38 +787,29 @@ def set_candidate_screen_links(run_id: str, candidate_ids: Sequence[str], target
         )
 
 
-def create_export_bundle(run_id: str, output_dir: str, zip_path: str, item_count: int) -> dict[str, Any]:
-    bundle_id = uuid4().hex
+def create_export_bundle(
+    run_id: str, output_dir: str, zip_path: str, item_count: int, *, bundle_id: str, retain: bool
+) -> dict[str, Any]:
     payload = {
         "id": bundle_id,
         "run_id": run_id,
         "output_dir": output_dir,
         "zip_path": zip_path,
         "item_count": item_count,
+        "retained": retain,
         "created_at": utc_now(),
     }
     with connect() as conn:
+        conn.execute("DELETE FROM export_bundles WHERE run_id = ? AND retained = 0", (run_id,))
         conn.execute(
             """
-            INSERT INTO export_bundles (id, run_id, output_dir, zip_path, item_count, created_at)
-            VALUES (:id, :run_id, :output_dir, :zip_path, :item_count, :created_at)
-            ON CONFLICT(run_id) DO UPDATE SET
-                id = excluded.id,
-                output_dir = excluded.output_dir,
-                zip_path = excluded.zip_path,
-                item_count = excluded.item_count,
-                created_at = excluded.created_at
+            INSERT INTO export_bundles (id, run_id, output_dir, zip_path, item_count, created_at, retained)
+            VALUES (:id, :run_id, :output_dir, :zip_path, :item_count, :created_at, :retained)
             """,
             payload,
         )
-    update_run(run_id, export_bundle_id=bundle_id)
-    return get_export_bundle(bundle_id)
-
-
-def clear_export_bundle_for_run(run_id: str) -> None:
-    with connect() as conn:
-        conn.execute("DELETE FROM export_bundles WHERE run_id = ?", (run_id,))
-    update_run(run_id, export_bundle_id=None)
+        conn.execute("UPDATE detection_runs SET export_bundle_id = ? WHERE id = ?", (bundle_id, run_id))
+    return payload
 
 
 def get_export_bundle(bundle_id: str) -> dict[str, Any] | None:
@@ -795,7 +824,7 @@ def get_export_bundle(bundle_id: str) -> dict[str, Any] | None:
 def get_export_bundle_for_run(run_id: str) -> dict[str, Any] | None:
     with connect() as conn:
         row = conn.execute(
-            "SELECT * FROM export_bundles WHERE run_id = ?",
+            "SELECT eb.* FROM detection_runs dr JOIN export_bundles eb ON dr.export_bundle_id = eb.id WHERE dr.id = ?",
             (run_id,),
         ).fetchone()
     return _row_to_dict(row)

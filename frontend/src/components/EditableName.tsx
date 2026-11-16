@@ -10,7 +10,7 @@ export interface EditableNameProps {
   inputClassName?: string;
   lockedExtension?: boolean;
   onDisplayClick?: () => void;
-  onSave: (nextValue: string) => Promise<void> | void;
+  onSave: (nextValue: string, previousValue: string) => Promise<void> | void;
   renameLabel: string;
   showRenameButton?: boolean;
   textClassName?: string;
@@ -36,10 +36,13 @@ export function EditableName({
   const [error, setError] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [originalValue, setOriginalValue] = useState(value);
+  const saving = useRef(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const editValue = isEditing ? originalValue : value;
   const { base, extension } = useMemo(
-    () => (lockedExtension ? splitFilename(value) : { base: value, extension: '' }),
-    [lockedExtension, value],
+    () => (lockedExtension ? splitFilename(editValue) : { base: editValue, extension: '' }),
+    [lockedExtension, editValue],
   );
 
   useEffect(() => {
@@ -67,10 +70,16 @@ export function EditableName({
     if (editRequestToken == null || disabled) {
       return;
     }
-    setIsEditing(true);
+    startEditing();
   }, [disabled, editRequestToken]);
 
+  function startEditing() {
+    setOriginalValue(value);
+    setIsEditing(true);
+  }
+
   async function commitRename() {
+    if (saving.current) return false;
     const nextBase = draft.trim();
     if (!nextBase) {
       setError('name required');
@@ -78,15 +87,16 @@ export function EditableName({
     }
 
     const nextValue = lockedExtension ? joinFilename(nextBase, extension) : nextBase;
-    if (nextValue === value) {
+    if (nextValue === originalValue) {
       setIsEditing(false);
       setError('');
       return true;
     }
 
+    saving.current = true;
     setIsSaving(true);
     try {
-      await onSave(nextValue);
+      await onSave(nextValue, originalValue);
       setIsEditing(false);
       setError('');
       return true;
@@ -94,6 +104,7 @@ export function EditableName({
       setError(renameError instanceof Error ? renameError.message : 'Could not rename.');
       return false;
     } finally {
+      saving.current = false;
       setIsSaving(false);
     }
   }
@@ -162,7 +173,7 @@ export function EditableName({
             <button
               className={buttonClassName ? `editable-name-button ${buttonClassName}` : 'editable-name-button'}
               disabled={disabled}
-              onClick={() => setIsEditing(true)}
+              onClick={startEditing}
               type="button"
             >
               rename

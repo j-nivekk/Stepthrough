@@ -65,6 +65,7 @@ class ProjectCreate(BaseModel):
 
 class ProjectUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    previous_name: str | None = Field(default=None, max_length=120)
 
 
 class UserResponse(BaseModel):
@@ -302,10 +303,11 @@ class RecordingImportResponse(BaseModel):
 
 class RecordingUpdate(BaseModel):
     filename: str = Field(min_length=1, max_length=240)
+    previous_filename: str | None = Field(default=None, max_length=240)
 
 
 class ExportRequest(BaseModel):
-    mode: ExportMode = "accepted"
+    mode: ExportMode | Literal["auto"] = "accepted"
 
 
 class DetectionRunSummary(BaseModel):
@@ -546,9 +548,26 @@ class CandidateUpdate(BaseModel):
     status: CandidateStatus | None = None
     title: str | None = Field(default=None, max_length=240)
     notes: str | None = Field(default=None, max_length=2_000)
+    # In a shared account: the title or notes this browser started from. When someone else saved other text in
+    # the meantime, the change is refused rather than written over theirs.
+    previous_title: str | None = Field(default=None, max_length=240)
+    previous_notes: str | None = Field(default=None, max_length=2_000)
     # Which screen the step shows, for the pathway: "auto", "new", or the id of another step of the run.
     screen_link: str | None = Field(default=None, min_length=1, max_length=64)
     screen_kind: Literal["auto", "screen", "popup"] | None = None
+
+
+class CandidateStatusUpdate(BaseModel):
+    """Accept or reject several steps of one task at once."""
+
+    candidate_ids: list[str] = Field(min_length=1, max_length=5_000)
+    status: CandidateStatus
+
+
+class PresenceUpdate(BaseModel):
+    """What this browser is doing that the others of its shared account should see (see live.clean_targets)."""
+
+    targets: list[dict[str, Any]] = Field(default_factory=list, max_length=20)
 
 
 class ReviewCarryOverPair(BaseModel):

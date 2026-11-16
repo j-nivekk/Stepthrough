@@ -34,6 +34,7 @@ from .repository import find_user_by_name, list_users, projects_owned_only_by, t
 from .user_admin import (
     AccountBusy,
     AccountError,
+    account_tags,
     clean_tags,
     create_account,
     delete_account,
@@ -151,7 +152,7 @@ def cmd_link(args: argparse.Namespace) -> None:
 def cmd_tag(args: argparse.Namespace) -> None:
     row = _user(args.name)
     tags = (set(User.from_row(row).tags) | set(clean_tags(args.add))) - set(args.remove)
-    user = User.from_row(update_user(row["id"], tags=sorted(tags)))
+    user = User.from_row(update_user(row["id"], tags=account_tags(tags)))
     _out(f"{user.name}: {', '.join(user.tags) or 'no tags'}")
 
 

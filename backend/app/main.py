@@ -6,9 +6,10 @@ import json
 import logging
 import shutil
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Thread
-from typing import Any, Callable, Literal
+from typing import Annotated, Any, Callable, Literal
 from uuid import uuid4
 
 from fastapi import (
@@ -27,6 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from .account_routes import router as account_router, user_response
 from .accounts import (
@@ -46,6 +48,7 @@ from .database import init_db, reset_db
 from .models import (
     AnalysisMetadataResponse,
     CandidateFrameResponse,
+    CandidateStatusUpdate,
     CandidateUpdate,
     ExportRequest,
     DetectionRunDetail,
@@ -56,6 +59,7 @@ from .models import (
     ReviewCarryOverResult,
     PathwayDetail,
     PathwayMerge,
+    PresenceUpdate,
     PathwayResponse,
     ProjectCreate,
     ProjectResponse,
@@ -71,7 +75,6 @@ from .models import (
 from .repository import (
     ACTIVE_RUN_STATUSES,
     any_password_set,
-    clear_export_bundle_for_run,
     create_export_bundle as create_export_bundle_record,
     create_project,
     create_recording,
@@ -100,6 +103,8 @@ from .repository import (
     replace_candidates,
     save_run_settings,
     set_candidate_screen_links,
+    set_candidate_statuses,
+    shared_accounts_for_project,
     update_candidate,
     update_project_name,
     update_recording_filename,
@@ -124,6 +129,7 @@ from .services.video import (
     save_upload_file,
     slug_timecode,
 )
+from .live import CLIENT_HEADER, LiveHub, TaskWrites, clean_targets
 from .storage import (
     absolute_data_path,
     asset_url,
@@ -139,6 +145,7 @@ from .utils import sanitize_filename, utc_now
 TERMINAL_WEBSOCKET_STATES = {"completed", "failed", "cancelled"}
 INTERRUPTED_RUN_MESSAGE = "Interrupted: the backend restarted while this run was active. Start a new run."
 ADMIN_CONFIRM_HEADER = "X-Stepthrough-Confirm"
+SharedClient = Annotated[str | None, Header(alias=CLIENT_HEADER, max_length=100)]
 logger = logging.getLogger("stepthrough")
 if not logger.handlers:
     # uvicorn sets up only its own loggers; give ours a time and a source, so failed logins read well in the log.
@@ -295,12 +302,61 @@ def startup() -> None:
     app.state.tool_diagnostics = build_tool_diagnostics()
     _set_ocr_state(_checking_ocr_state())
     app.state.job_manager = JobManager(max_concurrent_runs=server_config.max_concurrent_runs)
+    app.state.live = LiveHub()
+    app.state.task_writes = TaskWrites()
     fail_interrupted_runs(INTERRUPTED_RUN_MESSAGE)
     _start_background_ocr_probe()
 
 
 def _job_manager() -> JobManager:
     return app.state.job_manager
+
+
+def _live() -> LiveHub:
+    return app.state.live
+
+
+def _one_at_a_time(run_id: str):
+    """Changes to the steps of one task, one after the other (see live.TaskWrites)."""
+    return app.state.task_writes.one_at_a_time(run_id)
+
+
+def _audience(project_id: str | None, user: User | None = None) -> set[str]:
+    """The shared accounts to tell about a change: those that can open the project, and the one making it."""
+    accounts = set(shared_accounts_for_project(project_id)) if project_id else set()
+    if user is not None and user.is_shared:
+        accounts.add(user.id)
+    return accounts
+
+
+def _announce(
+    kind: str,
+    *,
+    project_id: str | None = None,
+    recording_id: str | None = None,
+    run_id: str | None = None,
+    user: User | None = None,
+    client: str | None = None,
+    accounts: set[str] | None = None,
+    **extra: Any,
+) -> None:
+    """Tell the browsers of the shared accounts concerned what changed, so that they show it at once. ``client`` is
+    the browser that made the change, which has shown it already."""
+    try:
+        audience = accounts if accounts is not None else _audience(project_id, user)
+        if audience:
+            event = {"kind": kind, "project_id": project_id, "recording_id": recording_id, "run_id": run_id, "by": client}
+            _live().publish(audience, {**event, **extra})
+    except Exception:  # telling the others must never undo the change itself
+        logger.exception("Could not announce a %s change", kind)
+
+
+@contextmanager
+def _busy(user: User, client: str | None, project_id: str, run_id: str, label: str):
+    """While a change rewrites a task, show the other browsers of a shared account what is happening to it."""
+    accounts = _audience(project_id, user) if user.is_shared else set()
+    with _live().busy(accounts, {"project_id": project_id, "run_id": run_id, "label": label, "by": client}):
+        yield
 
 
 def _require_tools() -> None:
@@ -675,10 +731,20 @@ def _ensure_recording_working_copy(
     ) or recording
 
 
+def _announce_run(run_id: str) -> None:
+    """Tell the shared accounts that a run changed by itself (an analysis ended), whoever started it."""
+    try:
+        project, recording, _run = _run_context(run_id)
+    except HTTPException:
+        return  # deleted meanwhile
+    _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id)
+
+
 def _prepare_recording_in_background(recording_id: str) -> None:
     try:
         project, recording = _recording_context(recording_id)
         _ensure_recording_working_copy(project, recording)
+        _announce("project", project_id=project["id"], recording_id=recording_id)
     except (CancellationRequested, HTTPException):
         # deleted before or while its working copy was made
         logger.info("Stopped preparing recording %s: it was deleted", recording_id)
@@ -798,7 +864,6 @@ def _run_detection_job(run_id: str) -> None:
         normalized_candidates = _apply_candidate_paths(candidates, target_frames_dir)
 
         replace_candidates(run_id, recording["id"], normalized_candidates)
-        clear_export_bundle_for_run(run_id)
 
         candidate_count = len(normalized_candidates)
         completion_message = f"Prepared {candidate_count} screenshot candidates, one per stable screen"
@@ -835,6 +900,7 @@ def _run_detection_job(run_id: str) -> None:
         if temp_root is not None:
             shutil.rmtree(temp_root, ignore_errors=True)
         manager.finish(run_id)
+        _announce_run(run_id)
 
 
 @app.get("/", include_in_schema=False, response_model=None)
@@ -905,6 +971,34 @@ def me(user: CurrentUser) -> UserResponse:
     return user_response(user)
 
 
+@app.get("/me/live")
+async def live_changes(user: CurrentUser, after: int | None = None, epoch: str | None = None, wait: float = 25.0) -> dict:
+    """What changed in a shared account after change number ``after``, and what its browsers are doing now. Waits up
+    to ``wait`` seconds for a change before answering (a long poll), so a browser that asks again at once hears of
+    each change within a moment, through any proxy."""
+    if not user.is_shared:
+        raise HTTPException(status_code=403, detail="Live changes are for shared accounts.")
+    hub = _live()
+    known = after if epoch == hub.epoch else None
+    if known is not None:
+        deadline = time.monotonic() + max(0.0, min(wait, 25.0))
+        while hub.seq(user.id) <= known and time.monotonic() < deadline:
+            await asyncio.sleep(0.25)
+    return hub.snapshot(user.id, known)
+
+
+@app.put("/me/presence", status_code=204)
+def live_presence(payload: PresenceUpdate, user: CurrentUser, client: SharedClient = None) -> Response:
+    """What this browser is doing that the other browsers of its shared account should see, such as editing a
+    step's notes; repeated while it lasts, an empty list when it ends."""
+    if not user.is_shared:
+        raise HTTPException(status_code=403, detail="Presence is for shared accounts.")
+    if not client:
+        raise HTTPException(status_code=400, detail=f"Send the {CLIENT_HEADER} header.")
+    _live().set_presence(user.id, client, clean_targets(payload.targets))
+    return Response(status_code=204)
+
+
 @app.get("/me/run-settings", response_model=list[SavedRunSettingsResponse])
 def my_run_settings(user: CurrentUser) -> list[SavedRunSettingsResponse]:
     """The settings this person saved for new runs, whichever computer they saved them on: their own defaults
@@ -919,33 +1013,42 @@ def my_run_settings(user: CurrentUser) -> list[SavedRunSettingsResponse]:
 
 
 @app.put("/me/run-settings/default", response_model=SavedRunSettingsResponse)
-def my_run_settings_save_default(settings: RunSettings, user: CurrentUser) -> SavedRunSettingsResponse:
+def my_run_settings_save_default(
+    settings: RunSettings, user: CurrentUser, client: SharedClient = None
+) -> SavedRunSettingsResponse:
     _refuse_retired_engine(settings)
-    return SavedRunSettingsResponse(**save_run_settings(user.id, None, settings))
+    saved = save_run_settings(user.id, None, settings)
+    _announce("settings", user=user, client=client, accounts=_audience(None, user))
+    return SavedRunSettingsResponse(**saved)
 
 
 @app.put("/me/run-settings/projects/{project_id}", response_model=SavedRunSettingsResponse)
 def my_run_settings_save_for_project(
-    project_id: str, settings: RunSettings, user: CurrentUser
+    project_id: str, settings: RunSettings, user: CurrentUser, client: SharedClient = None
 ) -> SavedRunSettingsResponse:
     # Viewers may keep their own settings for a project too: nobody else sees them.
     _project_for(project_id, user, "viewer")
     _refuse_retired_engine(settings)
-    return SavedRunSettingsResponse(**save_run_settings(user.id, project_id, settings))
+    saved = save_run_settings(user.id, project_id, settings)
+    # saved settings belong to the account, so only its own browsers need to hear of them
+    _announce("settings", project_id=project_id, user=user, client=client, accounts=_audience(None, user))
+    return SavedRunSettingsResponse(**saved)
 
 
 @app.delete("/me/run-settings/default", status_code=204)
-def my_run_settings_forget_default(user: CurrentUser) -> Response:
+def my_run_settings_forget_default(user: CurrentUser, client: SharedClient = None) -> Response:
     """Back to the factory settings for new runs: forget this person's own defaults."""
     forget_run_settings(user.id, None)
+    _announce("settings", user=user, client=client, accounts=_audience(None, user))
     return Response(status_code=204)
 
 
 @app.delete("/me/run-settings/projects/{project_id}", status_code=204)
-def my_run_settings_forget_for_project(project_id: str, user: CurrentUser) -> Response:
+def my_run_settings_forget_for_project(project_id: str, user: CurrentUser, client: SharedClient = None) -> Response:
     """Forget what this person saved for a project: new runs there start from their own defaults again."""
     _project_for(project_id, user, "viewer")
     forget_run_settings(user.id, project_id)
+    _announce("settings", project_id=project_id, user=user, client=client, accounts=_audience(None, user))
     return Response(status_code=204)
 
 
@@ -956,15 +1059,23 @@ def projects_index(user: CurrentUser) -> list[ProjectResponse]:
 
 
 @app.post("/projects", response_model=ProjectResponse)
-def projects_create(payload: ProjectCreate, user: CurrentUser) -> ProjectResponse:
+def projects_create(payload: ProjectCreate, user: CurrentUser, client: SharedClient = None) -> ProjectResponse:
     project = create_project(payload.name, owner_id=user.id)
+    _announce("projects", project_id=project["id"], user=user, client=client)
     return _serialize_project(project)
 
 
 @app.patch("/projects/{project_id}", response_model=ProjectResponse)
-def projects_update(project_id: str, payload: ProjectUpdate, user: CurrentUser) -> ProjectResponse:
-    _project_for(project_id, user, "owner")
-    return _serialize_project(update_project_name(project_id, payload.name))
+def projects_update(
+    project_id: str, payload: ProjectUpdate, user: CurrentUser, client: SharedClient = None
+) -> ProjectResponse:
+    project = _project_for(project_id, user, "owner")
+    # In a shared account, a rename made from a name that someone else has changed since would undo theirs.
+    if user.is_shared and payload.previous_name is not None and payload.previous_name != project["name"]:
+        raise HTTPException(409, f"This project was renamed to “{project['name']}” in another browser meanwhile.")
+    renamed = update_project_name(project_id, payload.name)
+    _announce("projects", project_id=project_id, user=user, client=client)
+    return _serialize_project(renamed)
 
 
 @app.get("/projects/{project_id}")
@@ -977,13 +1088,17 @@ def projects_show(project_id: str, user: CurrentUser) -> dict:
 
 
 @app.delete("/projects/{project_id}", status_code=204)
-def projects_delete(project_id: str, user: CurrentUser) -> Response:
+def projects_delete(project_id: str, user: CurrentUser, client: SharedClient = None) -> Response:
     project = _project_for(project_id, user, "owner")
     if project_has_active_runs(project_id):
         raise HTTPException(status_code=409, detail="Abort active runs before deleting this project")
+    accounts = _audience(project_id, user)  # before its members go with it
     project_path = project_dir(project["slug"], project["id"])
+    for recording in list_recordings(project_id):
+        stop_working_copy(recording["id"])
     delete_project_record(project_id)
     shutil.rmtree(project_path, ignore_errors=True)
+    _announce("project_deleted", project_id=project_id, client=client, accounts=accounts)
     return Response(status_code=204)
 
 
@@ -993,44 +1108,40 @@ async def recordings_import(
     project_id: str = Form(...),
     filename: str | None = Form(default=None),
     file: UploadFile = File(...),
+    client: SharedClient = None,
 ) -> RecordingImportResponse:
     _require_tools()
     project = _project_for(project_id, user, "owner")
-
+    recording_id = uuid4().hex
     preferred_name = filename.strip() if filename else file.filename or "recording.mp4"
     sanitized_name = sanitize_filename(preferred_name)
     recording_slug = recording_slug_from_filename(sanitized_name)
-    recording_id = uuid4().hex
-    destination = recording_source_path(
-        project["slug"],
-        project["id"],
-        recording_slug,
-        recording_id,
-        sanitized_name,
-    )
+    destination = recording_source_path(project["slug"], project_id, recording_slug, recording_id, sanitized_name)
+    recording = None
     try:
         await save_upload_file(file, destination, max_bytes=server_config.max_upload_bytes)
-        metadata = probe_video(destination)
+        metadata = await run_in_threadpool(probe_video, destination)
+        recording = create_recording(
+            recording_id=recording_id,
+            project_id=project_id,
+            filename=destination.name,
+            slug=recording_slug,
+            source_path=relative_data_path(destination),
+            duration_ms=metadata.duration_ms,
+            width=metadata.width,
+            height=metadata.height,
+            fps=metadata.fps,
+        )
     except UploadTooLargeError as exc:
-        shutil.rmtree(destination.parent.parent, ignore_errors=True)
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     except VideoToolError as exc:
-        if destination.exists():
-            destination.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    recording = create_recording(
-        recording_id=recording_id,
-        project_id=project_id,
-        filename=destination.name,
-        slug=recording_slug,
-        source_path=relative_data_path(destination),
-        duration_ms=metadata.duration_ms,
-        width=metadata.width,
-        height=metadata.height,
-        fps=metadata.fps,
-    )
+    finally:
+        if recording is None:
+            # nothing half-uploaded stays behind, whatever went wrong (a cancelled upload included)
+            shutil.rmtree(destination.parent.parent, ignore_errors=True)
     _start_background_ingest(recording["id"])
+    _announce("project", project_id=project_id, recording_id=recording_id, user=user, client=client)
     return _serialize_recording(recording)
 
 
@@ -1045,14 +1156,18 @@ def recordings_show(recording_id: str, user: CurrentUser) -> RecordingDetailResp
 
 @app.patch("/recordings/{recording_id}", response_model=RecordingImportResponse)
 def recordings_update(
-    recording_id: str, payload: RecordingUpdate, user: CurrentUser
+    recording_id: str, payload: RecordingUpdate, user: CurrentUser, client: SharedClient = None
 ) -> RecordingImportResponse:
-    _recording_for(recording_id, user, "owner")
-    return _serialize_recording(update_recording_filename(recording_id, sanitize_filename(payload.filename)))
+    project, recording = _recording_for(recording_id, user, "owner")
+    if user.is_shared and payload.previous_filename is not None and payload.previous_filename != recording["filename"]:
+        raise HTTPException(409, f"This video was renamed to “{recording['filename']}” in another browser meanwhile.")
+    renamed = update_recording_filename(recording_id, sanitize_filename(payload.filename))
+    _announce("project", project_id=project["id"], recording_id=recording_id, user=user, client=client)
+    return _serialize_recording(renamed)
 
 
 @app.delete("/recordings/{recording_id}", status_code=204)
-def recordings_delete(recording_id: str, user: CurrentUser) -> Response:
+def recordings_delete(recording_id: str, user: CurrentUser, client: SharedClient = None) -> Response:
     project, recording = _recording_for(recording_id, user, "owner")
     if recording_has_active_runs(recording_id):
         raise HTTPException(status_code=409, detail="Abort active runs before deleting this recording")
@@ -1063,28 +1178,30 @@ def recordings_delete(recording_id: str, user: CurrentUser) -> Response:
     if not stop_working_copy(recording_id):
         logger.warning("Preparation of deleted recording %s did not stop in time", recording_id)
     shutil.rmtree(recording_path, ignore_errors=True)
+    _announce("project", project_id=project["id"], recording_id=recording_id, user=user, client=client)
     return Response(status_code=204)
 
 
 @app.post("/recordings/{recording_id}/runs/manual", response_model=DetectionRunSummary)
-def runs_create_manual(recording_id: str, user: CurrentUser) -> DetectionRunSummary:
-    _recording_for(recording_id, user, "owner")
-    settings = RunSettings()
-    run = create_run(recording_id, settings)
+def runs_create_manual(recording_id: str, user: CurrentUser, client: SharedClient = None) -> DetectionRunSummary:
+    project, _recording = _recording_for(recording_id, user, "owner")
+    run = create_run(recording_id, RunSettings())
     update_run(run["id"], status="completed", phase="completed", progress=1.0, message="Manual run")
     _emit_run_event(run["id"], phase="completed", level="info", message="Manual run created", progress=1.0)
+    _announce("recording", project_id=project["id"], recording_id=recording_id, run_id=run["id"], user=user, client=client)
     return _serialize_run_summary(get_run(run["id"]))
 
 
 @app.post("/recordings/{recording_id}/runs", response_model=DetectionRunSummary)
-def runs_create(recording_id: str, settings: RunSettings, user: CurrentUser) -> DetectionRunSummary:
+def runs_create(recording_id: str, settings: RunSettings, user: CurrentUser, client: SharedClient = None) -> DetectionRunSummary:
     _require_tools()
-    _project, recording = _recording_for(recording_id, user, "owner")
+    project, recording = _recording_for(recording_id, user, "owner")
     settings = _lock_unavailable_ocr(settings)
     _validate_run_settings_for_recording(recording, settings)
     run = create_run(recording_id, settings)
     _emit_run_event(run["id"], phase="queued", level="info", message="Run queued", progress=0.0)
     _job_manager().start(run["id"], lambda: _run_detection_job(run["id"]))
+    _announce("recording", project_id=project["id"], recording_id=recording_id, run_id=run["id"], user=user, client=client)
     return _serialize_run_summary(get_run(run["id"]))
 
 
@@ -1106,21 +1223,23 @@ def runs_pathway(run_id: str, user: CurrentUser, detail: PathwayDetail = "screen
 
 
 @app.post("/runs/{run_id}/pathway/merge", status_code=204)
-def runs_pathway_merge(run_id: str, payload: PathwayMerge, user: CurrentUser) -> Response:
-    _run_for(run_id, user, "owner")
-    candidates = list_candidates(run_id)
-    ids = {candidate["id"] for candidate in candidates}
-    if payload.source_candidate_id not in ids or payload.target_candidate_id not in ids:
-        raise HTTPException(status_code=422, detail="Choose two screens of the same run.")
-    members = pathway_screen_members(candidates, payload.source_candidate_id, payload.detail)
-    if payload.target_candidate_id not in members:
-        set_candidate_screen_links(run_id, members, payload.target_candidate_id)
+def runs_pathway_merge(run_id: str, payload: PathwayMerge, user: CurrentUser, client: SharedClient = None) -> Response:
+    project, recording, _run = _run_for(run_id, user, "owner")
+    with _one_at_a_time(run_id), _busy(user, client, project["id"], run_id, "merging two screens in this task"):
+        candidates = list_candidates(run_id)
+        ids = {candidate["id"] for candidate in candidates}
+        if payload.source_candidate_id not in ids or payload.target_candidate_id not in ids:
+            raise HTTPException(status_code=422, detail="Choose two screens of the same run.")
+        members = pathway_screen_members(candidates, payload.source_candidate_id, payload.detail)
+        if payload.target_candidate_id not in members:
+            set_candidate_screen_links(run_id, members, payload.target_candidate_id)
+    _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
     return Response(status_code=204)
 
 
 @app.post("/runs/{run_id}/cancel", response_model=DetectionRunSummary)
-def runs_cancel(run_id: str, user: CurrentUser) -> DetectionRunSummary:
-    _project, _recording, run = _run_for(run_id, user, "owner")
+def runs_cancel(run_id: str, user: CurrentUser, client: SharedClient = None) -> DetectionRunSummary:
+    project, recording, run = _run_for(run_id, user, "owner")
     if run["status"] not in ACTIVE_RUN_STATUSES:
         raise HTTPException(status_code=409, detail="Only queued or running jobs can be aborted")
     # Record the request before signalling it: a queued run ends at once, and its final message must not be
@@ -1134,17 +1253,21 @@ def runs_cancel(run_id: str, user: CurrentUser) -> DetectionRunSummary:
         progress=run.get("progress"),
     )
     _job_manager().request_cancel(run_id)
+    _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
     return _serialize_run_summary(get_run(run_id))
 
 
 @app.delete("/runs/{run_id}", status_code=204)
-def runs_delete(run_id: str, user: CurrentUser) -> Response:
+def runs_delete(run_id: str, user: CurrentUser, client: SharedClient = None) -> Response:
     project, recording, run = _run_for(run_id, user, "owner")
     if run["status"] in ACTIVE_RUN_STATUSES:
         raise HTTPException(status_code=409, detail="Abort the run before deleting it")
-    run_path, _frames_path = _run_artifact_paths(project, recording, run_id)
-    delete_run_record(run_id)
-    shutil.rmtree(run_path, ignore_errors=True)
+    # after any change to its steps that is under way, so that nothing writes into it once it is gone
+    with _one_at_a_time(run_id):
+        run_path, _frames_path = _run_artifact_paths(project, recording, run_id)
+        delete_run_record(run_id)
+        shutil.rmtree(run_path, ignore_errors=True)
+    _announce("recording", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
     return Response(status_code=204)
 
 
@@ -1175,29 +1298,70 @@ async def runs_events(run_id: str, websocket: WebSocket, user: MaybeUser) -> Non
 
 @app.patch("/candidates/{candidate_id}", response_model=CandidateFrameResponse)
 def candidates_update(
-    candidate_id: str, payload: CandidateUpdate, user: CurrentUser
+    candidate_id: str, payload: CandidateUpdate, user: CurrentUser, client: SharedClient = None
 ) -> CandidateFrameResponse:
     candidate = get_candidate(candidate_id)
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
-    _run_for(candidate["run_id"], user, "owner", not_found="Candidate not found")
+    run_id = candidate["run_id"]
+    project, recording, _run = _run_for(run_id, user, "owner", not_found="Candidate not found")
     updates = payload.model_dump(exclude_none=True)
+    expected = {field: updates.pop(f"previous_{field}", None) for field in ("title", "notes")}
     if "title" in updates:
         updates["title"] = updates["title"].strip() or None
     if "notes" in updates:
         updates["notes"] = updates["notes"].strip() or None
-    if "screen_link" in updates:
-        link = updates["screen_link"]
-        if link == "auto":
-            updates["screen_link"] = None
-        elif link != "new":
-            other = get_candidate(link)
-            if not other or other["run_id"] != candidate["run_id"] or other["id"] == candidate_id:
-                raise HTTPException(status_code=422, detail="Choose another step of the same run.")
-    if updates.get("screen_kind") == "auto":
-        updates["screen_kind"] = None
-    candidate = update_candidate(candidate_id, **updates)
-    return _serialize_candidate(candidate)
+    with _one_at_a_time(run_id):
+        candidate = get_candidate(candidate_id)
+        if not candidate:
+            raise HTTPException(status_code=404, detail="Candidate not found")
+        if user.is_shared:
+            # Text is not merged: someone else's title or notes, saved after this browser began, stay.
+            for field, before in expected.items():
+                if field in updates and before is not None and before.strip() != (candidate.get(field) or ""):
+                    were = "was" if field == "title" else "were"
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"The {field} of this step {were} changed in another browser meanwhile, so yours {were} not saved.",
+                    )
+        if "screen_link" in updates:
+            link = updates["screen_link"]
+            if link == "auto":
+                updates["screen_link"] = None
+            elif link != "new":
+                other = get_candidate(link)
+                if not other or other["run_id"] != candidate["run_id"] or other["id"] == candidate_id:
+                    raise HTTPException(status_code=422, detail="Choose another step of the same run.")
+        if updates.get("screen_kind") == "auto":
+            updates["screen_kind"] = None
+        serialized = _serialize_candidate(update_candidate(candidate_id, **updates))
+        # still in turn, so that the browsers hear of changes to one step in the order they were made
+        _announce(
+            "candidate",
+            project_id=project["id"],
+            recording_id=recording["id"],
+            run_id=run_id,
+            user=user,
+            client=client,
+            candidate=serialized.model_dump(mode="json"),
+        )
+    return serialized
+
+
+@app.post("/runs/{run_id}/candidates/status", status_code=204)
+def runs_set_candidate_status(
+    run_id: str, payload: CandidateStatusUpdate, user: CurrentUser, client: SharedClient = None
+) -> Response:
+    """Accept, reject or reset several steps of a task at once: one change instead of one per step."""
+    project, recording, _run = _run_for(run_id, user, "owner")
+    with _one_at_a_time(run_id):
+        known = {candidate["id"] for candidate in list_candidates(run_id)}
+        wanted = list(dict.fromkeys(payload.candidate_ids))
+        if any(candidate_id not in known for candidate_id in wanted):
+            raise HTTPException(status_code=422, detail="Some of these steps are not in this task (any more).")
+        set_candidate_statuses(run_id, wanted, payload.status)
+        _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    return Response(status_code=204)
 
 
 def _insert_manual_candidate(project: dict, recording: dict, run: dict, timestamp_ms: int) -> str:
@@ -1210,12 +1374,13 @@ def _insert_manual_candidate(project: dict, recording: dict, run: dict, timestam
 
     candidate_id = uuid4().hex
     timestamp_tc = display_timecode(timestamp_ms)
-    image_path = frames_path / f"manual-{candidate_id[:8]}__{slug_timecode(timestamp_ms)}.png"
+    image_path = frames_path / f"manual-{candidate_id}__{slug_timecode(timestamp_ms)}.png"
 
     try:
         extract_frame(_recording_video_path(recording), image_path, timestamp_ms)
         fingerprint = fingerprint_image(image_path)
     except (VideoToolError, FileNotFoundError, OSError) as exc:
+        image_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Could not add a manual step at {timestamp_tc}. Try seeking to a nearby frame.") from exc
     now = utc_now()
     manual_candidate = {
@@ -1243,10 +1408,12 @@ def _insert_manual_candidate(project: dict, recording: dict, run: dict, timestam
         "updated_at": now,
     }
 
-    updated_candidates = _resequence_candidates([*list_candidates(run_id), manual_candidate], frozenset({candidate_id}))
-    replace_candidates(run_id, recording["id"], updated_candidates)
-    clear_export_bundle_for_run(run_id)
-    update_run(run_id, candidate_count=len(updated_candidates))
+    try:
+        updated_candidates = _resequence_candidates([*list_candidates(run_id), manual_candidate], frozenset({candidate_id}))
+        replace_candidates(run_id, recording["id"], updated_candidates)
+    except Exception:
+        image_path.unlink(missing_ok=True)
+        raise
     _emit_run_event(
         run_id,
         phase=run.get("phase") or "completed",
@@ -1259,15 +1426,18 @@ def _insert_manual_candidate(project: dict, recording: dict, run: dict, timestam
 
 @app.post("/runs/{run_id}/candidates/manual", response_model=CandidateFrameResponse)
 def runs_add_manual_candidate(
-    run_id: str, payload: ManualCandidateCreate, user: CurrentUser
+    run_id: str, payload: ManualCandidateCreate, user: CurrentUser, client: SharedClient = None
 ) -> CandidateFrameResponse:
     project, recording, run = _run_for(run_id, user, "owner")
     if run["status"] not in {"completed", "failed", "cancelled"}:
         raise HTTPException(status_code=409, detail="Manual steps can only be added to completed, failed, or cancelled runs")
     if payload.timestamp_ms >= recording["duration_ms"]:
         raise HTTPException(status_code=422, detail="Manual step timestamp must be inside the recording duration")
-    candidate_id = _insert_manual_candidate(project, recording, run, payload.timestamp_ms)
-    manual_row = next(candidate for candidate in list_candidates(run_id) if candidate["id"] == candidate_id)
+    # Adding a step renumbers every step: one change at a time, so no decision made meanwhile is written back.
+    with _one_at_a_time(run_id), _busy(user, client, project["id"], run_id, "adding a step by hand to this task"):
+        candidate_id = _insert_manual_candidate(project, recording, get_run(run_id) or run, payload.timestamp_ms)
+        manual_row = next(candidate for candidate in list_candidates(run_id) if candidate["id"] == candidate_id)
+    _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
     return _serialize_candidate(manual_row)
 
 
@@ -1276,7 +1446,7 @@ def _is_reviewed(candidate: dict) -> bool:
 
 
 @app.post("/runs/{run_id}/review-from", response_model=ReviewCarryOverResult)
-def runs_carry_over_review(run_id: str, payload: ReviewCarryOver, user: CurrentUser) -> ReviewCarryOverResult:
+def runs_carry_over_review(run_id: str, payload: ReviewCarryOver, user: CurrentUser, client: SharedClient = None) -> ReviewCarryOverResult:
     """Bring the review of an earlier run of the same recording over to this one, after a run with other
     settings: decisions, titles, notes and screen choices go to the steps they were paired with (the pairs the
     comparison showed), and steps added by hand are added again. Only what is still empty here is filled in, so
@@ -1287,74 +1457,94 @@ def runs_carry_over_review(run_id: str, payload: ReviewCarryOver, user: CurrentU
         raise HTTPException(status_code=422, detail="Choose another run to bring the review from.")
     if source_recording["id"] != recording["id"]:
         raise HTTPException(status_code=422, detail="Both runs must be of the same recording.")
-    if run["status"] != "completed" or source_run["status"] != "completed":
-        raise HTTPException(status_code=409, detail="Both runs must be completed.")
+    with _one_at_a_time(run_id), _busy(user, client, project["id"], run_id, "bringing the review of another run over to this task"):
+        run = get_run(run_id) or run
+        source_run = get_run(source_run["id"]) or source_run
+        if run["status"] != "completed" or source_run["status"] != "completed":
+            raise HTTPException(status_code=409, detail="Both runs must be completed.")
 
-    source = {candidate["id"]: candidate for candidate in list_candidates(source_run["id"])}
-    target_ids = {candidate["id"] for candidate in list_candidates(run_id)}
-    pairs: dict[str, str] = {}
-    used_targets: set[str] = set()
-    for pair in payload.pairs:
-        if pair.source_candidate_id not in source or pair.target_candidate_id not in target_ids:
-            raise HTTPException(status_code=422, detail="A pair names a step that is not in these runs.")
-        if pair.source_candidate_id in pairs or pair.target_candidate_id in used_targets:
-            raise HTTPException(status_code=422, detail="Each step can be paired once.")
-        pairs[pair.source_candidate_id] = pair.target_candidate_id
-        used_targets.add(pair.target_candidate_id)
+        source = {candidate["id"]: candidate for candidate in list_candidates(source_run["id"])}
+        target_ids = {candidate["id"] for candidate in list_candidates(run_id)}
+        pairs: dict[str, str] = {}
+        used_targets: set[str] = set()
+        for pair in payload.pairs:
+            if pair.source_candidate_id not in source or pair.target_candidate_id not in target_ids:
+                raise HTTPException(status_code=422, detail="A pair names a step that is not in these runs.")
+            if pair.source_candidate_id in pairs or pair.target_candidate_id in used_targets:
+                raise HTTPException(status_code=422, detail="Each step can be paired once.")
+            pairs[pair.source_candidate_id] = pair.target_candidate_id
+            used_targets.add(pair.target_candidate_id)
 
-    # Steps added by hand have no counterpart among the detected ones: add them again at the same moment.
-    added_manual = 0
-    for candidate in sorted(source.values(), key=lambda item: item["timestamp_ms"]):
-        if candidate["id"] in pairs or (candidate.get("candidate_origin") or "detected") != "manual":
-            continue
-        if candidate["timestamp_ms"] >= recording["duration_ms"]:
-            continue
-        pairs[candidate["id"]] = _insert_manual_candidate(project, recording, get_run(run_id) or run, candidate["timestamp_ms"])
-        added_manual += 1
+        # Steps added by hand have no counterpart among the detected ones: add them again at the same moment.
+        added_manual = 0
+        for candidate in sorted(source.values(), key=lambda item: item["timestamp_ms"]):
+            if candidate["id"] in pairs or (candidate.get("candidate_origin") or "detected") != "manual":
+                continue
+            if candidate["timestamp_ms"] >= recording["duration_ms"]:
+                continue
+            pairs[candidate["id"]] = _insert_manual_candidate(project, recording, get_run(run_id) or run, candidate["timestamp_ms"])
+            added_manual += 1
 
-    targets = {candidate["id"]: candidate for candidate in list_candidates(run_id)}
-    counts = {"decisions": 0, "titles": 0, "notes": 0, "screen_choices": 0}
-    for source_id, target_id in pairs.items():
-        before, after = source[source_id], targets[target_id]
-        updates: dict[str, Any] = {}
-        if after["status"] == "pending" and before["status"] in {"accepted", "rejected"}:
-            updates["status"] = before["status"]
-            counts["decisions"] += 1
-        for field, counter in (("title", "titles"), ("notes", "notes")):
-            if not after.get(field) and before.get(field):
-                updates[field] = before[field]
-                counts[counter] += 1
-        choice = False
-        if after.get("screen_kind") is None and before.get("screen_kind"):
-            updates["screen_kind"] = before["screen_kind"]
-            choice = True
-        link = before.get("screen_link")
-        if after.get("screen_link") is None and link:
-            mapped = "new" if link == "new" else pairs.get(link)
-            if mapped and mapped != target_id:
-                updates["screen_link"] = mapped
+        targets = {candidate["id"]: candidate for candidate in list_candidates(run_id)}
+        counts = {"decisions": 0, "titles": 0, "notes": 0, "screen_choices": 0}
+        for source_id, target_id in pairs.items():
+            before, after = source[source_id], targets[target_id]
+            updates: dict[str, Any] = {}
+            if after["status"] == "pending" and before["status"] in {"accepted", "rejected"}:
+                updates["status"] = before["status"]
+                counts["decisions"] += 1
+            for field, counter in (("title", "titles"), ("notes", "notes")):
+                if not after.get(field) and before.get(field):
+                    updates[field] = before[field]
+                    counts[counter] += 1
+            choice = False
+            if after.get("screen_kind") is None and before.get("screen_kind"):
+                updates["screen_kind"] = before["screen_kind"]
                 choice = True
-        counts["screen_choices"] += int(choice)
-        if updates:
-            update_candidate(target_id, **updates)
+            link = before.get("screen_link")
+            if after.get("screen_link") is None and link:
+                mapped = "new" if link == "new" else pairs.get(link)
+                if mapped and mapped != target_id:
+                    updates["screen_link"] = mapped
+                    choice = True
+            counts["screen_choices"] += int(choice)
+            if updates:
+                update_candidate(target_id, **updates)
 
-    unmatched = sum(1 for candidate in source.values() if candidate["id"] not in pairs and _is_reviewed(candidate))
-    _emit_run_event(
-        run_id,
-        phase=run.get("phase") or "completed",
-        level="info",
-        message=f"Brought over the review of an earlier run ({counts['decisions']} decisions)",
-        progress=run.get("progress"),
-    )
-    return ReviewCarryOverResult(**counts, added_manual=added_manual, unmatched=unmatched)
+        unmatched = sum(1 for candidate in source.values() if candidate["id"] not in pairs and _is_reviewed(candidate))
+        _emit_run_event(
+            run_id,
+            phase=run.get("phase") or "completed",
+            level="info",
+            message=f"Brought over the review of an earlier run ({counts['decisions']} decisions)",
+            progress=run.get("progress"),
+        )
+        result = ReviewCarryOverResult(**counts, added_manual=added_manual, unmatched=unmatched)
+    _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    return result
 
 
 @app.post("/runs/{run_id}/export")
-def runs_export(run_id: str, payload: ExportRequest, user: CurrentUser) -> dict:
+def runs_export(run_id: str, payload: ExportRequest, user: CurrentUser, client: SharedClient = None) -> dict:
     project, recording, run = _run_for(run_id, user, "owner")
+    # In a shared account every export stays downloadable (until its task is deleted), so that two people
+    # exporting the same task at once each get their own.
+    with _busy(user, client, project["id"], run_id, "exporting this task"):
+        bundle = _export_run(project, recording, run, payload, retain=user.is_shared)
+    _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    return bundle
+
+
+def _export_run(project: dict, recording: dict, run: dict, payload: ExportRequest, *, retain: bool) -> dict:
+    run_id = run["id"]
     if run["status"] != "completed":
         raise HTTPException(status_code=409, detail="Only completed runs can be exported")
     export_mode = payload.mode
+    candidates = list_candidates(run_id)
+    if export_mode == "auto":
+        export_mode = "accepted" if any(candidate["status"] != "pending" for candidate in candidates) else "all"
+        if export_mode == "accepted" and not any(candidate["status"] == "accepted" for candidate in candidates):
+            raise HTTPException(400, "This reviewed task has no accepted candidates to export.")
     _set_run_state(
         run_id,
         status="completed",
@@ -1363,7 +1553,6 @@ def runs_export(run_id: str, payload: ExportRequest, user: CurrentUser) -> dict:
         message="Preparing export bundle",
         level="info",
     )
-    candidates = list_candidates(run_id)
     bundle_id = uuid4().hex
     try:
         output_dir, zip_path, item_count = create_export_bundle(
@@ -1374,7 +1563,12 @@ def runs_export(run_id: str, payload: ExportRequest, user: CurrentUser) -> dict:
             candidates=candidates,
             mode=export_mode,
         )
-    except ValueError as exc:
+        bundle = create_export_bundle_record(run_id, output_dir, zip_path, item_count, bundle_id=bundle_id, retain=retain)
+    except Exception as exc:
+        run_path, _frames = _run_artifact_paths(project, recording, run_id)
+        partial = run_path / "exports" / bundle_id
+        shutil.rmtree(partial, ignore_errors=True)
+        partial.with_suffix(".zip").unlink(missing_ok=True)
         _set_run_state(
             run_id,
             status="completed",
@@ -1384,8 +1578,9 @@ def runs_export(run_id: str, payload: ExportRequest, user: CurrentUser) -> dict:
             level="info",
             emit_event=False,
         )
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    bundle = create_export_bundle_record(run_id, output_dir, zip_path, item_count)
+        if isinstance(exc, ValueError):
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise
     _set_run_state(
         run_id,
         status="completed",

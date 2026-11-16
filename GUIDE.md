@@ -676,6 +676,34 @@ the DOI to cite.
   settings. Compare the `steps.csv` files side by side.
 - **Changes over time:** record the same task at different dates and compare the exported steps.
 
+### Working under a shared account
+
+An administrator can give a regular account the `shared` tag, for a group that works under one login: up to
+about 30 people at once, each in their own browser. Administrator accounts cannot have the tag. Everyone can
+create projects, import videos, run analyses and review at the same time, and nothing has to be reserved first.
+
+What one person does shows in everyone else's browser within a moment, without reloading: new projects and
+videos, analyses starting and finishing, steps accepted, rejected, titled or annotated, and changes to the
+pathway.
+
+Where two people could get in each other's way, Stepthrough shows it in orange with moving stripes:
+
+- **a step someone is writing in.** While someone has the title or notes of a step open in a field, the others
+  see "being edited in another browser" on that step, and its title and notes are read-only for them until that
+  person leaves the field. Accepting and rejecting the step still work. If two people do save different text at
+  the same moment, the first is kept, and the second person sees a message with their own text in it, so
+  nothing is lost.
+- **a task being changed as a whole.** Adding a step by hand (which renumbers the steps), bringing a review over
+  from another run, merging two screens of the pathway and exporting take a moment. Meanwhile the others see a
+  **busy** banner on the task and a **busy** mark next to it under **tasks**; their own changes to the task wait
+  their turn and are then saved as usual, and it cannot be deleted until the change is done.
+- **a video on its way in.** A video someone else is uploading appears on the import page and under **videos**
+  with how far it is, and joins the list when it is in.
+
+A rename made from a name that someone else changed meanwhile is refused, with the new name in the message.
+Every export of a shared account stays downloadable until its task is deleted, so two people exporting the same
+task at the same time each get their own. A browser that loses its connection catches up when it is back.
+
 ### Privacy and consent
 
 Screen recordings often show names, messages, notifications and account details. Ask for consent before you

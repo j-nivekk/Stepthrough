@@ -64,7 +64,8 @@ settings, Stepthrough needs three things from the web server:
 
 - an upload limit (`client_max_body_size`) at least as large as `STEPTHROUGH_MAX_UPLOAD_MB`;
 - WebSocket upgrades (the `Upgrade` and `Connection` headers), which carry live progress while a run works;
-- long timeouts and no request buffering, so large uploads and long runs are not cut off.
+- long timeouts and no request buffering, so large uploads and long runs are not cut off. Browsers of a shared
+  account also wait up to 25 seconds at a time for each other's changes (`/me/live`), so the read timeout must be longer.
 
 The example also does three things for security. It **replaces** `X-Forwarded-For` with the visitor's address
 instead of adding to it, so login limits count real addresses (another web server must do the same). It limits

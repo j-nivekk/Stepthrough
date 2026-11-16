@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { absoluteApiUrl } from '../api';
+import { useLive } from '../features/live/LiveProvider';
 import { candidateLabelType, transitionLabelText, type SimilarLink } from '../lib/analysis';
+import { stepEditor } from '../lib/live';
 import type { StepHoverState } from '../features/analysis/useHoverClips';
 import type { CandidateChanges, CandidateFrame, CandidateStatus } from '../types';
 import { ScreenChoice, screenChoiceSummary } from './ScreenChoice';
@@ -75,26 +77,87 @@ function CandidateLabel({ candidate }: { candidate: CandidateFrame }) {
   );
 }
 
-function useAnnotationDrafts(candidate: CandidateFrame, onUpdate: CandidateCardProps['onUpdate']) {
-  const [title, setTitle] = useState(candidate.title ?? '');
-  const [notes, setNotes] = useState(candidate.notes ?? '');
+type TextField = 'title' | 'notes';
+
+/**
+ * The title and notes being typed. Saved text that arrives meanwhile (from another browser of a shared account,
+ * or this one's own save) is taken in, but never over typing that is not saved yet. A change is sent with the
+ * text it began from, so that in a shared account it is refused rather than written over text saved elsewhere.
+ */
+function useAnnotationDrafts(candidate: CandidateFrame, onUpdate: CandidateCardProps['onUpdate'], locked: boolean) {
+  const saved = { title: candidate.title ?? '', notes: candidate.notes ?? '' };
+  const [drafts, setDrafts] = useState(saved);
+  const base = useRef(saved);
+  const typing = useRef({ title: false, notes: false });
+  const stepId = useRef(candidate.id);
 
   useEffect(() => {
-    setTitle(candidate.title ?? '');
-    setNotes(candidate.notes ?? '');
+    if (stepId.current !== candidate.id) {
+      stepId.current = candidate.id;
+      typing.current = { title: false, notes: false };
+    }
+    const next = { title: candidate.title ?? '', notes: candidate.notes ?? '' };
+    for (const field of ['title', 'notes'] as const) {
+      if (!typing.current[field]) base.current = { ...base.current, [field]: next[field] };
+    }
+    setDrafts((current) => ({
+      title: typing.current.title ? current.title : next.title,
+      notes: typing.current.notes ? current.notes : next.notes,
+    }));
   }, [candidate.id, candidate.title, candidate.notes]);
 
-  function commit(field: 'title' | 'notes', value: string) {
-    const trimmed = value.trim();
-    const currentValue = field === 'title' ? candidate.title ?? '' : candidate.notes ?? '';
-    if (trimmed === currentValue.trim()) {
-      return;
-    }
-    onUpdate({ [field]: trimmed });
+  function edit(field: TextField, value: string) {
+    if (locked) return;
+    typing.current = { ...typing.current, [field]: true };
+    setDrafts((current) => ({ ...current, [field]: value }));
   }
 
-  return { title, setTitle, notes, setNotes, commit };
+  function commit(field: TextField, value: string) {
+    typing.current = { ...typing.current, [field]: false };
+    const trimmed = value.trim();
+    const current = (field === 'title' ? candidate.title : candidate.notes) ?? '';
+    if (locked || trimmed === current.trim()) {
+      setDrafts((drafts) => ({ ...drafts, [field]: current }));
+      return;
+    }
+    onUpdate(field === 'title' ? { title: trimmed, previous_title: base.current.title } : { notes: trimmed, previous_notes: base.current.notes });
+    if (base.current[field] !== current) {
+      // Saved elsewhere since this browser began: in a shared account the change is refused, so the field shows
+      // the saved text again (this browser's text goes into the message about it).
+      base.current = { ...base.current, [field]: current };
+      setDrafts((drafts) => ({ ...drafts, [field]: current }));
+    }
+  }
+
+  return {
+    title: drafts.title,
+    setTitle: (value: string) => edit('title', value),
+    notes: drafts.notes,
+    setNotes: (value: string) => edit('notes', value),
+    commit,
+  };
 }
+
+/**
+ * In a shared account, who is typing a step's title and notes: this browser claims the step while one of its text
+ * fields has the focus, and while another browser holds it, the fields here are read-only.
+ */
+function useStepEditing(candidate: CandidateFrame) {
+  const { enabled, clientId, presence, setPresence } = useLive();
+  const key = `editing:${candidate.id}`;
+  const editor = enabled ? stepEditor(presence, candidate.run_id, candidate.id) : null;
+  const lockedElsewhere = editor !== null && editor !== clientId;
+  useEffect(() => () => setPresence(key, null), [key, setPresence]);
+  return {
+    lockedElsewhere,
+    onFocusField: () => {
+      if (!lockedElsewhere) setPresence(key, { kind: 'editing', run_id: candidate.run_id, candidate_id: candidate.id });
+    },
+    onBlurField: () => setPresence(key, null),
+  };
+}
+
+const EDITED_ELSEWHERE = 'being edited in another browser';
 
 interface CandidateDecisionButtonProps {
   intent: CandidateStatus;
@@ -224,7 +287,8 @@ export function CandidateCard({
   hover,
 }: CandidateCardProps) {
   const liveSlotRef = useRef<HTMLDivElement | null>(null);
-  const { title, setTitle, notes, setNotes, commit: commitTextField } = useAnnotationDrafts(candidate, onUpdate);
+  const editing = useStepEditing(candidate);
+  const { title, setTitle, notes, setNotes, commit: commitTextField } = useAnnotationDrafts(candidate, onUpdate, editing.lockedElsewhere);
   // The title and notes fields open only on request, so a selected card can still be just a screenshot.
   // Saved text stays visible as plain text while the fields are closed.
   const hasAnnotation = Boolean(candidate.title || candidate.notes);
@@ -278,6 +342,11 @@ export function CandidateCard({
         </div>
       </div>
       <div className="candidate-body">
+        {editing.lockedElsewhere ? (
+          <p className="live-band" role="status">
+            {EDITED_ELSEWHERE}
+          </p>
+        ) : null}
         <div className="candidate-headline">
           <div className="candidate-heading-copy">
             <strong className="candidate-title">
@@ -405,10 +474,16 @@ export function CandidateCard({
               <span>step title</span>
               <input
                 className="candidate-field"
-                onBlur={(event) => commitTextField('title', event.target.value)}
+                onBlur={(event) => {
+                  commitTextField('title', event.target.value);
+                  editing.onBlurField();
+                }}
                 onChange={(event) => setTitle(event.target.value)}
                 onClick={(event) => event.stopPropagation()}
+                onFocus={editing.onFocusField}
                 placeholder="optional custom label"
+                readOnly={editing.lockedElsewhere}
+                title={editing.lockedElsewhere ? EDITED_ELSEWHERE : undefined}
                 value={title}
               />
             </label>
@@ -417,10 +492,16 @@ export function CandidateCard({
               <span>notes</span>
               <textarea
                 className="candidate-field candidate-notes-field"
-                onBlur={(event) => commitTextField('notes', event.target.value)}
+                onBlur={(event) => {
+                  commitTextField('notes', event.target.value);
+                  editing.onBlurField();
+                }}
                 onChange={(event) => setNotes(event.target.value)}
                 onClick={(event) => event.stopPropagation()}
+                onFocus={editing.onFocusField}
                 placeholder="add observation, annotation note, or coding hint"
+                readOnly={editing.lockedElsewhere}
+                title={editing.lockedElsewhere ? EDITED_ELSEWHERE : undefined}
                 value={notes}
               />
             </label>
@@ -471,13 +552,15 @@ export function CandidateRow({
   hover,
 }: CandidateRowProps) {
   const noSlot = useRef<HTMLElement | null>(null);
-  const { title, setTitle, notes, setNotes, commit } = useAnnotationDrafts(candidate, onUpdate);
+  const editing = useStepEditing(candidate);
+  const locked = editing.lockedElsewhere;
+  const { title, setTitle, notes, setNotes, commit } = useAnnotationDrafts(candidate, onUpdate, locked);
   const onScreenMs = candidate.score_breakdown?.dwell_after_ms;
   const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
 
   return (
     <div
-      className={`candidate-row ${candidate.status} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}`}
+      className={`candidate-row ${candidate.status} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${locked ? 'edited-elsewhere' : ''}`}
       id={`candidate-${candidate.id}`}
       onClick={onActivate}
       onFocus={onActivate}
@@ -540,10 +623,16 @@ export function CandidateRow({
         <input
           aria-label={`title of step ${candidate.detector_index}`}
           className="candidate-field"
-          onBlur={(event) => commit('title', event.target.value)}
+          onBlur={(event) => {
+            commit('title', event.target.value);
+            editing.onBlurField();
+          }}
           onChange={(event) => setTitle(event.target.value)}
           onClick={stop}
-          placeholder="step title"
+          onFocus={editing.onFocusField}
+          placeholder={locked ? EDITED_ELSEWHERE : 'step title'}
+          readOnly={locked}
+          title={locked ? EDITED_ELSEWHERE : undefined}
           value={title}
         />
       </div>
@@ -551,11 +640,16 @@ export function CandidateRow({
         <input
           aria-label={`notes on step ${candidate.detector_index}`}
           className="candidate-field"
-          onBlur={(event) => commit('notes', event.target.value)}
+          onBlur={(event) => {
+            commit('notes', event.target.value);
+            editing.onBlurField();
+          }}
           onChange={(event) => setNotes(event.target.value)}
           onClick={stop}
-          placeholder="notes"
-          title={notes || undefined}
+          onFocus={editing.onFocusField}
+          placeholder={locked ? EDITED_ELSEWHERE : 'notes'}
+          readOnly={locked}
+          title={locked ? EDITED_ELSEWHERE : notes || undefined}
           value={notes}
         />
       </div>

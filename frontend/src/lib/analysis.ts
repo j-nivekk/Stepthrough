@@ -34,6 +34,7 @@ export interface AnalysisTaskGroup {
 
 export interface PendingManualMark {
   id: string;
+  runId: string;
   timestampMs: number;
 }
 

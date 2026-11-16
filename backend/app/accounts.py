@@ -33,7 +33,7 @@ from fastapi import Depends, HTTPException
 from starlette.requests import HTTPConnection
 
 from .config import AuthMode, public_url
-from .database import ADMIN_TAG, LOCAL_USER_ID
+from .database import ADMIN_TAG, LOCAL_USER_ID, SHARED_TAG
 from .repository import (
     create_session,
     delete_session,
@@ -95,6 +95,10 @@ class User:
     @property
     def is_admin(self) -> bool:
         return ADMIN_TAG in self.tags
+
+    @property
+    def is_shared(self) -> bool:
+        return SHARED_TAG in self.tags and not self.is_admin
 
     @property
     def is_builtin(self) -> bool:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from app import database
+from app import database, repository
 
 OLD_SCHEMA = """
 CREATE TABLE projects (
@@ -41,6 +41,14 @@ CREATE TABLE detection_runs (
     updated_at TEXT NOT NULL,
     export_bundle_id TEXT
 );
+CREATE TABLE export_bundles (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL UNIQUE REFERENCES detection_runs(id) ON DELETE CASCADE,
+    output_dir TEXT NOT NULL,
+    zip_path TEXT NOT NULL,
+    item_count INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -78,6 +86,10 @@ def test_init_db_migrates_existing_detection_runs(monkeypatch, tmp_path) -> None
                 None,
             ),
         )
+        conn.execute(
+            "INSERT INTO export_bundles VALUES (?, ?, ?, ?, ?, ?)",
+            ('bundle-1', 'run-1', 'old-bundle', 'old-bundle.zip', 1, '2026-03-12T00:01:00+00:00'),
+        )
         conn.commit()
 
     database.init_db()
@@ -103,6 +115,7 @@ def test_init_db_migrates_existing_detection_runs(monkeypatch, tmp_path) -> None
         assert members == [('project-1', 'local', 'owner')]
 
     database.init_db()  # running it again changes nothing
+    assert repository.get_export_bundle_for_run('run-1')['zip_path'] == 'old-bundle.zip'
     with sqlite3.connect(db_path) as conn:
         assert conn.execute('SELECT COUNT(*) FROM users').fetchone()[0] == 1
         assert conn.execute('SELECT COUNT(*) FROM project_members').fetchone()[0] == 1

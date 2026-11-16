@@ -22,7 +22,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from .accounts import MAX_PASSWORD_LENGTH, UserLink, new_user_link, password_problem, set_password
-from .database import LOCAL_USER_ID
+from .database import ADMIN_TAG, LOCAL_USER_ID, SHARED_TAG
 from .repository import (
     create_user,
     delete_expired_sessions_and_links,
@@ -87,6 +87,13 @@ def split_tags(text: str | None) -> list[str]:
     return clean_tags(re.split(r"[,\s]+", text or ""))
 
 
+def account_tags(raw: Iterable[str]) -> list[str]:
+    tags = clean_tags(raw)
+    if ADMIN_TAG in tags and SHARED_TAG in tags:
+        raise AccountError("Administrator accounts cannot have the shared tag.")
+    return tags
+
+
 def clean_date(raw: str | date | None) -> str | None:
     """A deletion date as YYYY-MM-DD, from a date or text such as ``2027-02-01`` (a time after it is ignored)."""
     if raw is None or isinstance(raw, date):
@@ -119,7 +126,7 @@ def create_account(
     row = create_user(
         name,
         display_name=clean_display_name(display_name),
-        tags=clean_tags(tags),
+        tags=account_tags(tags),
         delete_after=clean_date(delete_after),
         notes=(notes or "").strip() or None,
     )

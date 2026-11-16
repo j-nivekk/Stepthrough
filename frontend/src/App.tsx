@@ -28,6 +28,7 @@ import {
   saveRunSettings,
   forgetRunSettings,
   carryOverReview,
+  setCandidateStatuses,
   updateCandidate,
   updateProject,
   updateRecording,
@@ -40,6 +41,7 @@ import { UsersScreen } from './features/account/UsersScreen';
 import { PerformanceMonitor } from './components/PerformanceMonitor';
 import { ViewportWarning } from './components/ViewportWarning';
 import { AnalysisScreen } from './features/analysis/AnalysisScreen';
+import { useLive } from './features/live/LiveProvider';
 import { ImportScreen } from './features/import/ImportScreen';
 import { EntryScreen } from './features/projects/EntryScreen';
 import {
@@ -157,6 +159,7 @@ function App({ session, onSessionChange }: AppProps) {
   // With password logins, who is logged in shows next to settings; the desktop app has one built-in user.
   const accountUser = session?.mode === 'password' ? sessionUser : null;
   const isAdmin = sessionUser?.is_admin ?? true;
+  const isShared = Boolean(accountUser && !accountUser.is_admin && accountUser.tags.includes('shared'));
   const [viewportSize, setViewportSize] = useState(() => ({
     height: typeof window === 'undefined' ? 900 : window.innerHeight,
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
@@ -234,13 +237,15 @@ function App({ session, onSessionChange }: AppProps) {
   });
   const runDetailQuery = useQuery({
     queryKey: ['run', selectedRunId],
-    queryFn: () => getRun(selectedRunId as string),
+    queryFn: ({ signal }) => getRun(selectedRunId as string, signal),
     enabled: Boolean(selectedRunId),
     refetchInterval: (query) => {
       const run = query.state.data as RunDetail | undefined;
       return run && activeRunStatuses.includes(run.summary.status) ? 2000 : false;
     },
   });
+  // In a shared account the other browsers see what this one uploads (see LiveProvider).
+  const { setPresence } = useLive();
 
   const projectRecordings = projectDetailQuery.data?.recordings ?? [];
   const analysisRecordingQueries = useQueries({
@@ -268,6 +273,17 @@ function App({ session, onSessionChange }: AppProps) {
 
     setSettingsFeedback('');
   }, [selectedProjectId]);
+
+  useEffect(() => {
+    if (!isShared || !(projectDetailQuery.error instanceof ApiError) || projectDetailQuery.error.status !== 404) {
+      return;
+    }
+    setSelectedProjectId(null);
+    setSelectedRecordingId(null);
+    setSelectedRunId(null);
+    setPendingTaskNavigation(null);
+    setAppError('This project is no longer available.');
+  }, [isShared, projectDetailQuery.error]);
 
   // A project opens with the settings saved for it, or else the person's own defaults; again once those have
   // loaded. Saving, or fetching them again later, leaves the settings on screen alone.
@@ -677,7 +693,8 @@ function App({ session, onSessionChange }: AppProps) {
   });
 
   const updateProjectMutation = useMutation({
-    mutationFn: ({ name, projectId }: { name: string; projectId: string }) => updateProject(projectId, name),
+    mutationFn: ({ name, previousName, projectId }: { name: string; previousName: string; projectId: string }) =>
+      updateProject(projectId, name, previousName),
     onSuccess: (project) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['project', project.id] });
@@ -782,18 +799,27 @@ function App({ session, onSessionChange }: AppProps) {
       const controller = new AbortController();
       uploadControllers.current.set(localId, controller);
       let shown = -1;
+      // In a shared account the other browsers show this upload while it lasts, in steps of a tenth.
+      const presenceKey = `upload:${localId}`;
+      const announce = (progress: number) =>
+        setPresence(presenceKey, { kind: 'uploading', project_id: projectId, name: filename || file.name, progress });
+      announce(0);
       return importRecording(projectId, file, filename, {
         signal: controller.signal,
         onProgress: (fraction) => {
           // one update per whole percent is plenty
           const percent = Math.floor(fraction * 100);
           if (percent === shown) return;
+          if (Math.floor(percent / 10) !== Math.floor(shown / 10)) announce(Math.floor(percent / 10) / 10);
           shown = percent;
           setImportQueue((current) =>
             current.map((item) => (item.localId === localId && item.status === 'uploading' ? { ...item, progress: fraction } : item)),
           );
         },
-      }).finally(() => uploadControllers.current.delete(localId));
+      }).finally(() => {
+        uploadControllers.current.delete(localId);
+        setPresence(presenceKey, null);
+      });
     },
     onSuccess: (recording, variables) => {
       setImportQueue((current) => markImportUploaded(current, variables.localId, recording));
@@ -857,8 +883,8 @@ function App({ session, onSessionChange }: AppProps) {
   }, [importQueue]);
 
   const updateRecordingMutation = useMutation({
-    mutationFn: ({ filename, recordingId }: { filename: string; recordingId: string }) =>
-      updateRecording(recordingId, filename),
+    mutationFn: ({ filename, previousFilename, recordingId }: { filename: string; previousFilename: string; recordingId: string }) =>
+      updateRecording(recordingId, filename, previousFilename),
     onSuccess: (recording) => {
       setImportQueue((current) =>
         current.map((item) =>
@@ -899,6 +925,7 @@ function App({ session, onSessionChange }: AppProps) {
     mutationFn: ({ recordingId, settings }: { recordingId: string; settings: RunSettings }) =>
       createRun(recordingId, settings),
     onSuccess: (run) => {
+      rememberNewRun(run);
       setSelectedRunId(run.id);
       setLiveMessage('queued detection job.');
       void refreshRunQueries(run.id, run.recording_id);
@@ -941,7 +968,17 @@ function App({ session, onSessionChange }: AppProps) {
     onSuccess: (candidate) => {
       return refreshRunQueries(candidate.run_id, candidate.recording_id);
     },
-    onError: (error: Error) => setAppError(error.message),
+    onError: (error: Error, { payload }) => {
+      // In a shared account, text saved in another browser meanwhile is kept and shown here; this browser's text
+      // goes into the message, so it is not lost.
+      const text = payload.title ?? payload.notes;
+      if (error instanceof ApiError && error.status === 409 && text) {
+        setAppError(`${error.message} Your text: “${text}”`);
+        if (selectedRunId) void queryClient.invalidateQueries({ queryKey: ['run', selectedRunId] });
+        return;
+      }
+      setAppError(error.message);
+    },
   });
 
   const createManualCandidateMutation = useMutation({
@@ -961,11 +998,19 @@ function App({ session, onSessionChange }: AppProps) {
   const createManualRunMutation = useMutation({
     mutationFn: (recordingId: string) => createManualRun(recordingId),
     onSuccess: async (run) => {
+      rememberNewRun(run);
       setSelectedRunId(run.id);
       await refreshRunQueries(run.id, run.recording_id);
     },
     onError: (error: Error) => setAppError(error.message),
   });
+
+  function rememberNewRun(run: RunSummary) {
+    queryClient.setQueriesData<RecordingDetail>({ queryKey: ['recording', run.recording_id] }, (current) => {
+      if (!current || current.runs.some(({ id }) => id === run.id)) return current;
+      return { ...current, runs: [run, ...current.runs] };
+    });
+  }
 
   const exportRunMutation = useMutation({
     mutationFn: async ({ downloadName, mode, runId }: { downloadName?: string; mode: ExportMode; runId: string }) => {
@@ -1112,7 +1157,7 @@ function App({ session, onSessionChange }: AppProps) {
   async function handleCreateManualRun(recordingId: string) {
     clearAnalysisMessages();
     setSelectedRecordingId(recordingId);
-    await createManualRunMutation.mutateAsync(recordingId);
+    return createManualRunMutation.mutateAsync(recordingId);
   }
 
   /** Ask before deleting a recording: it takes every run, screenshot and export made from it along. */
@@ -1147,24 +1192,24 @@ function App({ session, onSessionChange }: AppProps) {
     deleteProjectMutation.mutate({ projectId });
   }
 
-  async function handleRenameProject(projectId: string, name: string) {
+  async function handleRenameProject(projectId: string, name: string, previousName: string) {
     clearAnalysisMessages();
-    await updateProjectMutation.mutateAsync({ name, projectId });
+    await updateProjectMutation.mutateAsync({ name, previousName, projectId });
   }
 
-  async function handleRenameRecording(recordingId: string, filename: string) {
+  async function handleRenameRecording(recordingId: string, filename: string, previousFilename: string) {
     clearAnalysisMessages();
-    await updateRecordingMutation.mutateAsync({ filename, recordingId });
+    await updateRecordingMutation.mutateAsync({ filename, previousFilename, recordingId });
   }
 
-  async function handleRenameImportItem(localId: string, filename: string) {
+  async function handleRenameImportItem(localId: string, filename: string, previousFilename: string) {
     const queueItem = importQueue.find((item) => item.localId === localId);
     if (!queueItem) {
       return;
     }
 
     if (queueItem.recordingId) {
-      await handleRenameRecording(queueItem.recordingId, filename);
+      await handleRenameRecording(queueItem.recordingId, filename, previousFilename);
       return;
     }
 
@@ -1378,17 +1423,14 @@ function App({ session, onSessionChange }: AppProps) {
 
     clearAnalysisMessages();
 
-    const results = await Promise.allSettled(
-      uniqueCandidateIds.map((candidateId) => updateCandidate(candidateId, { status })),
-    );
-    const failedCandidateIds: string[] = [];
-
-    results.forEach((result, index) => {
-      if (result.status === 'fulfilled') {
-        return;
-      }
-      failedCandidateIds.push(uniqueCandidateIds[index]);
-    });
+    // One request for all of them: one change to the task, whoever else is working on it.
+    let failure: unknown = null;
+    try {
+      await setCandidateStatuses(runId, uniqueCandidateIds, status);
+    } catch (error) {
+      failure = error;
+    }
+    const failedCandidateIds = failure ? uniqueCandidateIds : [];
 
     await refreshRunQueries(runId, recordingId);
 
@@ -1402,9 +1444,11 @@ function App({ session, onSessionChange }: AppProps) {
     }
     if (failedCandidateIds.length > 0) {
       setAppError(
-        `Could not update ${
-          failedCandidateIds.length === 1 ? '1 selected candidate' : `${failedCandidateIds.length} selected candidates`
-        }.`,
+        failure instanceof ApiError && (failure.status === 409 || failure.status === 422)
+          ? failure.message
+          : `Could not update ${
+              failedCandidateIds.length === 1 ? '1 selected candidate' : `${failedCandidateIds.length} selected candidates`
+            }.`,
       );
     }
 
@@ -1429,16 +1473,7 @@ function App({ session, onSessionChange }: AppProps) {
     try {
       const results = await Promise.allSettled(
         completedTasks.map(async (item) => {
-          const runDetail = await getRun(item.run.id);
-          const hasReviewedItems = runDetail.candidates.some((candidate) => candidate.status !== 'pending');
-          const hasAcceptedItems = runDetail.candidates.some((candidate) => candidate.status === 'accepted');
-
-          if (hasReviewedItems && !hasAcceptedItems) {
-            throw new Error('This reviewed task has no accepted candidates to export.');
-          }
-
-          const exportMode: ExportMode = hasReviewedItems ? 'accepted' : 'all';
-          const bundle = await exportRun(item.run.id, exportMode);
+          const bundle = await exportRun(item.run.id, 'auto');
           await refreshRunQueries(item.run.id, item.run.recording_id);
           await downloadExportBundle(bundle);
           return item.run.id;

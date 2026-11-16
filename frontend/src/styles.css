@@ -3363,10 +3363,18 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   justify-content: flex-end;
 }
 
-.analysis-task-export-badge {
-  color: #2d7a5a;
+.analysis-task-export-badge,
+.analysis-task-busy {
   font-size: 12px;
   white-space: nowrap;
+}
+
+.analysis-task-export-badge {
+  color: #2d7a5a;
+}
+
+.analysis-task-busy {
+  color: #8a570e;
 }
 
 .analysis-task-progress,
@@ -8099,4 +8107,91 @@ button:disabled {
 
 .users-row.selected .users-row-name {
   color: #2d7a5a;
+}
+
+/* ── shared accounts: what other browsers are doing ──────────────────────────────────────────────────────────
+   "Busy" is the orange of the advanced bar with darker angled stripes that drift slowly: work under way elsewhere.
+   A banner over a task (laid out like the pathway tutorial's invitation), a band on a step, a pill on a task or an
+   upload. They mark what is happening; only the few actions that would clash with it wait. */
+
+:root {
+  --live-stripes: repeating-linear-gradient(135deg, var(--accent) 0 8px, #bb5a28 8px 16px);
+}
+
+@keyframes live-stripes-drift {
+  to {
+    /* one stripe period along the x axis: 16px across the stripes is 16 / cos 45° along it */
+    background-position: 22.63px 0;
+  }
+}
+
+.live-banner,
+.live-band,
+.live-pill {
+  background: var(--live-stripes);
+  color: #fff;
+  animation: live-stripes-drift 1.6s linear infinite;
+}
+
+.live-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.live-banner > span:last-child {
+  flex: 1 1 360px;
+}
+
+.live-banner-label {
+  padding: 1px 7px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.22);
+  font-weight: 600;
+}
+
+.live-band {
+  margin: 0 0 8px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.live-pill {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.analysis-task-busy.live-pill {
+  color: #fff;
+}
+
+.live-row {
+  opacity: 0.92;
+}
+
+/* A step's text fields while another browser is writing them: in the list view, and in an open card. */
+.candidate-row.edited-elsewhere .candidate-field,
+.candidate-annotation-panel .candidate-field[readonly] {
+  background: repeating-linear-gradient(135deg, rgba(209, 109, 56, 0.2) 0 8px, rgba(209, 109, 56, 0.08) 8px 16px);
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-banner,
+  .live-band,
+  .live-pill {
+    animation: none;
+  }
 }

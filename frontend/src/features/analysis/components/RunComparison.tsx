@@ -19,6 +19,7 @@ interface RunComparisonProps {
   rightRunId: string;
   analysisMetadata: AnalysisMetadata | null;
   carryOverPending: boolean;
+  busyRunIds: string[];
   onChangeRuns: (leftRunId: string, rightRunId: string) => void;
   onClose: () => void;
   onReview: (runId: string) => void;
@@ -39,6 +40,7 @@ export function RunComparison({
   rightRunId,
   analysisMetadata,
   carryOverPending,
+  busyRunIds,
   onChangeRuns,
   onClose,
   onReview,
@@ -263,7 +265,7 @@ export function RunComparison({
               {canCarryOver ? (
                 <button
                   className="analysis-pill success"
-                  disabled={carryOverPending}
+                  disabled={carryOverPending || busyRunIds.includes(leftRunId) || busyRunIds.includes(rightRunId)}
                   onClick={() => onCarryOver(leftRunId, rightRunId, comparison.pairs)}
                   type="button"
                 >

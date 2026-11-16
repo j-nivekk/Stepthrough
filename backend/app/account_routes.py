@@ -62,7 +62,7 @@ from .user_admin import (
     AccountError,
     clean_date,
     clean_display_name,
-    clean_tags,
+    account_tags,
     create_account,
     delete_account,
     import_accounts,
@@ -293,7 +293,7 @@ def admin_users_update(user_id: str, payload: AdminUserUpdate, user: CurrentUser
         if "display_name" in sent:
             changes["display_name"] = clean_display_name(payload.display_name)
         if "tags" in sent:
-            changes["tags"] = clean_tags(payload.tags or [])
+            changes["tags"] = account_tags(payload.tags or [])
         if "delete_after" in sent:
             changes["delete_after"] = clean_date(payload.delete_after)
         if "notes" in sent:

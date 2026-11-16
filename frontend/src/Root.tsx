@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import App from './App';
+import { LiveProvider } from './features/live/LiveProvider';
 import { SIGNED_OUT_EVENT, getSession } from './api';
 import { AppWatermark } from './components/AppWatermark';
 import { LoginScreen } from './features/account/LoginScreen';
@@ -14,7 +15,13 @@ const SESSION_KEY = ['session'];
 export function Root() {
   const queryClient = useQueryClient();
   const [linkToken, setLinkToken] = useState(() => readLinkToken());
-  const sessionQuery = useQuery({ queryKey: SESSION_KEY, queryFn: getSession, retry: false, staleTime: Infinity });
+  const sessionQuery = useQuery({
+    queryKey: SESSION_KEY,
+    queryFn: getSession,
+    retry: false,
+    staleTime: 30_000,
+    refetchInterval: (query) => query.state.data?.user && query.state.data.mode === 'password' ? 30_000 : false,
+  });
 
   useEffect(() => {
     // A request found the session gone (logged out elsewhere, expired, switched off): check, then show the login.
@@ -63,5 +70,11 @@ export function Root() {
     );
   }
   // Without an answer (the backend is not running yet), the app's own notices explain what is wrong.
-  return <App onSessionChange={enter} session={session} />;
+  // Many people signed in to one shared account see each other's changes as they happen.
+  const shared = Boolean(session?.mode === 'password' && session.user && !session.user.is_admin && session.user.tags.includes('shared'));
+  return (
+    <LiveProvider enabled={shared}>
+      <App onSessionChange={enter} session={session} />
+    </LiveProvider>
+  );
 }

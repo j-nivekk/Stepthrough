@@ -88,11 +88,12 @@ CREATE TABLE IF NOT EXISTS candidate_frames (
 
 CREATE TABLE IF NOT EXISTS export_bundles (
     id TEXT PRIMARY KEY,
-    run_id TEXT NOT NULL UNIQUE REFERENCES detection_runs(id) ON DELETE CASCADE,
+    run_id TEXT NOT NULL REFERENCES detection_runs(id) ON DELETE CASCADE,
     output_dir TEXT NOT NULL,
     zip_path TEXT NOT NULL,
     item_count INTEGER NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    retained INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
@@ -168,6 +169,7 @@ CREATE INDEX IF NOT EXISTS idx_project_members_member ON project_members(member)
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_recordings_project_id ON recordings(project_id);
 CREATE INDEX IF NOT EXISTS idx_runs_recording_id ON detection_runs(recording_id);
+CREATE INDEX IF NOT EXISTS idx_export_bundles_run_id ON export_bundles(run_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_run_id ON candidate_frames(run_id);
 CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id, created_at);
 """
@@ -177,6 +179,7 @@ CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id, created_a
 LOCAL_USER_ID = "local"
 LOCAL_USER_NAME = "local"
 ADMIN_TAG = "admin"
+SHARED_TAG = "shared"
 
 # Runs write progress from their own threads while requests read and write too. A writer waits this long for
 # another to finish instead of failing at once with "database is locked" (sqlite3's default is 5 s).
@@ -208,6 +211,32 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
 def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
     if column_name not in _table_columns(conn, table_name):
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def _migrate_export_bundles(conn: sqlite3.Connection) -> None:
+    if "retained" in _table_columns(conn, "export_bundles"):
+        return
+    conn.executescript("""
+        BEGIN IMMEDIATE;
+        ALTER TABLE export_bundles RENAME TO legacy_export_bundles;
+        CREATE TABLE export_bundles (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL REFERENCES detection_runs(id) ON DELETE CASCADE,
+            output_dir TEXT NOT NULL,
+            zip_path TEXT NOT NULL,
+            item_count INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            retained INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO export_bundles (id, run_id, output_dir, zip_path, item_count, created_at)
+            SELECT id, run_id, output_dir, zip_path, item_count, created_at FROM legacy_export_bundles;
+        UPDATE detection_runs
+            SET export_bundle_id = (SELECT id FROM export_bundles WHERE run_id = detection_runs.id)
+            WHERE EXISTS (SELECT 1 FROM export_bundles WHERE run_id = detection_runs.id);
+        DROP TABLE legacy_export_bundles;
+        CREATE INDEX idx_export_bundles_run_id ON export_bundles(run_id);
+        COMMIT;
+    """)
 
 
 def _backfill_detection_run_phase(conn: sqlite3.Connection) -> None:
@@ -281,6 +310,7 @@ def init_db() -> None:
         # here. Back the database up with SQLite's backup API (`python -m app.backup`), not by copying the file.
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
+        _migrate_export_bundles(conn)
         _ensure_column(conn, "detection_runs", "phase", "TEXT NOT NULL DEFAULT 'queued'")
         _ensure_column(conn, "detection_runs", "analysis_engine", "TEXT NOT NULL DEFAULT 'scene_v1'")
         _ensure_column(conn, "detection_runs", "analysis_preset", "TEXT NOT NULL DEFAULT 'balanced'")
@@ -299,4 +329,13 @@ def init_db() -> None:
         _ensure_column(conn, "users", "password_hash", "TEXT")
         _backfill_detection_run_phase(conn)
         _ensure_local_user(conn)
+        conn.execute(
+            """
+            UPDATE users
+            SET tags = (SELECT json_group_array(value) FROM json_each(users.tags) WHERE value != ?)
+            WHERE ? IN (SELECT value FROM json_each(users.tags))
+              AND ? IN (SELECT value FROM json_each(users.tags))
+            """,
+            (SHARED_TAG, SHARED_TAG, ADMIN_TAG),
+        )
         _adopt_projects_without_members(conn)

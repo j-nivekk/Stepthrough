@@ -40,6 +40,7 @@ export interface AnalysisTasksPanelProps {
   analysisMetadata: AnalysisMetadata | null;
   bulkDeletePending: boolean;
   bulkExportPending: boolean;
+  busyRunIds: string[];
   expandedTaskRunId: string | null;
   groupedTaskItems: AnalysisTaskGroup[];
   onAbortRun: (runId: string) => void;
@@ -71,6 +72,7 @@ export function AnalysisTasksPanel({
   analysisMetadata,
   bulkDeletePending,
   bulkExportPending,
+  busyRunIds,
   expandedTaskRunId,
   groupedTaskItems,
   onAbortRun,
@@ -131,6 +133,7 @@ export function AnalysisTasksPanel({
   function renderTaskRow(item: AnalysisTaskItem) {
     const isSelected = selectedRunId === item.run.id;
     const run = isSelected && selectedRunSummary?.id === item.run.id ? selectedRunSummary : item.run;
+    const busy = busyRunIds.includes(run.id);
     const runNumber = runNumberById.get(run.id) ?? 1;
     const isExpanded = expandedTaskRunId === run.id;
     const isMarked = selectedTaskRunIds.includes(run.id);
@@ -214,7 +217,7 @@ export function AnalysisTasksPanel({
           <div className="analysis-task-head-primary">
             {taskSelectMode && (
               <label className="analysis-task-select-toggle">
-                <input checked={isMarked} onChange={() => onToggleTaskSelection(run.id)} type="checkbox" />
+                <input checked={isMarked} disabled={busy && !isMarked} onChange={() => onToggleTaskSelection(run.id)} type="checkbox" />
                 <span className="analysis-task-select-copy">select task</span>
               </label>
             )}
@@ -236,6 +239,7 @@ export function AnalysisTasksPanel({
             </div>
           </div>
           <div className="analysis-task-meta">
+            {busy ? <span className="analysis-task-busy live-pill" title="being changed in another browser">busy</span> : null}
             {hasExported ? <span className="analysis-task-export-badge">exported</span> : null}
             <span className={`analysis-task-progress ${isError ? 'error' : isDone ? 'success' : ''}`}>
               {progressLabel}
@@ -250,7 +254,7 @@ export function AnalysisTasksPanel({
             </button>
             {actionButtons.map((action) =>
               action.label === 'end' ? (
-                <button className="analysis-task-link danger" key={action.label} onClick={() => onAbortRun(run.id)} type="button">
+                <button className="analysis-task-link danger" disabled={busy} key={action.label} onClick={() => onAbortRun(run.id)} type="button">
                   {action.label}
                 </button>
               ) : action.label === 'review outputs' ? (
@@ -275,6 +279,7 @@ export function AnalysisTasksPanel({
             )}
             <button
               className="analysis-task-link danger analysis-task-hover-link"
+              disabled={busy}
               onClick={() => onDeleteRun(run.id)}
               type="button"
             >

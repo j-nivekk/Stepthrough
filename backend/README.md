@@ -203,3 +203,34 @@ In both modes, requests that change something are refused when the browser says 
 `frame-ancestors`). On a server (`STEPTHROUGH_DEPLOYMENT=server`) the API description (`/docs`, `/openapi.json`)
 is switched off, and `/health` gives its details (folders, library versions) only to administrators. A database
 reset deletes projects but keeps accounts.
+
+## Shared accounts
+
+An account tagged `shared` (never one with `admin`; the tag is refused there and removed by the migration) is for a
+group working under one login, up to about 30 browsers at once. `app/live.py` keeps them in step, in memory, in the
+one server process:
+
+- **Live changes.** Every change in a project is announced to the shared accounts that can open it.
+  `GET /me/live?after=<seq>&epoch=<epoch>&wait=<seconds>` answers at once with the changes after `seq`, or waits up
+  to 25 seconds for one (a long poll, which needs no WebSocket support in the proxy). Each change says what it
+  touched (`projects`, `project`, `project_deleted`, `recording`, `run`, `candidate` with the step as it now is,
+  `settings`) and which browser made it (`by`, the `X-Stepthrough-Client` header every change carries). The answer
+  has `reset` when the browser cannot catch up from the last 1,000 changes or the server restarted (a new `epoch`):
+  it then loads everything again. Answers also give `presence` and `busy` below.
+- **Presence.** `PUT /me/presence` with `{"targets": [...]}` says what a browser is doing: editing a step's text
+  (`{"kind": "editing", "run_id", "candidate_id"}`) or uploading (`{"kind": "uploading", "project_id", "name",
+  "progress"}`). It lasts 25 seconds unless repeated; `[]` ends it. Of two browsers editing one step, the one that
+  began first (`since`) holds it, and the others show its text read-only.
+- **Busy work.** Adding a step by hand, carrying a review over, merging pathway screens and exporting are listed
+  in `busy` while they run, for the banner on the task.
+- **One change at a time per task** (for every account): changes to a task's steps wait for one another rather
+  than interleave, so that renumbering the steps cannot write back a decision made meanwhile. One waiting longer
+  than 30 seconds gets a 409. `POST /runs/{id}/candidates/status` sets the status of several steps in one change.
+- **Conflicts.** `PATCH /candidates/{id}` takes `previous_title` and `previous_notes`, and `PATCH /projects/{id}`
+  and `PATCH /recordings/{id}` take `previous_name` and `previous_filename`: in a shared account a change made from
+  text that someone else has changed since is refused (409) instead of written over theirs. Decisions and screen
+  choices are simply the latest.
+- **Exports** of a shared account are all kept (`export_bundles.retained`) until their task is deleted, so two
+  people exporting the same task at once each download their own.
+
+`tests/test_shared_accounts.py` covers these.

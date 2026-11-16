@@ -19,7 +19,7 @@ export interface EntryScreenProps {
   onProjectNameChange: (value: string) => void;
   onProjectSearchChange: (value: string) => void;
   onProjectSortChange: (sort: 'name' | 'recent') => void;
-  onRenameProject: (projectId: string, name: string) => Promise<void>;
+  onRenameProject: (projectId: string, name: string, previousName: string) => Promise<void>;
   projectName: string;
   projectSearch: string;
   projectSort: 'name' | 'recent';
@@ -198,7 +198,7 @@ export function EntryScreen({
                         containerClassName="entry-project-name"
                         displayButtonClassName="entry-project-select-button"
                         onDisplayClick={() => onOpenProject(project.id, entryTarget(project))}
-                        onSave={(nextValue) => onRenameProject(project.id, nextValue)}
+                        onSave={(nextValue, previousValue) => onRenameProject(project.id, nextValue, previousValue)}
                         renameLabel={`rename project ${project.name}`}
                         textClassName="entry-project-name-text"
                         value={project.name}

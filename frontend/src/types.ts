@@ -223,6 +223,51 @@ export interface CandidateChanges {
   /** `auto`, `new`, or the id of an earlier step of the run. */
   screen_link?: string;
   screen_kind?: 'auto' | 'screen' | 'popup';
+  /** In a shared account, the text this browser began from: if someone else saved other text meanwhile, the
+   *  change is refused instead of written over theirs. */
+  previous_title?: string;
+  previous_notes?: string;
+}
+
+/** A change in a shared account, from the live feed (backend/app/live.py). `by` is the browser that made it. */
+export interface LiveEvent {
+  seq: number;
+  kind: 'projects' | 'project' | 'project_deleted' | 'recording' | 'run' | 'candidate' | 'settings' | 'state';
+  project_id: string | null;
+  recording_id: string | null;
+  run_id: string | null;
+  by: string | null;
+  candidate?: CandidateFrame;
+}
+
+/** What a browser of the account is doing: editing a step's title and notes, or uploading a video. `since` (in
+ *  seconds, the server's clock) settles who came first. */
+export type LivePresenceTarget =
+  | { kind: 'editing'; run_id: string; candidate_id: string; since?: number }
+  | { kind: 'uploading'; project_id: string; name: string; progress: number | null; since?: number };
+
+export interface LivePresence {
+  client: string;
+  targets: LivePresenceTarget[];
+}
+
+/** A change rewriting a whole task while it runs (adding a step by hand, merging screens, ...). */
+export interface LiveBusy {
+  id: string;
+  project_id: string;
+  run_id: string;
+  label: string;
+  by: string | null;
+}
+
+export interface LiveState {
+  epoch: string;
+  seq: number;
+  /** The browser could not catch up from the list of changes and loads everything again. */
+  reset: boolean;
+  events: LiveEvent[];
+  presence: LivePresence[];
+  busy: LiveBusy[];
 }
 
 export interface AcceptedStep {

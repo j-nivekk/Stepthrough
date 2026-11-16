@@ -4,10 +4,13 @@ import type {
   AnalysisMetadata,
   CandidateChanges,
   CandidateFrame,
+  CandidateStatus,
   ExportBundle,
   ExportMode,
   HealthResponse,
   LinkDetails,
+  LivePresenceTarget,
+  LiveState,
   Pathway,
   PathwayDetail,
   Project,
@@ -58,10 +61,18 @@ export class ApiError extends Error {
 
 /** Sent on the window when a request finds that nobody is logged in (any more), so the login page can show. */
 export const SIGNED_OUT_EVENT = 'stepthrough:signed-out';
+const CLIENT_HEADER = 'X-Stepthrough-Client';
+/** This page, among the browsers and tabs of one shared account (they share the login cookie): sent with every
+ *  change, so the server can tell the others which browser made it. */
+export const CLIENT_ID = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+  byte.toString(16).padStart(2, '0'),
+).join('');
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // `include`: the session cookie also goes along when the development frontend runs on another port.
-  const response = await fetch(apiUrl(path), { credentials: 'include', ...init });
+  const headers = new Headers(init?.headers);
+  if (init?.method && init.method !== 'GET') headers.set(CLIENT_HEADER, CLIENT_ID);
+  const response = await fetch(apiUrl(path), { credentials: 'include', ...init, headers });
   if (response.status === 204) {
     return undefined as T;
   }
@@ -99,12 +110,8 @@ export function createProject(name: string): Promise<Project> {
   });
 }
 
-export function updateProject(projectId: string, name: string): Promise<Project> {
-  return request<Project>(`/projects/${projectId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
-  });
+export function updateProject(projectId: string, name: string, previousName: string): Promise<Project> {
+  return request<Project>(`/projects/${projectId}`, jsonBody('PATCH', { name, previous_name: previousName }));
 }
 
 export function deleteProject(projectId: string): Promise<void> {
@@ -113,6 +120,21 @@ export function deleteProject(projectId: string): Promise<void> {
 
 export function getProject(projectId: string): Promise<ProjectDetail> {
   return request<ProjectDetail>(`/projects/${projectId}`);
+}
+
+/** Changes in a shared account since `after` (see backend/app/live.py); waits up to `wait` seconds for one. */
+export function waitForChanges(after: number | null, epoch: string | null, signal: AbortSignal, wait = 25): Promise<LiveState> {
+  const params = new URLSearchParams({ wait: String(wait) });
+  if (after !== null && epoch) {
+    params.set('after', String(after));
+    params.set('epoch', epoch);
+  }
+  return request<LiveState>(`/me/live?${params}`, { signal });
+}
+
+/** What this browser is doing that the others of its shared account should see; `[]` when it stops. */
+export function sendPresence(targets: LivePresenceTarget[], keepalive = false): Promise<void> {
+  return request<void>('/me/presence', { ...jsonBody('PUT', { targets }), keepalive });
 }
 
 export interface UploadOptions {
@@ -179,12 +201,10 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
 
-export function updateRecording(recordingId: string, filename: string): Promise<RecordingSummary> {
-  return request<RecordingSummary>(`/recordings/${recordingId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename }),
-  });
+export function updateRecording(recordingId: string, filename: string, previousFilename: string): Promise<RecordingSummary> {
+  return request<RecordingSummary>(
+    `/recordings/${recordingId}`, jsonBody('PATCH', { filename, previous_filename: previousFilename }),
+  );
 }
 
 export function deleteRecording(recordingId: string): Promise<void> {
@@ -242,8 +262,8 @@ export function createManualRun(recordingId: string): Promise<RunSummary> {
   return request<RunSummary>(`/recordings/${recordingId}/runs/manual`, { method: 'POST' });
 }
 
-export function getRun(runId: string): Promise<RunDetail> {
-  return request<RunDetail>(`/runs/${runId}`);
+export function getRun(runId: string, signal?: AbortSignal): Promise<RunDetail> {
+  return request<RunDetail>(`/runs/${runId}`, { signal });
 }
 
 export function getRunPathway(runId: string, detail: PathwayDetail, signal?: AbortSignal): Promise<Pathway> {
@@ -277,6 +297,11 @@ export function updateCandidate(
   });
 }
 
+/** Accept, reject or reset several steps of one task in one go. */
+export function setCandidateStatuses(runId: string, candidateIds: string[], status: CandidateStatus): Promise<void> {
+  return request<void>(`/runs/${runId}/candidates/status`, jsonBody('POST', { candidate_ids: candidateIds, status }));
+}
+
 export function createManualCandidate(runId: string, timestampMs: number): Promise<CandidateFrame> {
   return request<CandidateFrame>(`/runs/${runId}/candidates/manual`, {
     method: 'POST',
@@ -285,7 +310,7 @@ export function createManualCandidate(runId: string, timestampMs: number): Promi
   });
 }
 
-export function exportRun(runId: string, mode: ExportMode = 'accepted'): Promise<ExportBundle> {
+export function exportRun(runId: string, mode: ExportMode | 'auto' = 'accepted'): Promise<ExportBundle> {
   return request<ExportBundle>(`/runs/${runId}/export`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

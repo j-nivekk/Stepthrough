@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
+import { busyElsewhere, busyRunIds } from '../../lib/live';
+import { useLive } from '../live/LiveProvider';
 import { absoluteApiUrl } from '../../api';
 import { CandidateCard, CandidateRow } from '../../components/CandidateCard';
 import { EditableName } from '../../components/EditableName';
@@ -49,6 +51,7 @@ import type {
   RecordingSummary,
   RunDetail,
   RunSettings,
+  RunSummary,
   TransitionType,
 } from '../../types';
 import { AnalysisParametersPanel } from './components/AnalysisParametersPanel';
@@ -108,7 +111,7 @@ export interface AnalysisScreenProps {
     status: CandidateStatus,
   ) => Promise<string[]>;
   onCreateManualCandidate: (runId: string, timestampMs: number) => Promise<CandidateFrame>;
-  onCreateManualRun: (recordingId: string) => Promise<void>;
+  onCreateManualRun: (recordingId: string) => Promise<RunSummary>;
   onDeleteRecording: (recordingId: string, filename: string) => void;
   onDropFiles: (files: FileList | File[]) => void;
   /** Videos of the project still on their way in, and how to stop one. */
@@ -122,8 +125,8 @@ export interface AnalysisScreenProps {
   onPreviewRecording: (recordingId: string) => void;
   /** Open the preview on a recording without toggling it closed when it is already open. */
   onOpenPreview: (recordingId: string) => void;
-  onRenameProject: (projectId: string, name: string) => Promise<void>;
-  onRenameRecording: (recordingId: string, filename: string) => Promise<void>;
+  onRenameProject: (projectId: string, name: string, previousName: string) => Promise<void>;
+  onRenameRecording: (recordingId: string, filename: string, previousFilename: string) => Promise<void>;
   onResetToProjectDefaults: () => void;
   onResetToUniversalDefaults: () => void;
   onRestoreFactorySettings: () => void;
@@ -348,6 +351,7 @@ export function AnalysisScreen({
   const presetMenuRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const activeManualMarkIdRef = useRef<string | null>(null);
+  const creatingManualRuns = useRef(new Map<string, Promise<RunSummary>>());
 
 
   const previewVideoUrl = previewRecording ? absoluteApiUrl(previewRecording.source_url) : null;
@@ -393,6 +397,10 @@ export function AnalysisScreen({
   const previewMatchesSelectedRun = Boolean(
     previewRecording && selectedRun && previewRecording.id === selectedRun.summary.recording_id,
   );
+  // Shared accounts: what other browsers are doing to tasks right now (see LiveProvider).
+  const live = useLive();
+  const runsBusyElsewhere = useMemo(() => busyRunIds(live.busy, live.clientId), [live.busy, live.clientId]);
+  const selectedRunBusy = busyElsewhere(live.busy, selectedRun?.summary.id ?? null, live.clientId);
   const canAddManualCandidate = Boolean(
     previewMatchesSelectedRun &&
       selectedRun &&
@@ -681,10 +689,9 @@ export function AnalysisScreen({
   }, [selectedRun?.summary.id]);
 
   useEffect(() => {
-    setQueuedManualMarkItems([]);
-    activeManualMarkIdRef.current = null;
+    setQueuedManualMarkItems((current) => current.filter((mark) => mark.runId === selectedRunId));
     setManualCapturePulseToken(0);
-  }, [selectedRun?.summary.id]);
+  }, [selectedRunId]);
 
   useEffect(() => {
     if (!openPopover) {
@@ -739,12 +746,15 @@ export function AnalysisScreen({
       return;
     }
 
-    const nextMark = queuedManualMarkItems[0];
+    const nextMark = queuedManualMarkItems.find((mark) => mark.runId === selectedRun.summary.id);
+    if (!nextMark) return;
     activeManualMarkIdRef.current = nextMark.id;
 
     void (async () => {
       try {
         await onCreateManualCandidate(selectedRun.summary.id, nextMark.timestampMs);
+      } catch {
+        // The app reports save failures next to the review.
       } finally {
         activeManualMarkIdRef.current = null;
         setQueuedManualMarkItems((current) => current.filter((item) => item.id !== nextMark.id));
@@ -1171,15 +1181,25 @@ export function AnalysisScreen({
   }
 
   function handleCreateManualCandidate(timestampOverrideMs?: number) {
-    const timestampMs = timestampOverrideMs ?? getCurrentPreviewTimestampMs();
-    if (timestampMs === null) return;
+    if (!previewRecording) return;
+    const timestamp = timestampOverrideMs ?? getCurrentPreviewTimestampMs();
+    if (timestamp === null) return;
 
     setManualCapturePulseToken((current) => current + 1);
-    setQueuedManualMarkItems((current) => [...current, { id: createLocalId('manual-mark'), timestampMs }]);
-
-    if (!canAddManualCandidate && previewRecording) {
-      void onCreateManualRun(previewRecording.id);
+    function queueMark(runId: string, timestampMs: number) {
+      setQueuedManualMarkItems((current) => [...current, { id: createLocalId('manual-mark'), runId, timestampMs }]);
     }
+    if (canAddManualCandidate && selectedRun) {
+      queueMark(selectedRun.summary.id, timestamp);
+      return;
+    }
+    const recordingId = previewRecording.id;
+    let creating = creatingManualRuns.current.get(recordingId);
+    if (!creating) {
+      creating = onCreateManualRun(recordingId).finally(() => creatingManualRuns.current.delete(recordingId));
+      creatingManualRuns.current.set(recordingId, creating);
+    }
+    void creating.then((run) => queueMark(run.id, timestamp)).catch(() => {});
   }
 
   function handleToggleCandidateAnnotation(candidateId: string) {
@@ -1325,7 +1345,7 @@ export function AnalysisScreen({
             <EditableName
               buttonClassName="entry-rename-button"
               containerClassName="analysis-pill-project"
-              onSave={(nextValue) => onRenameProject(activeProject.id, nextValue)}
+              onSave={(nextValue, previousValue) => onRenameProject(activeProject.id, nextValue, previousValue)}
               renameLabel={`rename project ${activeProject.name}`}
               textClassName="analysis-pill-project-text"
               value={activeProject.name}
@@ -1383,6 +1403,7 @@ export function AnalysisScreen({
             onRequestRename={handleRequestVideoRename}
             onSelectRecording={onSelectRecording}
             previewRecording={previewRecording}
+            projectId={activeProject?.id ?? null}
             recordings={recordings}
             recordingsLoading={recordingsLoading}
             selectedRecordingId={selectedRecordingId}
@@ -1434,6 +1455,7 @@ export function AnalysisScreen({
 
           <AnalysisTasksPanel
             analysisTaskItems={analysisTaskItems}
+            busyRunIds={runsBusyElsewhere}
             onCompareRuns={handleCompareRuns}
             analysisMetadata={analysisMetadata}
             bulkDeletePending={bulkDeletePending}
@@ -1708,6 +1730,7 @@ export function AnalysisScreen({
             return recording ? (
               <RunComparison
                 analysisMetadata={analysisMetadata}
+                busyRunIds={runsBusyElsewhere}
                 carryOverPending={carryOverPending}
                 key={comparison.recordingId}
                 leftRunId={comparison.left}
@@ -1790,6 +1813,16 @@ export function AnalysisScreen({
                 </div>
               </div>
             </div>
+
+            {selectedRunBusy.length ? (
+              <div className="live-banner" role="status">
+                <span className="live-banner-label">busy</span>
+                <span>
+                  another browser is {selectedRunBusy.map((entry) => entry.label).join(' and ')}. it updates here as soon as that
+                  is done.
+                </span>
+              </div>
+            ) : null}
 
             {!isCompletedReview ? (
               <div className="analysis-task-bar" aria-hidden="true">

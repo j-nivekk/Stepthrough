@@ -3,7 +3,9 @@ import { EditableName } from '../../components/EditableName';
 import { StageNavigator } from '../../components/StageNavigator';
 import { formatProjectSummary } from '../../lib/formatters';
 import type { ImportQueueItem } from '../../lib/importQueue';
+import { uploadsElsewhere } from '../../lib/live';
 import type { WorkflowStage } from '../../lib/workflow';
+import { useLive } from '../live/LiveProvider';
 import type { Project } from '../../types';
 
 export interface ImportScreenProps {
@@ -20,8 +22,8 @@ export interface ImportScreenProps {
   onDone: () => void;
   onFilesSelected: (files: FileList | File[]) => void;
   onNavigateStage: (stage: WorkflowStage) => void;
-  onRenameProject: (projectId: string, name: string) => Promise<void>;
-  onRenameRow: (localId: string, filename: string) => Promise<void>;
+  onRenameProject: (projectId: string, name: string, previousName: string) => Promise<void>;
+  onRenameRow: (localId: string, filename: string, previousFilename: string) => Promise<void>;
   onRetryRow: (localId: string) => void;
   project: Project | null;
   rows: ImportQueueItem[];
@@ -49,6 +51,9 @@ export function ImportScreen({
   rows,
   selectionFeedback,
 }: ImportScreenProps) {
+  // In a shared account: videos another browser is uploading into this project.
+  const live = useLive();
+  const elsewhere = uploadsElsewhere(live.presence, project?.id ?? null, live.clientId);
   const [isDropzoneActive, setIsDropzoneActive] = useState(false);
   const [ocrWarningsExpanded, setOcrWarningsExpanded] = useState(false);
   const uploadedCount = rows.filter((row) => row.status === 'uploaded').length;
@@ -102,7 +107,7 @@ export function ImportScreen({
                 <EditableName
                   buttonClassName="entry-rename-button"
                   containerClassName="import-project-name"
-                  onSave={(nextValue) => onRenameProject(project.id, nextValue)}
+                  onSave={(nextValue, previousValue) => onRenameProject(project.id, nextValue, previousValue)}
                   renameLabel={`rename project ${project.name}`}
                   textClassName="import-project-title"
                   value={project.name}
@@ -187,7 +192,7 @@ export function ImportScreen({
                     disabled={row.status === 'uploading'}
                     inputClassName="import-row-input"
                     lockedExtension
-                    onSave={(nextValue) => onRenameRow(row.localId, nextValue)}
+                    onSave={(nextValue, previousValue) => onRenameRow(row.localId, nextValue, previousValue)}
                     renameLabel={`rename video ${row.filename}`}
                     textClassName="import-row-title"
                     value={row.filename}
@@ -243,7 +248,21 @@ export function ImportScreen({
                 </div>
               </div>
             ))}
-            {!rows.length && (
+            {elsewhere.map((upload) => (
+              <div className="import-row live-row" key={upload.key}>
+                <div className="import-row-copy">
+                  <span className="import-row-title">{upload.name}</span>
+                </div>
+                <div className="import-row-actions">
+                  <span className="import-row-status">
+                    <span className="live-pill">
+                      uploading in another browser{upload.progress !== null ? ` ${Math.round(upload.progress * 100)}%` : ''}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            ))}
+            {!rows.length && !elsewhere.length && (
               <p className="entry-empty-copy import-empty-copy">selected and uploaded videos will appear here.</p>
             )}
           </div>

@@ -1,6 +1,8 @@
 import { EditableName } from '../../../components/EditableName';
 import { formatRecordingContextBadge } from '../../../lib/formatters';
 import type { ImportQueueItem } from '../../../lib/importQueue';
+import { uploadsElsewhere } from '../../../lib/live';
+import { useLive } from '../../live/LiveProvider';
 import type { RecordingSummary } from '../../../types';
 
 export interface AnalysisVideosPanelProps {
@@ -9,10 +11,11 @@ export interface AnalysisVideosPanelProps {
   onFilesDropped: (files: FileList | File[]) => void;
   onJumpToSelection: () => void;
   onPreviewRecording: (recordingId: string) => void;
-  onRenameRecording: (recordingId: string, filename: string) => Promise<void>;
+  onRenameRecording: (recordingId: string, filename: string, previousFilename: string) => Promise<void>;
   onRequestRename: (recordingId: string) => void;
   onSelectRecording: (recordingId: string) => void;
   previewRecording: RecordingSummary | null;
+  projectId: string | null;
   recordings: RecordingSummary[];
   recordingsLoading: boolean;
   selectedRecordingId: string | null;
@@ -31,12 +34,17 @@ export function AnalysisVideosPanel({
   onRequestRename,
   onSelectRecording,
   previewRecording,
+  projectId,
   recordings,
   recordingsLoading,
   selectedRecordingId,
   uploads,
   videoRenameRequest,
 }: AnalysisVideosPanelProps) {
+  // In a shared account: videos another browser is uploading into this project.
+  const live = useLive();
+  const elsewhere = uploadsElsewhere(live.presence, projectId, live.clientId);
+
   function isFileDrag(event: React.DragEvent<HTMLElement>) {
     return Array.from(event.dataTransfer.types).includes('Files');
   }
@@ -84,7 +92,7 @@ export function AnalysisVideosPanel({
                   editRequestToken={videoRenameRequest?.id === recording.id ? videoRenameRequest.nonce : null}
                   lockedExtension
                   onDisplayClick={() => onSelectRecording(recording.id)}
-                  onSave={(nextValue) => onRenameRecording(recording.id, nextValue)}
+                  onSave={(nextValue, previousValue) => onRenameRecording(recording.id, nextValue, previousValue)}
                   renameLabel={`rename video ${recording.filename}`}
                   showRenameButton={false}
                   textClassName="analysis-video-name-text"
@@ -141,7 +149,19 @@ export function AnalysisVideosPanel({
             </div>
           );
         })}
-        {!recordings.length && !uploads.length && (
+        {elsewhere.map((upload) => (
+          <div className="analysis-video-row analysis-video-upload live-row" key={upload.key}>
+            <div className="analysis-video-row-button">
+              <span className="analysis-video-name-text">{upload.name}</span>
+              <div className="analysis-video-meta">
+                <span className="live-pill">
+                  uploading in another browser{upload.progress !== null ? ` ${Math.round(upload.progress * 100)}%` : ''}
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+        {!recordings.length && !uploads.length && !elsewhere.length && (
           <p className="entry-empty-copy">
             {recordingsLoading ? 'loading videos…' : 'uploaded videos will appear here.'}
           </p>
