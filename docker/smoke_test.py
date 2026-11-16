@@ -151,6 +151,8 @@ def main() -> None:
     print(f"Stepthrough smoke test against {BASE}")
     status, headers, page = call("GET", "/")
     check(status == 200 and b"<title>" in page and "text/html" in headers.get("content-type", ""), "the frontend loads")
+    status, headers, icon = call("GET", "/favicon.svg")
+    check(status == 200 and icon.lstrip().startswith(b"<svg") and "svg" in headers.get("content-type", ""), "the icon is served")
 
     health = call_json("GET", "/health")
     check(health["ffmpeg_available"] and health["ffprobe_available"], "ffmpeg and ffprobe are available")

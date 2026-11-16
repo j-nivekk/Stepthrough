@@ -15,6 +15,7 @@
 !frontend/tsconfig.node.json
 !frontend/vite.config.ts
 !frontend/src/
+!frontend/public/
 !frontend/tests/
 !frontend/scripts/test.mjs
 
