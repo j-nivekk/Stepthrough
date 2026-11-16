@@ -88,6 +88,12 @@ breakdown, revisit links and the timing columns `transition_type`, `change_start
 `time_on_screen_ms` and `grouped_states`. Changed regions are in pixels of the recording for every engine.
 `steps.csv` has the same per-step fields without the nested score breakdown.
 
+Each export is written to the task's `exports/` as a folder and a zip of it, named by the export's id. Only the
+latest export of a task is offered (`GET /exports/{id}/download`); `app/export_cleanup.py` removes the others
+after each export and every hour: their record once it is ten minutes old, then the folder and zip no record
+points to, also those left by earlier versions. Anything else in `exports/`, and files younger than ten minutes
+(an export may still be writing them), stays.
+
 The zip also has `pathway.json`: the same steps folded into the screens they show and the moves between
 those screens (`app/services/pathway.py`). Steps share a screen when one is a revisit of the other, or when
 the later one was reached by a change that stays on the screen (`scroll`, `text_entry`, `feed_card_swap`,
@@ -232,7 +238,7 @@ one server process:
   choices are simply the latest.
 - **Passwords.** `POST /me/password` is refused (403) for a shared account, since it logs out the other browsers;
   an administrator gives the account a new link instead.
-- **Exports** of a shared account are all kept (`export_bundles.retained`) until their task is deleted, so two
-  people exporting the same task at once each download their own.
+- **Exports** of a shared account are all kept (`export_bundles.retained`) for ten minutes, even when a newer
+  export of the task replaces them, so two people exporting the same task at once each download their own.
 
 `tests/test_shared_accounts.py` covers these.

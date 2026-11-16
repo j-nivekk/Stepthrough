@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from io import BytesIO
 from threading import Event
 from zipfile import ZipFile
@@ -11,7 +12,7 @@ from zipfile import ZipFile
 import pytest
 from fastapi.testclient import TestClient
 
-from app import account_routes, accounts, live, main
+from app import account_routes, accounts, export_cleanup, live, main
 from app.user_admin import create_account
 
 PASSWORD = "test shared account password"
@@ -215,7 +216,7 @@ def test_several_steps_change_in_one_go(group, video_factory):
     assert a.post(f"/runs/{run_id}/candidates/status", json={"candidate_ids": ["not-a-step"], "status": "rejected"}).status_code == 422
 
 
-def test_two_exports_at_once_are_both_downloadable(group, video_factory):
+def test_two_exports_at_once_are_both_downloadable(group, video_factory, monkeypatch):
     a, b = group
     _project, _recording, run_id, _steps = a_task(a, video_factory)
     with ThreadPoolExecutor(2) as pool:
@@ -226,6 +227,14 @@ def test_two_exports_at_once_are_both_downloadable(group, video_factory):
         assert download.status_code == 200
         with ZipFile(BytesIO(download.content)) as archive:
             assert "steps.json" in archive.namelist()
+
+    # Once the grace period is over, only the latest is kept.
+    latest = ok(a.get(f"/runs/{run_id}"))["export_bundle"]["id"]
+    older = first if second["id"] == latest else second
+    monkeypatch.setattr(export_cleanup, "EXPORT_GRACE", timedelta(0))
+    assert export_cleanup.clear_old_exports()[0] == 1
+    assert b.get(older["zip_url"]).status_code == 404
+    assert b.get(f"/exports/{latest}/download").status_code == 200
 
 
 def test_renaming_from_a_name_changed_meanwhile_is_refused(group, video_factory):

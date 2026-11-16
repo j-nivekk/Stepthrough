@@ -821,6 +821,30 @@ def get_export_bundle(bundle_id: str) -> dict[str, Any] | None:
     return _row_to_dict(row)
 
 
+def forget_replaced_export_bundles(created_before: str, run_id: str | None = None) -> int:
+    """Forget the exports that are no longer their task's latest, if made before ``created_before`` (all tasks', or
+    one task's). The latest of each task is kept, for when it was made and for downloading it again."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM export_bundles
+            WHERE created_at < :before AND (:run_id IS NULL OR run_id = :run_id)
+              AND id NOT IN (SELECT export_bundle_id FROM detection_runs WHERE export_bundle_id IS NOT NULL)
+            """,
+            {"before": created_before, "run_id": run_id},
+        )
+        return cursor.rowcount
+
+
+def export_bundle_ids(run_id: str | None = None) -> set[str]:
+    """The exports the database still knows: all, or one task's."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id FROM export_bundles WHERE (:run_id IS NULL OR run_id = :run_id)", {"run_id": run_id}
+        ).fetchall()
+    return {row["id"] for row in rows}
+
+
 def get_export_bundle_for_run(run_id: str) -> dict[str, Any] | None:
     with connect() as conn:
         row = conn.execute(

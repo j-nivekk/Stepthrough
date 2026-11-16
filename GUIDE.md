@@ -549,7 +549,8 @@ analysis did, step by step, which helps when a run failed or took longer than ex
 ## 8. Exports
 
 **export accepted** exports the steps you accepted; **export all** exports every step. Under **tasks**,
-**select** lets you export several runs at once. Each export is a zip file with:
+**select** lets you export several runs at once. An export is made from the task as it is at that moment, so
+Stepthrough keeps only the latest of each task: export again whenever you need it. Each export is a zip file with:
 
 - `images/`: one screenshot (PNG) per step, named after the recording, the step number and the time;
 - `steps.csv`: one row per step, to open in a spreadsheet;
@@ -701,8 +702,9 @@ Where two people could get in each other's way, Stepthrough shows it in orange w
   with how far it is, and joins the list when it is in.
 
 A rename made from a name that someone else changed meanwhile is refused, with the new name in the message.
-Every export of a shared account stays downloadable until its task is deleted, so two people exporting the same
-task at the same time each get their own. A browser that loses its connection catches up when it is back.
+Every export of a shared account stays downloadable for ten minutes, even when someone exports the same task
+again, so two people exporting it at the same time each get their own. A browser that loses its connection
+catches up when it is back.
 
 The password of a shared account cannot be changed from the app, because that would log everyone else out.
 An administrator gives the account a new link instead; setting a password with it logs every other browser out.

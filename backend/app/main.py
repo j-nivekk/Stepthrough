@@ -129,6 +129,7 @@ from .services.video import (
     save_upload_file,
     slug_timecode,
 )
+from .export_cleanup import clear_old_exports
 from .live import CLIENT_HEADER, LiveHub, TaskWrites, clean_targets
 from .storage import (
     absolute_data_path,
@@ -282,6 +283,13 @@ def _delete_expired_accounts_hourly() -> None:
                 logger.info("Deleted the account %s and the projects only it owned: its deletion date has come.", name)
         except Exception:  # pragma: no cover - keep trying every hour
             logger.exception("Could not delete expired accounts.")
+        try:
+            removed, freed = clear_old_exports()
+            if removed:
+                exports = "export" if removed == 1 else "exports"
+                logger.info("Removed %d %s that newer ones replaced (%.1f MB).", removed, exports, freed / 1_000_000)
+        except Exception:  # pragma: no cover - keep trying every hour
+            logger.exception("Could not remove replaced exports.")
         time.sleep(3600)
 
 
@@ -1593,6 +1601,10 @@ def _export_run(project: dict, recording: dict, run: dict, payload: ExportReques
         ),
         level="success",
     )
+    try:
+        clear_old_exports(run_id, (DATA_ROOT / output_dir).parent)
+    except Exception:  # the export itself is done; the hourly clean-up tries again
+        logger.exception("Could not remove the replaced exports of run %s.", run_id)
     return _serialize_export_bundle(bundle)
 
 
