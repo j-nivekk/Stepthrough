@@ -9,8 +9,8 @@ export const APP_VERSION: string = __APP_VERSION__;
 export const APP_COMMIT: string = typeof __APP_COMMIT__ === 'string' ? __APP_COMMIT__ : '';
 
 export const REPOSITORY_URL = 'https://github.com/j-nivekk/Stepthrough';
-/** The DOI of Stepthrough on Zenodo, for citing it (all versions). */
-export const DOI = '10.5281/zenodo.24159850';
+/** The DOI of Stepthrough on Zenodo, for citing it: all versions, so it always leads to the newest. */
+export const DOI = '10.5281/zenodo.24159849';
 
 // The Docker build passes the image's tag in: a release carries its version number (`1.0.0`, `1.0.0-ocr`), a
 // build of the main branch carries `edge`. Builds from source carry nothing.

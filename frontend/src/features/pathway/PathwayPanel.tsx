@@ -157,6 +157,10 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
     [pathway, options, aspect, filename, projectName, recording?.duration_ms, selectedScreen?.id],
   );
   const peek = usePathwayPeek(pathway, figure?.svg);
+  // One object per figure: React sets the markup again whenever it gets a new object, even with the same text, and
+  // the analysis page renders every second for its clock. That would draw the chart anew each second and take
+  // away the step a pointer is resting on.
+  const figureMarkup = useMemo(() => (figure ? { __html: figure.svg } : undefined), [figure]);
 
   /** A click on a screen selects its box for editing; a click anywhere else lets go of it. */
   function handleFigureClick(event: MouseEvent<HTMLDivElement>) {
@@ -430,7 +434,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
             aria-label={`pathway of ${filename}; choose a screen above to change it`}
             className="pathway-figure"
             // The markup is built by buildPathwayFigure, which escapes every title, note and address it places.
-            dangerouslySetInnerHTML={{ __html: figure.svg }}
+            dangerouslySetInnerHTML={figureMarkup}
             onClick={handleFigureClick}
             onPointerLeave={peek.onPointerLeave}
             onPointerOver={peek.onPointerOver}

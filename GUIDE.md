@@ -248,8 +248,8 @@ how to record.
 On the start screen, type a name under **create a project** and press **enter**. Use one project per study or
 app: a project keeps its recordings, runs and preferred settings together.
 
-To come back to a project later, pick it from the list. When you point at a project, you see **import**,
-**analysis** and **delete**.
+To come back to a project later, pick it from the list: a project with videos opens on the analysis page, and an
+empty one on the import page. When you point at a project, you see **import**, **analysis** and **delete**.
 
 ### Step 2: import the recording
 

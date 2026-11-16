@@ -114,3 +114,9 @@ test('a loading pathway never borrows a chart from a different run or grouping m
     client.clear();
   }
 });
+
+test('the badge cites the DOI of all versions, which leads to the newest', () => {
+  const figure = buildPathwayFigure(input);
+  assert.ok(figure.svg.includes('doi.org/10.5281/zenodo.24159849'));
+  assert.ok(!figure.svg.includes('zenodo.24159850'));
+});

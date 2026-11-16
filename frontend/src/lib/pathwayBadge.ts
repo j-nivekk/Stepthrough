@@ -8,8 +8,8 @@
  */
 import { BADGE_GLYPHS, BADGE_ITALIC_GLYPHS, BADGE_QR, BADGE_REPOSITORY_URL, BADGE_UNITS_PER_EM, type BadgeGlyph } from './pathwayBadgeData';
 
-/** Where Stepthrough is archived for citing. */
-export const BADGE_DOI = 'doi.org/10.5281/zenodo.24159850';
+/** Where Stepthrough is archived for citing: the DOI of all versions, which leads to the newest. */
+export const BADGE_DOI = 'doi.org/10.5281/zenodo.24159849';
 
 // The badge is laid out in the units of its design and scaled to the figure: the QR code on the left, the
 // text beside it, in a card as wide as its longest line (the DOI) needs.

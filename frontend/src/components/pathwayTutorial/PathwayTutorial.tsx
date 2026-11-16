@@ -842,7 +842,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
       <div aria-labelledby="pt-title" aria-modal="true" className="demo-panel pt-panel" ref={panelRef} role="dialog" tabIndex={-1}>
         <header className="demo-header">
           <div>
-            <p className="demo-eyebrow">tutorial · about 5 minutes · nothing here changes your runs</p>
+            <p className="demo-eyebrow">pathway tutorial</p>
             <h2 id="pt-title">working with pathways</h2>
           </div>
           <button aria-label="close" className="demo-icon-button" onClick={close} title="close (esc)" type="button">

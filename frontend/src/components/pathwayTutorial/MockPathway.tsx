@@ -1,6 +1,5 @@
 import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
 
-import { APP_VERSION } from '../../lib/buildInfo';
 import { ART_HEIGHT as H, ART_WIDTH as W, MockArt } from './MockArt';
 import { MOCK_STEPS, mockStep, type MockPathway as Pathway, type MockScreen } from './tutorialModel';
 
@@ -206,7 +205,7 @@ export function MockPathway({
   const keyTop = chartBottom + 14;
   const keyHeight = chart && notes === 'key' ? 18 + noted.length * 16 : 0;
   const legendTop = chartBottom + 14 + keyHeight + (keyHeight ? 8 : 0);
-  const height = Math.max(caption && chart ? legendTop + 60 : chartBottom + keyHeight + 24, rowTop(0) + H + 66);
+  const height = Math.max(caption && chart ? legendTop + 40 : chartBottom + keyHeight + 24, rowTop(0) + H + 66);
 
   const lineArrows: ReactNode[] = [];
   if (!chart) {
@@ -432,7 +431,7 @@ export function MockPathway({
           })
         : null}
 
-      {/* the legend and the badge, as in the downloaded figure */}
+      {/* the legend, as in the downloaded figure (the badge is left out here) */}
       {caption && chart ? (
         <g className="pt-fade" transform={`translate(0 ${legendTop})`}>
           <line stroke="#d6d6d1" x1={LEFT} x2={DESIGN_WIDTH - LEFT} y1={0} y2={0} />
@@ -452,27 +451,6 @@ export function MockPathway({
             <rect fill="none" height={13} stroke={INK} strokeDasharray="3 2" strokeWidth={0.8} width={9} x={340} y={1} />
             <text fill="#444" fontSize={9.5} x={354} y={10.8}>
               pop-up
-            </text>
-          </g>
-          <g transform={`translate(${DESIGN_WIDTH - LEFT - 150} 8)`}>
-            <rect fill="#fff" height={38} rx={6} stroke="#3c3c3c" width={150} />
-            <g fill={INK} transform="translate(6 6)">
-              {[0, 1, 2, 3, 4, 5].flatMap((row) =>
-                [0, 1, 2, 3, 4, 5].map((col) =>
-                  (row * 7 + col * 3 + row * col) % 3 !== 1 || (row < 2 && col < 2) || (row < 2 && col > 3) || (row > 3 && col < 2) ? (
-                    <rect height={4.3} key={`${row}${col}`} width={4.3} x={col * 4.3} y={row * 4.3} />
-                  ) : null,
-                ),
-              )}
-            </g>
-            <text fontSize={7.5} x={40} y={15}>
-              generated with <tspan fontStyle="italic">Stepthrough</tspan>
-            </text>
-            <text fontSize={7.5} x={40} y={25}>
-              using version {APP_VERSION}
-            </text>
-            <text fill="#555" fontSize={6.5} x={40} y={33}>
-              github.com/j-nivekk/Stepthrough
             </text>
           </g>
         </g>

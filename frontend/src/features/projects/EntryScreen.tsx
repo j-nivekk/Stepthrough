@@ -34,6 +34,11 @@ export interface EntryScreenProps {
   selectedProjectId: string | null;
 }
 
+/** Where a click on a project leads: its analysis once it has videos, the import page while it has none. */
+function entryTarget(project: Project): ProjectEntryTarget {
+  return project.recording_count > 0 ? 'analysis' : 'import';
+}
+
 export function EntryScreen({
   accountNotice,
   appError,
@@ -192,7 +197,7 @@ export function EntryScreen({
                         buttonClassName="entry-rename-button"
                         containerClassName="entry-project-name"
                         displayButtonClassName="entry-project-select-button"
-                        onDisplayClick={() => onOpenProject(project.id, 'import')}
+                        onDisplayClick={() => onOpenProject(project.id, entryTarget(project))}
                         onSave={(nextValue) => onRenameProject(project.id, nextValue)}
                         renameLabel={`rename project ${project.name}`}
                         textClassName="entry-project-name-text"
@@ -200,7 +205,7 @@ export function EntryScreen({
                       />
                       <button
                         className="entry-project-summary-button"
-                        onClick={() => onOpenProject(project.id, 'import')}
+                        onClick={() => onOpenProject(project.id, entryTarget(project))}
                         type="button"
                       >
                         <small>{formatProjectSummary(project)}</small>
