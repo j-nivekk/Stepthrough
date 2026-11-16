@@ -50,21 +50,29 @@ class JobManager:
             except ValueError:
                 return len(self._waiting)
 
+    def _slot_free(self) -> bool:
+        return self._max_concurrent_runs is None or len(self._holding) < self._max_concurrent_runs
+
     def has_free_slot(self) -> bool:
         with self._lock:
-            return self._max_concurrent_runs is None or (not self._waiting and len(self._holding) < self._max_concurrent_runs)
+            return self._max_concurrent_runs is None or (not self._waiting and self._slot_free())
+
+    def set_max_concurrent_runs(self, limit: int | None) -> None:
+        """Change how many runs may hold a slot (None: no limit), for the runs that start or wait from now on.
+        Runs already going keep going; with a higher limit, waiting runs start at once."""
+        with self._slot_changed:
+            self._max_concurrent_runs = limit
+            self._slot_changed.notify_all()
 
     def wait_for_slot(self, run_id: str) -> bool:
         """Block until this run may start. False means it was cancelled while it waited."""
         with self._slot_changed:
-            if self._max_concurrent_runs is None:
-                return run_id not in self._cancelled
             self._waiting.append(run_id)
             try:
                 while True:
                     if run_id in self._cancelled:
                         return False
-                    if self._waiting[0] == run_id and len(self._holding) < self._max_concurrent_runs:
+                    if self._waiting[0] == run_id and self._slot_free():
                         self._holding.add(run_id)
                         return True
                     self._slot_changed.wait()

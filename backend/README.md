@@ -136,7 +136,7 @@ The caller must be an owner of both runs' project.
 | `STEPTHROUGH_CORS_ORIGINS` | the Vite dev and preview origins in `local`; none in `server` | comma-separated origins allowed to call the API from a browser |
 | `STEPTHROUGH_MAX_UPLOAD_MB` | `2048` | largest accepted upload; also enforce it in the reverse proxy (`client_max_body_size`) |
 | `STEPTHROUGH_ALLOW_ADMIN_RESET` | on in `local`, off in `server` | whether `POST /admin/reset-db` is available (it also requires the `X-Stepthrough-Confirm: reset-database` header) |
-| `STEPTHROUGH_MAX_CONCURRENT_RUNS` | no limit in `local`, `2` in `server` | analyses that may run at once; later runs wait as `queued`, first come first served, and can be ended while they wait. `0` lifts the limit |
+| `STEPTHROUGH_MAX_CONCURRENT_RUNS` | no limit in `local`, `2` in `server` | analyses that may run at once; later runs wait as `queued`, first come first served, and can be ended while they wait. `0` lifts the limit. It is the default for the setting administrators change while the server runs (below) |
 | `STEPTHROUGH_FRONTEND_DIR` | unset | a built frontend (`frontend/dist`) to serve from the API's own origin, as the Docker image does; it must contain `index.html` |
 | `STEPTHROUGH_AUTH` | `none` in `local`, `password` in `server` | `none`: no logins, every request comes from the built-in user; `password`: people log in (see [Accounts](#accounts)) |
 | `STEPTHROUGH_PUBLIC_URL` | unset | the address people open, such as `https://stepthrough.example.org`, so `python -m app.users` prints whole links; an `https` address also keeps the session cookie to HTTPS, even when the web server in front does not say the browser used HTTPS |
@@ -210,6 +210,20 @@ In both modes, requests that change something are refused when the browser says 
 is switched off, and `/health` gives its details (folders, library versions) only to administrators. A database
 reset deletes projects but keeps accounts.
 
+## Server settings and compression
+
+`app/server_settings.py` holds what an administrator changes while the server runs (`GET` and `PATCH
+/admin/server-settings`, shown on the users page under **server**). Each starts from the configuration and is stored
+in `server_settings` once changed, unless changed back to the configuration's value:
+
+- `analyses_at_a_time` (0: no limit) sets the job manager's limit at once; with a higher limit, runs waiting start.
+  Analyses are threads of the one process, so more than two or three mostly slows the API down;
+- `compression` switches `app/compression.py` on or off. It gzips answers of 1 KB or more whose type is JSON,
+  text, JavaScript or SVG, for browsers that accept it, and leaves media, zips, partial answers (`Range`) and `HEAD`
+  alone. A large task is a tenth of its size compressed;
+- `live_spread_seconds`: the live feed tells browsers (`pace.spread_ms`) to reload a task after a change at a
+  random moment within this time, after the usual pause, so the browsers of a shared account spread their requests.
+
 ## Shared accounts
 
 An account tagged `shared` (never one with `admin`; the tag is refused there and removed by the migration) is for a
@@ -241,4 +255,4 @@ one server process:
 - **Exports** of a shared account are all kept (`export_bundles.retained`) for ten minutes, even when a newer
   export of the task replaces them, so two people exporting the same task at once each download their own.
 
-`tests/test_shared_accounts.py` covers these.
+`tests/test_shared_accounts.py` covers these, and `tests/test_server_settings.py` the settings and compression.

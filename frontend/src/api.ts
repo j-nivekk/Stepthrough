@@ -21,6 +21,8 @@ import type {
   RunSettings,
   RunSummary,
   SavedRunSettings,
+  ServerSettings,
+  ServerSettingsChanges,
   SessionInfo,
   UserImportResult,
   UserLink,
@@ -362,6 +364,14 @@ export function changePassword(currentPassword: string, newPassword: string): Pr
     '/me/password',
     jsonBody('POST', { current_password: currentPassword, new_password: newPassword }),
   );
+}
+
+export function getServerSettings(): Promise<ServerSettings> {
+  return request<ServerSettings>('/admin/server-settings');
+}
+
+export function updateServerSettings(changes: ServerSettingsChanges): Promise<ServerSettings> {
+  return request<ServerSettings>('/admin/server-settings', jsonBody('PATCH', changes));
 }
 
 export function listUsers(): Promise<AdminUser[]> {

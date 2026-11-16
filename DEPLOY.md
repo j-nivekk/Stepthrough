@@ -17,7 +17,8 @@ theirs: others cannot see them, except the server's administrators.
 - A web server with a TLS certificate for a subdomain, for example `stepthrough.example.org`. Stepthrough must sit at
   the root of its domain; a path such as `example.org/stepthrough/` does not work.
 - CPU: each analysis keeps one or two cores busy while it runs. `STEPTHROUGH_MAX_CONCURRENT_RUNS` (default 2) sets how
-  many run at once; the rest wait in line.
+  many run at once; the rest wait in line. Analyses share the server's one process, so more cores do not make more
+  of them at once faster: beyond two or three, they mostly slow the app down for everyone.
 - Disk: about twice the size of everything uploaded. Each recording is kept as uploaded, plus a working copy used for
   analysis and previews, plus screenshots and exports.
 
@@ -49,7 +50,7 @@ Edit `.env`, then apply it with `docker compose up -d --wait`. Every setting is 
 | `STEPTHROUGH_TAG` | `stable` | image version: `stable` (latest release), a release such as `1.0.0`, or `edge` (latest from `main`) |
 | `STEPTHROUGH_BIND_ADDRESS` | `127.0.0.1` | host address to listen on; keep `127.0.0.1` behind a web server |
 | `STEPTHROUGH_PORT` | `8080` | host port |
-| `STEPTHROUGH_MAX_CONCURRENT_RUNS` | `2` | analyses that run at once; `0` is no limit |
+| `STEPTHROUGH_MAX_CONCURRENT_RUNS` | `2` | analyses that run at once; `0` is no limit. Administrators can change it while the server runs (see [Accounts](#accounts)) |
 | `STEPTHROUGH_MAX_UPLOAD_MB` | `1024` | largest recording accepted; nginx's `client_max_body_size` must be at least this |
 | `STEPTHROUGH_CPUS`, `STEPTHROUGH_MEMORY` | `0` (no limit) | caps for the container, for example `4` and `8g`, so analyses cannot starve other tools on the host |
 | `STEPTHROUGH_VOLUME` | `stepthrough_data` | name of the Docker volume with all data |
@@ -66,6 +67,9 @@ settings, Stepthrough needs three things from the web server:
 - WebSocket upgrades (the `Upgrade` and `Connection` headers), which carry live progress while a run works;
 - long timeouts and no request buffering, so large uploads and long runs are not cut off. Browsers of a shared
   account also wait up to 25 seconds at a time for each other's changes (`/me/live`), so the read timeout must be longer.
+
+Stepthrough compresses its data, pages and scripts itself, so the web server need not (it leaves them alone once
+compressed).
 
 The example also does three things for security. It **replaces** `X-Forwarded-For` with the visitor's address
 instead of adding to it, so login limits count real addresses (another web server must do the same). It limits
@@ -111,6 +115,12 @@ docker compose exec stepthrough python -m app.users link yourname          # a n
 docker compose exec -T stepthrough python -m app.users import /dev/stdin --tag group-a < people.csv > links.csv
 docker compose exec stepthrough python -m app.users --help                 # everything else
 ```
+
+**The server's settings.** Under **server** on the users page, administrators change, while Stepthrough runs and for
+everyone at once: how many analyses run at a time (it starts as `STEPTHROUGH_MAX_CONCURRENT_RUNS` has it), whether
+answers are compressed (a switch in case something goes wrong with it), and over how many seconds the browsers of a
+shared account spread reloading a task after a change. The changes are kept in the database and outlast restarts;
+each says when it differs from the server's configuration.
 
 **Upgrading from a version without accounts.** Projects made before then belong to a built-in account that nobody
 logs in with, so they appear in nobody's list. Take them over with **take over its projects** on the built-in
@@ -256,7 +266,8 @@ same in all but the last point.
 - It serves the interface and the API from one address, so no cross-origin settings are needed.
 - People log in (`STEPTHROUGH_AUTH=password`); from source, the app has no logins unless that is set.
 - The database reset in **settings** is switched off.
-- At most `STEPTHROUGH_MAX_CONCURRENT_RUNS` analyses run at once; later ones show as `queued` and start in order.
+- At most `STEPTHROUGH_MAX_CONCURRENT_RUNS` analyses run at once (or what an administrator set under **server**); later
+  ones show as `queued` and start in order.
 - It runs as one process, because live progress and the run queue are kept in memory. Restarting ends active runs.
 - The container runs as an unprivileged user with no extra Linux capabilities. Logs go to Docker
   (`docker compose logs -f`), rotated at 5 × 10 MB.

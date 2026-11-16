@@ -163,6 +163,13 @@ CREATE TABLE IF NOT EXISTS saved_run_settings (
     saved_at TEXT NOT NULL
 );
 
+-- What an administrator changed while the server runs (app/server_settings.py); a value as JSON.
+CREATE TABLE IF NOT EXISTS server_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_run_settings_scope ON saved_run_settings(user_id, IFNULL(project_id, ''));
 CREATE INDEX IF NOT EXISTS idx_saved_run_settings_project ON saved_run_settings(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_members_member ON project_members(member);

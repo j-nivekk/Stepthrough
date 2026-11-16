@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { listUsers } from '../../api';
 import type { AdminUser } from '../../types';
 import { AddPeoplePanel } from './AddPeoplePanel';
+import { ServerSettingsPanel } from './ServerSettingsPanel';
 import { UserBatchBar } from './UserBatchBar';
 import { UserRow } from './UserRow';
 
@@ -85,12 +86,15 @@ export function UsersScreen({ currentUserId, onBack }: UsersScreenProps) {
         </div>
 
         <div className="users-grid">
-          <AddPeoplePanel
-            onChanged={() => {
-              setNotice('');
-              return refresh();
-            }}
-          />
+          <div className="users-side">
+            <AddPeoplePanel
+              onChanged={() => {
+                setNotice('');
+                return refresh();
+              }}
+            />
+            <ServerSettingsPanel />
+          </div>
 
           <section className="analysis-column users-people-column">
             <div className="analysis-column-head">

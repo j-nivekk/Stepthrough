@@ -268,7 +268,20 @@ export interface LiveState {
   events: LiveEvent[];
   presence: LivePresence[];
   busy: LiveBusy[];
+  /** How the server asks browsers to pace their reloads: at a random moment within `spread_ms`, so that the
+   *  browsers of a shared account do not all load a task at once. */
+  pace?: { spread_ms: number };
 }
+
+/** What an administrator can change while the server runs, each with the server's own configuration as default. */
+export interface ServerSettings {
+  /** How many analyses run together; 0 is no limit. */
+  analyses_at_a_time: { value: number; default: number };
+  compression: { value: boolean; default: boolean };
+  live_spread_seconds: { value: number; default: number };
+}
+
+export type ServerSettingsChanges = Partial<{ [K in keyof ServerSettings]: ServerSettings[K]['value'] }>;
 
 export interface AcceptedStep {
   step_id: string;

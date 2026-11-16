@@ -821,6 +821,27 @@ def get_export_bundle(bundle_id: str) -> dict[str, Any] | None:
     return _row_to_dict(row)
 
 
+def get_server_settings() -> dict[str, str]:
+    """What administrators changed (app/server_settings.py), each value as JSON."""
+    with connect() as conn:
+        return {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM server_settings")}
+
+
+def set_server_settings(changes: dict[str, str | None]) -> None:
+    """Store values (as JSON), or with None go back to the server's configuration for that setting."""
+    now = utc_now()
+    with connect() as conn:
+        for key, value in changes.items():
+            if value is None:
+                conn.execute("DELETE FROM server_settings WHERE key = ?", (key,))
+            else:
+                conn.execute(
+                    "INSERT INTO server_settings (key, value, updated_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                    (key, value, now),
+                )
+
+
 def forget_replaced_export_bundles(created_before: str, run_id: str | None = None) -> int:
     """Forget the exports that are no longer their task's latest, if made before ``created_before`` (all tasks', or
     one task's). The latest of each task is kept, for when it was made and for downloading it again."""

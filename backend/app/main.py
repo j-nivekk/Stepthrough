@@ -129,8 +129,10 @@ from .services.video import (
     save_upload_file,
     slug_timecode,
 )
+from .compression import CompressMiddleware
 from .export_cleanup import clear_old_exports
 from .live import CLIENT_HEADER, LiveHub, TaskWrites, clean_targets
+from . import server_settings
 from .storage import (
     absolute_data_path,
     asset_url,
@@ -184,6 +186,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(account_router)
+app.include_router(server_settings.router)
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
@@ -225,6 +228,10 @@ async def add_security_headers(request: Request, call_next):
     for header, value in SECURITY_HEADERS.items():
         response.headers.setdefault(header, value)
     return response
+
+
+# Outermost of all: what the others send is compressed when it is worth it and an administrator has not switched it off.
+app.add_middleware(CompressMiddleware, enabled=server_settings.compression_enabled)
 
 
 def _checking_ocr_state() -> OcrHealthState:
@@ -309,7 +316,8 @@ def startup() -> None:
     _start_account_cleanup()
     app.state.tool_diagnostics = build_tool_diagnostics()
     _set_ocr_state(_checking_ocr_state())
-    app.state.job_manager = JobManager(max_concurrent_runs=server_config.max_concurrent_runs)
+    server_settings.load(server_config.max_concurrent_runs)
+    app.state.job_manager = JobManager(max_concurrent_runs=server_settings.analyses_limit())
     app.state.live = LiveHub()
     app.state.task_writes = TaskWrites()
     fail_interrupted_runs(INTERRUPTED_RUN_MESSAGE)
@@ -962,7 +970,8 @@ def admin_reset_db(
     if confirm != "reset-database":
         raise HTTPException(status_code=400, detail=f"Send the `{ADMIN_CONFIRM_HEADER}: reset-database` header to confirm.")
     reset_db()
-    app.state.job_manager = JobManager(max_concurrent_runs=server_config.max_concurrent_runs)
+    server_settings.load(server_config.max_concurrent_runs)
+    app.state.job_manager = JobManager(max_concurrent_runs=server_settings.analyses_limit())
     return Response(status_code=204)
 
 
@@ -992,7 +1001,9 @@ async def live_changes(user: CurrentUser, after: int | None = None, epoch: str |
         deadline = time.monotonic() + max(0.0, min(wait, 25.0))
         while hub.seq(user.id) <= known and time.monotonic() < deadline:
             await asyncio.sleep(0.25)
-    return hub.snapshot(user.id, known)
+    answer = hub.snapshot(user.id, known)
+    answer["pace"] = {"spread_ms": round(server_settings.value("live_spread_seconds") * 1000)}
+    return answer
 
 
 @app.put("/me/presence", status_code=204)

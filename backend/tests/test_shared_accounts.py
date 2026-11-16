@@ -279,6 +279,14 @@ def test_nobody_changes_the_password_for_the_whole_group(group, logins):
     logins("group", "browser-c")  # and the password is the same
 
 
+def test_the_feed_says_how_far_to_spread_reloads(group, logins):
+    a, _b = group
+    assert start(a)["pace"] == {"spread_ms": 1500}
+    create_account("admin", tags=["admin"], password=PASSWORD)
+    ok(logins("admin", "browser-admin").patch("/admin/server-settings", json={"live_spread_seconds": 4}))
+    assert start(a)["pace"] == {"spread_ms": 4000}
+
+
 def test_the_hub_shows_busy_work_only_while_it_runs():
     hub = live.LiveHub()
     with hub.busy({"group"}, {"run_id": "run-1", "label": "merging two screens"}):

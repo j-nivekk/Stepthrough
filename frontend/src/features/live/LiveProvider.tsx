@@ -16,6 +16,13 @@ const PRESENCE_REPEAT_MS = 10_000;
 /** After a step changes elsewhere, what is derived from it (accepted steps, the pathway) is loaded again this
  *  long after the last such change, so a burst of decisions costs one reload, not one per step. */
 const RECONCILE_MS = 1200;
+/** Reloads of a task then wait a further random moment within this (the server may say otherwise), so that the
+ *  browsers of a shared account spread theirs instead of all asking at the same instant. */
+const DEFAULT_SPREAD_MS = 1500;
+
+function spread(spreadMs: number): number {
+  return Math.random() * spreadMs;
+}
 
 interface LiveValue {
   enabled: boolean;
@@ -50,6 +57,8 @@ export function LiveProvider({ enabled, children }: { enabled: boolean; children
     let epoch: string | null = null;
     const reconcile = new Map<string, QueryKeyPrefix>();
     let reconcileTimer: number | undefined;
+    const laterTimers = new Set<number>();
+    let spreadMs = DEFAULT_SPREAD_MS;
 
     function invalidate(keys: QueryKeyPrefix[]) {
       for (const queryKey of keys) void queryClient.invalidateQueries({ queryKey: [...queryKey] });
@@ -62,11 +71,20 @@ export function LiveProvider({ enabled, children }: { enabled: boolean; children
         const due = [...reconcile.values()];
         reconcile.clear();
         invalidate(due);
-      }, RECONCILE_MS);
+      }, RECONCILE_MS + spread(spreadMs));
+    }
+
+    function invalidateSoon(keys: QueryKeyPrefix[]) {
+      const timer = window.setTimeout(() => {
+        laterTimers.delete(timer);
+        invalidate(keys);
+      }, spread(spreadMs));
+      laterTimers.add(timer);
     }
 
     function apply(events: Awaited<ReturnType<typeof waitForChanges>>['events']) {
       const stale = new Map<string, QueryKeyPrefix>();
+      const taskStale = new Map<string, QueryKeyPrefix>();
       for (const event of events) {
         // This browser shows its own changes already.
         if (event.kind === 'state' || event.by === CLIENT_ID) continue;
@@ -76,9 +94,12 @@ export function LiveProvider({ enabled, children }: { enabled: boolean; children
           reconcileSoon(staleQueries(event));
           continue;
         }
-        for (const key of staleQueries(event)) stale.set(JSON.stringify(key), key);
+        // A whole task loaded again (a run or recording changed): spread, like the reloads above. The rest is small.
+        const into = event.kind === 'run' || event.kind === 'recording' ? taskStale : stale;
+        for (const key of staleQueries(event)) into.set(JSON.stringify(key), key);
       }
       invalidate([...stale.values()]);
+      if (taskStale.size) invalidateSoon([...taskStale.values()]);
     }
 
     async function listen() {
@@ -100,6 +121,7 @@ export function LiveProvider({ enabled, children }: { enabled: boolean; children
           }
           after = live.seq;
           epoch = live.epoch;
+          spreadMs = live.pace?.spread_ms ?? DEFAULT_SPREAD_MS;
           const next = { presence: live.presence, busy: live.busy };
           setState((previous) => (sameState(previous, next) ? previous : next));
         } catch {
@@ -118,6 +140,7 @@ export function LiveProvider({ enabled, children }: { enabled: boolean; children
       stopped = true;
       controller?.abort();
       window.clearTimeout(reconcileTimer);
+      for (const timer of laterTimers) window.clearTimeout(timer);
       setState({ presence: [], busy: [] });
     };
   }, [enabled, queryClient]);

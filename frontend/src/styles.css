@@ -7937,6 +7937,29 @@ button:disabled {
 
 /* The people column fills the window down to just above the watermark, and its list scrolls inside it, whatever
    the select mode's bar above the list takes. */
+/* The left column: adding people, and below it what an administrator can change about the server. */
+.users-side {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+
+.users-server-number {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.users-server-number .users-control {
+  width: 72px;
+}
+
+.users-server-unit {
+  min-width: 1ch;
+  color: var(--muted);
+}
+
 .users-people-column {
   height: calc(100dvh - 76px - 72px);
 }
