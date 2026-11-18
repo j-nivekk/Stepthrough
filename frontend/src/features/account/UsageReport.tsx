@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import { getUsageReport } from '../../api';
 import { TUTORIAL_LESSON_NAMES } from '../../components/pathwayTutorial/PathwayTutorial';
 import { downloadText } from '../../lib/accountLinks';
@@ -204,7 +204,12 @@ export function UsageReport({ filter, onFilterChange, tags }: ReportProps) {
   const opened = Math.max(1, tutorial.opened);
   const stageTotal = Math.max(1, ...STAGES.map((stage) => totals.stage_minutes[stage]));
   const corrections = Object.entries(totals.corrections_by_choice).filter(([, count]) => count);
-  const gridEvery = tickEvery(report.days_list.length);
+  // The grid's cells are wider for a short period. Its day labels (about 6px a character) are spaced so that none
+  // runs into the next, counted back from the last day so that today always has one.
+  const dayCount = report.days_list.length;
+  const dayCell = dayCount <= 14 ? 28 : dayCount <= 31 ? 20 : 14;
+  const labelWidth = Math.max(1, ...report.days_list.map((day) => dayLabel(day.date).length)) * 6 + 8;
+  const gridEvery = Math.max(1, Math.ceil(labelWidth / (dayCell + 2)));
   return (
     <div className={`usage-report ${reportQuery.isFetching ? 'is-refreshing' : ''}`}>
       {filters}
@@ -307,13 +312,13 @@ export function UsageReport({ filter, onFilterChange, tags }: ReportProps) {
           </span>
         </p>
         <div className="usage-table-scroll">
-          <table className="usage-days-grid">
+          <table className="usage-days-grid" style={{ '--day-cell': `${dayCell}px` } as CSSProperties}>
             <thead>
               <tr>
                 <th />
                 {report.days_list.map((day, index) => (
                   <th key={day.date} scope="col" title={dayLabel(day.date, true)}>
-                    {index % gridEvery === 0 ? <span>{dayLabel(day.date)}</span> : null}
+                    {(dayCount - 1 - index) % gridEvery === 0 ? <span>{dayLabel(day.date)}</span> : null}
                   </th>
                 ))}
               </tr>

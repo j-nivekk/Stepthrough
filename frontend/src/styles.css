@@ -8626,19 +8626,20 @@ button:disabled {
   white-space: nowrap;
 }
 
-/* A day's label hangs over the days after it, so every column stays one cell wide. */
+/* A day's label ends at its own column and hangs over the days before it (unlabelled, as the labels are spaced in
+   UsageReport), so every column stays one cell wide. --day-cell is the cell's size for the period. */
 .usage-days-grid thead th {
   position: relative;
-  width: 14px;
-  min-width: 14px;
-  max-width: 14px;
+  width: var(--day-cell, 14px);
+  min-width: var(--day-cell, 14px);
+  max-width: var(--day-cell, 14px);
   height: 18px;
   padding: 0;
 }
 
 .usage-days-grid thead th span {
   position: absolute;
-  left: 0;
+  right: 0;
   bottom: 2px;
   white-space: nowrap;
 }
@@ -8651,8 +8652,8 @@ button:disabled {
 }
 
 .usage-days-grid td {
-  width: 14px;
-  min-width: 14px;
+  width: var(--day-cell, 14px);
+  min-width: var(--day-cell, 14px);
   height: 14px;
   padding: 0;
   box-shadow: inset 0 0 0 1px var(--admin-surface);
