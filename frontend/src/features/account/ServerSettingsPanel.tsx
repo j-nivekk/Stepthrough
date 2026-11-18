@@ -1,7 +1,118 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { getServerSettings, updateServerSettings } from '../../api';
+import { useConfirm } from '../../components/ConfirmDialog';
 import type { ServerSettings, ServerSettingsChanges } from '../../types';
+
+/** How long usage and traffic are kept: days, 0 for nothing, null for ever. */
+const KEEP_CHOICES: Array<[number | null, string]> = [
+  [0, 'off'],
+  [14, '2 weeks'],
+  [21, '3 weeks'],
+  [28, '4 weeks'],
+  [56, '8 weeks'],
+  [null, 'for ever'],
+];
+
+export function keepLabel(days: number | null): string {
+  const named = KEEP_CHOICES.find(([value]) => value === days);
+  if (named) return named[1] === 'off' ? 'not at all' : named[1];
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+/** The keeping time of usage and traffic: a few usual lengths, for ever, off, or a number of days. A shorter time
+ * deletes what is older at once, so it asks first. */
+function KeepSetting({ onSave, value }: { onSave: (value: number | null) => void; value: number | null }) {
+  const named = KEEP_CHOICES.some(([days]) => days === value);
+  const [custom, setCustom] = useState(!named);
+  const [draft, setDraft] = useState(value === null ? '' : String(value));
+  const { confirm, dialog } = useConfirm();
+  useEffect(() => {
+    setDraft(value === null ? '' : String(value));
+    if (!KEEP_CHOICES.some(([days]) => days === value)) setCustom(true);
+  }, [value]);
+
+  async function choose(next: number | null) {
+    if (next === value) return;
+    const shorter = next !== null && (value === null || next < value);
+    if (shorter) {
+      const confirmed = await confirm({
+        message: next === 0 ? 'stop recording usage and traffic?' : `keep usage and traffic for ${keepLabel(next)}?`,
+        detail:
+          next === 0
+            ? 'everything recorded so far is deleted now, and nothing more is recorded. this cannot be undone.'
+            : `whatever is older than ${keepLabel(next)} is deleted now. this cannot be undone.`,
+        confirmLabel: next === 0 ? 'stop and delete' : 'delete older',
+        danger: true,
+      });
+      if (!confirmed) {
+        setDraft(value === null ? '' : String(value));
+        return;
+      }
+    }
+    onSave(next);
+  }
+
+  function commitCustom() {
+    const days = Number(draft);
+    if (draft.trim() === '' || !Number.isInteger(days) || days < 1 || days > 3650) {
+      setDraft(value === null ? '' : String(value));
+      return;
+    }
+    void choose(days);
+  }
+
+  return (
+    <label className="analysis-parameter-row">
+      <span>keep usage for</span>
+      <span className="users-server-number">
+        <select
+          className="users-control users-keep-select"
+          onChange={(event) => {
+            if (event.target.value === 'custom') {
+              setCustom(true);
+              return;
+            }
+            setCustom(false);
+            void choose(event.target.value === 'forever' ? null : Number(event.target.value));
+          }}
+          value={custom ? 'custom' : value === null ? 'forever' : String(value)}
+        >
+          {KEEP_CHOICES.map(([days, label]) => (
+            <option key={label} value={days === null ? 'forever' : String(days)}>
+              {label}
+            </option>
+          ))}
+          <option value="custom">custom…</option>
+        </select>
+        {custom ? (
+          <>
+            <input
+              aria-label="days to keep usage and traffic"
+              className="users-control users-keep-days"
+              max={3650}
+              min={1}
+              onBlur={commitCustom}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                // the Enter must end here: otherwise it also presses the button the question below focuses
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  event.currentTarget.blur();
+                }
+              }}
+              step={1}
+              type="number"
+              value={draft}
+            />
+            <span className="users-server-unit">d</span>
+          </>
+        ) : null}
+      </span>
+      {dialog}
+    </label>
+  );
+}
 
 /** A number field that saves when it is left or Enter is pressed, and shows the saved value otherwise. */
 function NumberSetting({
@@ -129,18 +240,11 @@ export function ServerSettingsPanel() {
           </div>
 
           <div className="analysis-parameter-group">
-            <NumberSetting
-              label="keep usage for"
-              max={90}
-              min={0}
-              onSave={(value) => save({ usage_keep_days: value })}
-              step={1}
-              unit="d"
-              value={settings.usage_keep_days.value}
-            />
+            <KeepSetting onSave={(value) => save({ usage_keep_days: value })} value={settings.usage_keep_days.value} />
             <span className="analysis-parameter-annotation">
-              days that the usage report under usage keeps what it records, then deletes it; 0 records nothing and
-              deletes what there is. {fromConfiguration(settings.usage_keep_days, `${settings.usage_keep_days.default} days`)}
+              how long the usage and traffic reports keep what they record, then delete it: 4 weeks is half a teaching
+              block of 8 weeks; custom is a number of days. off records nothing; for ever keeps everything until you choose a shorter time.
+              progress is read from the projects and is not affected. {fromConfiguration(settings.usage_keep_days, keepLabel(settings.usage_keep_days.default))}
             </span>
           </div>
 

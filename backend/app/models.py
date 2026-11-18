@@ -557,6 +557,10 @@ class CandidateUpdate(BaseModel):
     screen_kind: Literal["auto", "screen", "popup"] | None = None
 
 
+class PathwayFigureDownload(BaseModel):
+    format: Literal["svg", "png"]
+
+
 class CandidateStatusUpdate(BaseModel):
     """Accept or reject several steps of one task at once."""
 

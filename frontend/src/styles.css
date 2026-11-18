@@ -6143,7 +6143,9 @@ button:disabled {
 /* Our own arrow, 10px in from the right like the text from the left: the browser's own sits against the right
    edge whatever the padding. */
 .pathway-editor select,
-.run-compare-select {
+.run-compare-select,
+.users-keep-select,
+.usage-class-select {
   -webkit-appearance: none;
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23000' stroke-opacity='.6' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -7882,7 +7884,7 @@ button:disabled {
   border: none;
   border-radius: 0;
   padding: 0 8px;
-  background: var(--analysis-surface-overlay);
+  background-color: var(--analysis-surface-overlay);
   color: #000;
   font-size: 12px;
   line-height: 24px;
@@ -8000,6 +8002,11 @@ button:disabled {
 
 .users-server-number .users-control {
   width: 72px;
+}
+
+.users-server-number .users-keep-select {
+  width: auto;
+  padding-right: 28px;
 }
 
 .users-server-unit {
@@ -8278,11 +8285,12 @@ button:disabled {
   display: none;
 }
 
+/* The reports use the whole width of the page: charts and sections side by side where there is room. */
 .usage-report {
   display: flex;
   flex-direction: column;
   gap: 28px;
-  max-width: 1080px;
+  min-width: 0;
   margin-top: 20px;
   padding-bottom: 72px;
   transition: opacity 160ms ease;
@@ -8301,8 +8309,53 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 12px 28px;
+}
+
+.usage-filters > .usage-downloads {
+  margin-left: auto;
+}
+
+.usage-filter-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.usage-dates {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.usage-dates .users-control {
+  width: auto;
+}
+
+.usage-class-select {
+  min-width: 150px;
+  padding-right: 28px;
+}
+
+/* Two (or more) parts side by side, each at least about half a laptop screen wide. */
+.usage-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
+  gap: 28px 44px;
+  align-items: start;
+}
+
+.usage-row > * {
+  min-width: 0;
+}
+
+.usage-small-multiples {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
+  gap: 16px 24px;
 }
 
 .usage-downloads {
@@ -8442,6 +8495,11 @@ button:disabled {
   gap: 10px;
 }
 
+/* A list of bars on its own row: wide enough to compare, not so wide the bars lose their ends. */
+.usage-section-narrow {
+  max-width: 900px;
+}
+
 .usage-lessons {
   display: flex;
   flex-direction: column;
@@ -8531,6 +8589,162 @@ button:disabled {
 
 .usage-privacy {
   max-width: 760px;
+}
+
+/* Minutes making changes per account and day: a cell per day, shaded in the four greys of GRID_STEPS. */
+.usage-days-legend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.usage-days-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  vertical-align: -1px;
+}
+
+.usage-days-none {
+  box-shadow: inset 0 0 0 1px var(--admin-surface);
+}
+
+.usage-days-grid {
+  border-collapse: separate;
+  border-spacing: 2px;
+  font-size: 11px;
+  table-layout: fixed;
+}
+
+.usage-days-grid th {
+  padding: 0 4px;
+  color: var(--muted);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+/* A day's label hangs over the days after it, so every column stays one cell wide. */
+.usage-days-grid thead th {
+  position: relative;
+  width: 14px;
+  min-width: 14px;
+  max-width: 14px;
+  height: 18px;
+  padding: 0;
+}
+
+.usage-days-grid thead th span {
+  position: absolute;
+  left: 0;
+  bottom: 2px;
+  white-space: nowrap;
+}
+
+.usage-days-grid tbody th {
+  padding-right: 10px;
+  text-align: left;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.usage-days-grid td {
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0;
+  box-shadow: inset 0 0 0 1px var(--admin-surface);
+}
+
+.usage-days-grid td span {
+  display: block;
+  width: 100%;
+  height: 14px;
+}
+
+/* Progress: a cell per stage, with the date it was reached or how much of it is done. */
+.progress-head {
+  align-items: center;
+}
+
+.progress-table thead th {
+  text-align: left;
+}
+
+.progress-table th[scope='row'] {
+  text-align: left;
+  font-weight: 400;
+  color: var(--text);
+  white-space: normal;
+  min-width: 180px;
+}
+
+.progress-account {
+  font-weight: 600;
+}
+
+.progress-project-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.progress-project th[scope='row'] {
+  padding-left: 24px;
+}
+
+.progress-table td {
+  vertical-align: top;
+}
+
+.progress-cell {
+  min-width: 110px;
+  text-align: left !important;
+}
+
+.progress-mark {
+  display: block;
+  color: var(--muted);
+}
+
+.progress-cell.is-reached .progress-mark {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.progress-meter {
+  width: 100%;
+  max-width: 120px;
+  height: 6px;
+  margin: 4px 0 2px;
+}
+
+.progress-text {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: normal;
+}
+
+.progress-done {
+  font-weight: 600;
+}
+
+.progress-flags {
+  min-width: 160px;
+  text-align: left !important;
+  white-space: normal !important;
+  color: var(--text);
+}
+
+/* A stage that does not count toward done (the pathway figure, when it is not needed): faded. */
+.is-not-counted {
+  opacity: 0.5;
 }
 
 @media (max-width: 720px) {

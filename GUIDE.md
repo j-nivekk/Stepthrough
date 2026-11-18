@@ -738,10 +738,16 @@ time. Ask the people who run the server how long recordings are kept, and do not
 other people without their consent.
 
 A server also keeps a record of how Stepthrough is used, for the people who teach with it: when people are in the
-app, what they do (such as uploading, analysing, deciding on steps and exporting) and how far they get with the
-pathway tutorial, and how much data goes to and from each account. It counts each login in each browser, so it can
-tell how many people work under a shared account, but it does not record names, addresses, files or anything you
-write, and it deletes the record after 14 days unless the administrators set another time. Stepthrough on your own computer records none of this.
+app and on which page, what they do (such as uploading, analysing, deciding on steps, correcting the pathway and
+exporting) and how far they get with the pathway tutorial, and how much data goes to and from each account. It counts
+each login in each browser, so it can tell how many people work under a shared account, but it does not record
+names, addresses, files or anything you write. It deletes the record after 14 days unless the administrators set
+another time, which can be longer, such as a whole course, or until they delete it.
+
+The administrators also see how far each account has got with its projects: videos uploaded and analysed, steps
+decided, steps with a title or notes, pathway figures downloaded and exports, with the dates they were done. This is
+read from the projects themselves, as counts and dates, not from what anyone wrote. Stepthrough on your own computer
+records none of this.
 
 ## 12. Credits and references
 

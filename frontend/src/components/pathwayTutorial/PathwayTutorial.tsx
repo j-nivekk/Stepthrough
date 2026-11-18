@@ -902,7 +902,13 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
               )}
             </div>
             {after}
-            <a className="demo-guide-link" href={`${GUIDE_URL}${info.guide}`} rel="noreferrer" target="_blank">
+            <a
+              className="demo-guide-link"
+              href={`${GUIDE_URL}${info.guide}`}
+              onClick={() => track({ kind: 'guide_opened', from: 'tutorial' })}
+              rel="noreferrer"
+              target="_blank"
+            >
               in the guide: {info.guideLabel} ↗
             </a>
           </section>

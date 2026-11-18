@@ -21,6 +21,8 @@ import type {
   RunSettings,
   RunSummary,
   SavedRunSettings,
+  ProgressReport,
+  ReportFilter,
   ServerSettings,
   ServerSettingsChanges,
   SessionInfo,
@@ -147,15 +149,35 @@ export function sendUsage(events: UsageEvent[], keepalive = false): Promise<void
   return request<void>('/me/usage', { ...jsonBody('POST', { events }), keepalive });
 }
 
-export function getTrafficReport(days: number): Promise<TrafficReport> {
-  const tz = -new Date().getTimezoneOffset();
-  return request<TrafficReport>(`/admin/traffic?days=${days}&tz=${tz}`);
+/** The query of a report for `filter`, with this computer's time zone (minutes east of UTC), so that the report's
+ * hours and days are the reader's own. */
+function reportQuery(filter: ReportFilter): string {
+  const query = new URLSearchParams({ tz: String(-new Date().getTimezoneOffset()) });
+  if ('days' in filter.period) query.set('days', String(filter.period.days));
+  else {
+    query.set('start', filter.period.start);
+    query.set('end', filter.period.end);
+  }
+  if (filter.tag) query.set('tag', filter.tag);
+  return query.toString();
 }
 
-export function getUsageReport(days: number): Promise<UsageReport> {
-  // minutes east of UTC, so the report's hours and days are the reader's own
-  const tz = -new Date().getTimezoneOffset();
-  return request<UsageReport>(`/admin/usage?days=${days}&tz=${tz}`);
+export function getTrafficReport(filter: ReportFilter): Promise<TrafficReport> {
+  return request<TrafficReport>(`/admin/traffic?${reportQuery(filter)}`);
+}
+
+/** `long`: with a row for every account, day and measure, for the long CSV. */
+export function getUsageReport(filter: ReportFilter, long = false): Promise<UsageReport> {
+  return request<UsageReport>(`/admin/usage?${reportQuery(filter)}${long ? '&long=true' : ''}`);
+}
+
+export function getProgressReport(tag: string): Promise<ProgressReport> {
+  return request<ProgressReport>(`/admin/progress${tag ? `?tag=${encodeURIComponent(tag)}` : ''}`);
+}
+
+/** A pathway figure was downloaded: for the usage and progress reports (the server decides whether it counts). */
+export function notePathwayFigure(runId: string, format: 'svg' | 'png'): Promise<void> {
+  return request<void>(`/runs/${runId}/pathway/figure`, jsonBody('POST', { format }));
 }
 
 export interface UploadOptions {

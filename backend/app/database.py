@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS detection_runs (
     started_at TEXT,
     completed_at TEXT,
     updated_at TEXT NOT NULL,
-    export_bundle_id TEXT
+    export_bundle_id TEXT,
+    -- When a pathway figure of it was first downloaded, for the progress report (app/progress.py).
+    figure_downloaded_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS candidate_frames (
@@ -346,6 +348,7 @@ def init_db() -> None:
         _ensure_column(conn, "detection_runs", "analysis_config", "TEXT")
         _ensure_column(conn, "detection_runs", "analysis_stable", "TEXT")
         _ensure_column(conn, "detection_runs", "allow_high_fps_sampling", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "detection_runs", "figure_downloaded_at", "TEXT")
         _ensure_column(conn, "candidate_frames", "candidate_origin", "TEXT NOT NULL DEFAULT 'detected'")
         _ensure_column(conn, "candidate_frames", "perceptual_hash", "TEXT")
         _ensure_column(conn, "candidate_frames", "ocr_text", "TEXT")

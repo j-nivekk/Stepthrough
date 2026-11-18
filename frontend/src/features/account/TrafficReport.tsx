@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { getTrafficReport } from '../../api';
 import { downloadText } from '../../lib/accountLinks';
 import type { TrafficKind, TrafficReport as Report } from '../../types';
 import { ColumnChart, DARK_GREY, LIGHT_GREY, Stat, formatBytes, toCsv, type ChartColumn, type ChartSeries } from './ColumnChart';
-import { PERIODS, dayLabel, plural } from './UsageReport';
+import { ReportFilters } from './ReportFilters';
+import { dayLabel, keptNote, plural, tickEvery, type ReportProps } from './UsageReport';
 
 const DIRECTIONS: ChartSeries[] = [
   { key: 'out', label: 'downloaded', colour: DARK_GREY },
@@ -27,7 +28,7 @@ function busiest(start: string): string {
 }
 
 function downloads(report: Report) {
-  const stamp = report.until.slice(0, 10);
+  const stamp = `${report.start}-to-${report.end}${report.tag ? `-${report.tag}` : ''}`;
   return [
     {
       label: 'accounts',
@@ -68,16 +69,14 @@ function downloads(report: Report) {
 }
 
 /** How much goes in and out of the server, per kind, account and time (backend/app/traffic.py). */
-export function TrafficReport() {
-  const [days, setDays] = useState(7);
+export function TrafficReport({ filter, onFilterChange, tags }: ReportProps) {
   const reportQuery = useQuery({
-    queryKey: ['traffic-report', days],
-    queryFn: () => getTrafficReport(days),
+    queryKey: ['traffic-report', filter],
+    queryFn: () => getTrafficReport(filter),
     placeholderData: (previous) => previous,
     refetchInterval: 60_000,
   });
   const report = reportQuery.data;
-  const keep = report?.keep_days ?? 14;
 
   const hourColumns = useMemo<ChartColumn[]>(
     () =>
@@ -91,7 +90,7 @@ export function TrafficReport() {
   );
   const dayColumns = useMemo<ChartColumn[]>(() => {
     const list = report?.days_list ?? [];
-    const every = list.length > 10 ? 2 : 1;
+    const every = tickEvery(list.length);
     return list.map((day, index) => ({
       key: day.date,
       label: dayLabel(day.date, true),
@@ -100,29 +99,9 @@ export function TrafficReport() {
     }));
   }, [report]);
 
-  if (reportQuery.isError) {
-    return <p className="analysis-guidance-copy usage-message">{reportQuery.error.message.toLocaleLowerCase()}</p>;
-  }
-  if (!report) return <p className="entry-empty-copy usage-message">loading…</p>;
-
-  const { totals } = report;
-  const largestKind = Math.max(1, ...report.categories.map((kind) => kind.bytes_in + kind.bytes_out));
-  const people = report.accounts.filter((row) => row.id && !row.admin);
-  return (
-    <div className={`usage-report ${reportQuery.isFetching ? 'is-refreshing' : ''}`}>
-      <div className="usage-filters">
-        <div className="analysis-task-filter-tabs">
-          {PERIODS.filter(([value]) => value <= keep || value === 1).map(([value, label]) => (
-            <button
-              className={`analysis-task-filter-button ${days === value ? 'active' : ''}`}
-              key={value}
-              onClick={() => setDays(value)}
-              type="button"
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+  const filters = (
+    <ReportFilters filter={filter} onChange={onFilterChange} tags={tags}>
+      {report ? (
         <span className="usage-downloads">
           download (csv):
           {downloads(report).map((download) => (
@@ -131,7 +110,26 @@ export function TrafficReport() {
             </button>
           ))}
         </span>
+      ) : null}
+    </ReportFilters>
+  );
+
+  if (reportQuery.isError) {
+    return (
+      <div className="usage-report">
+        {filters}
+        <p className="analysis-guidance-copy usage-message">{reportQuery.error.message.toLocaleLowerCase()}</p>
       </div>
+    );
+  }
+  if (!report) return <p className="entry-empty-copy usage-message">loading…</p>;
+
+  const { totals } = report;
+  const largestKind = Math.max(1, ...report.categories.map((kind) => kind.bytes_in + kind.bytes_out));
+  const people = report.accounts.filter((row) => row.id && !row.admin);
+  return (
+    <div className={`usage-report ${reportQuery.isFetching ? 'is-refreshing' : ''}`}>
+      {filters}
 
       <div className="usage-stats">
         <Stat label="downloaded" note="answers, as sent over the network" value={formatBytes(totals.bytes_out)} />
@@ -151,16 +149,18 @@ export function TrafficReport() {
         />
       </div>
 
-      <ColumnChart
-        columns={hourColumns}
-        format={formatBytes}
-        mode="stacked"
-        series={DIRECTIONS}
-        title="traffic at each hour of the day, all days together"
-      />
-      <ColumnChart columns={dayColumns} format={formatBytes} mode="stacked" series={DIRECTIONS} title="traffic each day" />
+      <div className="usage-row">
+        <ColumnChart
+          columns={hourColumns}
+          format={formatBytes}
+          mode="stacked"
+          series={DIRECTIONS}
+          title="traffic at each hour of the day, all days together"
+        />
+        <ColumnChart columns={dayColumns} format={formatBytes} mode="stacked" series={DIRECTIONS} title="traffic each day" />
+      </div>
 
-      <section className="usage-section">
+      <section className="usage-section usage-section-narrow">
         <p className="usage-section-head">by kind, downloaded and uploaded together</p>
         <ol className="usage-lessons">
           {KINDS.map((kind) => {
@@ -227,7 +227,7 @@ export function TrafficReport() {
       <p className="analysis-parameter-annotation usage-privacy">
         every request is counted as it goes over the network (compressed), for the account logged in, administrators
         included; requests before a login count for nobody. kept as totals per hour, account and kind, never single
-        requests, addresses or files, for {plural(keep, 'day', 'days')} (admin panel, under server), then deleted.
+        requests, addresses or files; {keptNote(report.keep_days)} (admin panel, under server).
       </p>
     </div>
   );

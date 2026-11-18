@@ -59,6 +59,7 @@ from .models import (
     ReviewCarryOver,
     ReviewCarryOverResult,
     PathwayDetail,
+    PathwayFigureDownload,
     PathwayMerge,
     PresenceUpdate,
     PathwayResponse,
@@ -104,6 +105,7 @@ from .repository import (
     replace_candidates,
     save_run_settings,
     set_candidate_screen_links,
+    mark_figure_downloaded,
     set_candidate_statuses,
     shared_accounts_for_project,
     update_candidate,
@@ -189,9 +191,10 @@ app.add_middleware(
 app.include_router(account_router)
 app.include_router(server_settings.router)
 app.include_router(usage_routes.router)
-# Usage is recorded on a server with logins, while it is kept for a day or more (app/usage.py).
+# Usage is recorded on a server with logins, while it is kept for a day or more, or for ever (app/usage.py).
 def _recording() -> bool:
-    return getattr(app.state, "auth_mode", "none") == "password" and server_settings.value("usage_keep_days") > 0
+    keep = server_settings.keep_days()
+    return getattr(app.state, "auth_mode", "none") == "password" and (keep is None or keep > 0)
 
 
 usage.configure(_recording)
@@ -302,8 +305,8 @@ def _delete_expired_accounts_hourly() -> None:
         except Exception:  # pragma: no cover - keep trying every hour
             logger.exception("Could not delete expired accounts.")
         try:
-            usage.purge(server_settings.value("usage_keep_days"))
-            traffic.purge(server_settings.value("usage_keep_days"))
+            usage.purge(server_settings.keep_days())
+            traffic.purge(server_settings.keep_days())
         except Exception:  # pragma: no cover - keep trying every hour
             logger.exception("Could not delete old usage events.")
         try:
@@ -1283,6 +1286,16 @@ def runs_pathway_merge(run_id: str, payload: PathwayMerge, user: CurrentUser, cl
     return Response(status_code=204)
 
 
+@app.post("/runs/{run_id}/pathway/figure", status_code=204)
+def runs_pathway_figure(run_id: str, payload: PathwayFigureDownload, user: CurrentUser) -> Response:
+    """A pathway figure was downloaded, for the usage report and, the first time, the progress report."""
+    _run_for(run_id, user, "viewer")
+    if usage.counts(user):
+        mark_figure_downloaded(run_id)
+        usage.record("figure_downloaded", user, format=payload.format)
+    return Response(status_code=204)
+
+
 @app.post("/runs/{run_id}/cancel", response_model=DetectionRunSummary)
 def runs_cancel(run_id: str, user: CurrentUser, client: SharedClient = None) -> DetectionRunSummary:
     project, recording, run = _run_for(run_id, user, "owner")
@@ -1353,6 +1366,11 @@ def candidates_update(
     project, recording, _run = _run_for(run_id, user, "owner", not_found="Candidate not found")
     updates = payload.model_dump(exclude_none=True)
     expected = {field: updates.pop(f"previous_{field}", None) for field in ("title", "notes")}
+    # for the usage report: which correction of the pathway this is, before "auto" becomes None below
+    corrections = [
+        *([{"auto": "automatic", "new": "new_screen"}.get(updates["screen_link"], "same_screen")] if "screen_link" in updates else []),
+        *([{"auto": "popup_automatic", "screen": "not_popup", "popup": "popup"}[updates["screen_kind"]]] if "screen_kind" in updates else []),
+    ]
     if "title" in updates:
         updates["title"] = updates["title"].strip() or None
     if "notes" in updates:
@@ -1383,6 +1401,8 @@ def candidates_update(
         serialized = _serialize_candidate(update_candidate(candidate_id, **updates))
         if updates.get("status") in ("accepted", "rejected"):
             usage.record("step_decided", user, status=updates["status"])
+        for choice in corrections:
+            usage.record("screen_corrected", user, choice=choice)
         for field in ("title", "notes"):
             if updates.get(field):
                 usage.record("step_annotated", user, field=field)

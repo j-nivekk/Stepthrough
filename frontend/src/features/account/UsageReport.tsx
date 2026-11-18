@@ -3,25 +3,53 @@ import { useMemo, useState } from 'react';
 import { getUsageReport } from '../../api';
 import { TUTORIAL_LESSON_NAMES } from '../../components/pathwayTutorial/PathwayTutorial';
 import { downloadText } from '../../lib/accountLinks';
-import type { UsageReport as Report } from '../../types';
+import type { ReportFilter, UsageReport as Report, UsageStage } from '../../types';
 import { ColumnChart, DARK_GREY, LIGHT_GREY, Stat, toCsv, type ChartColumn, type ChartSeries } from './ColumnChart';
+import { ReportFilters } from './ReportFilters';
+import { keepLabel } from './ServerSettingsPanel';
 
 const PEOPLE: ChartSeries[] = [
   { key: 'open', label: 'in the app', colour: LIGHT_GREY },
   { key: 'working', label: 'making changes', colour: DARK_GREY },
 ];
 
-export const PERIODS: Array<[number, string]> = [
-  [1, '24 hours'],
-  [7, '7 days'],
-  [14, '14 days'],
+const STAGE_NAMES: Record<UsageStage, string> = {
+  projects: 'the project list',
+  import: 'importing videos',
+  analysis: 'analysing and reviewing steps',
+  pathway: 'the pathway',
+};
+const STAGES = Object.keys(STAGE_NAMES) as UsageStage[];
+
+const CORRECTION_NAMES: Record<string, string> = {
+  same_screen: 'the same screen as',
+  new_screen: 'a new screen',
+  automatic: 'back to automatic',
+  popup: 'a pop-up',
+  not_popup: 'not a pop-up',
+  popup_automatic: 'pop-up back to automatic',
+};
+
+/** The grid's shades, for minutes making changes on a day: checked with the dataviz validator (ordinal, one hue,
+ * the light end above 2:1 against the admin page). No changes leaves a cell empty. */
+const GRID_STEPS: Array<[number, string, string]> = [
+  [1, '#a6a6a6', 'under 30 min'],
+  [30, '#828282', '30 to 59 min'],
+  [60, '#5f5f5f', '1 to 2 h'],
+  [120, '#3f3f3f', '2 h or more'],
 ];
+
+export interface ReportProps {
+  filter: ReportFilter;
+  onFilterChange: (filter: ReportFilter) => void;
+  tags: string[];
+}
 
 export function plural(count: number, one: string, many: string): string {
   return `${count.toLocaleString()} ${count === 1 ? one : many}`;
 }
 
-function hours(minutes: number): string {
+export function hours(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;
   return `${(minutes / 60).toFixed(minutes < 600 ? 1 : 0)} h`;
 }
@@ -36,8 +64,23 @@ export function dayLabel(date: string, long = false): string {
   return day.toLocaleDateString(undefined, long ? { weekday: 'long', day: 'numeric', month: 'long' } : { weekday: 'short', day: 'numeric' });
 }
 
-function downloads(report: Report) {
-  const stamp = report.until.slice(0, 10);
+/** Every so many columns gets a label, so that about a dozen fit under a chart. */
+export function tickEvery(count: number): number {
+  return Math.max(1, Math.ceil(count / 12));
+}
+
+function shade(minutes: number): string | null {
+  let colour: string | null = null;
+  for (const [from, step] of GRID_STEPS) if (minutes >= from) colour = step;
+  return colour;
+}
+
+export function keptNote(keep: number | null): string {
+  return keep === null ? 'kept until an administrator chooses a shorter time' : `kept for ${keepLabel(keep)}, then deleted`;
+}
+
+function downloads(report: Report, filter: ReportFilter) {
+  const stamp = `${report.start}-to-${report.end}${report.tag ? `-${report.tag}` : ''}`;
   return [
     {
       label: 'accounts',
@@ -45,13 +88,15 @@ function downloads(report: Report) {
         downloadText(
           `stepthrough-usage-accounts-${stamp}.csv`,
           toCsv([
-            ['account', 'shared', 'browsers', 'minutes in the app', 'minutes making changes', 'logins', 'projects', 'uploads',
-              'minutes uploaded', 'analyses', 'analyses failed', 'accepted', 'rejected', 'titles and notes', 'steps added',
-              'reviews carried over', 'screens merged', 'exports', 'figures', 'tutorial browsers', 'tutorial finished'],
+            ['account', 'shared', 'browsers', 'minutes in the app', 'minutes making changes', 'days with changes', 'logins',
+              'projects', 'uploads', 'minutes uploaded', 'analyses', 'analyses failed', 'accepted', 'rejected', 'titles and notes',
+              'steps added', 'reviews carried over', 'screens merged', 'pathway corrections', 'comparisons', 'exports', 'figures',
+              'tutorial browsers', 'tutorial finished', ...STAGES.map((stage) => `minutes: ${STAGE_NAMES[stage]}`)],
             ...report.accounts.map((row) => [
-              row.name, row.shared, row.browsers, row.open_minutes, row.working_minutes, row.logins, row.projects, row.uploads,
-              row.upload_minutes, row.analyses, row.analyses_failed, row.accepted, row.rejected, row.annotations, row.steps_added,
-              row.carried_over, row.merges, row.exports, row.figures, row.tutorial_browsers, row.tutorial_finished,
+              row.name, row.shared, row.browsers, row.open_minutes, row.working_minutes, row.active_days, row.logins, row.projects,
+              row.uploads, row.upload_minutes, row.analyses, row.analyses_failed, row.accepted, row.rejected, row.annotations,
+              row.steps_added, row.carried_over, row.merges, row.corrections, row.comparisons, row.exports, row.figures,
+              row.tutorial_browsers, row.tutorial_finished, ...STAGES.map((stage) => row.stage_minutes[stage]),
             ]),
           ]),
         ),
@@ -78,20 +123,26 @@ function downloads(report: Report) {
           ]),
         ),
     },
+    {
+      label: 'everything, one row per account, day and measure',
+      run: async () => {
+        const full = await getUsageReport(filter, true);
+        downloadText(`stepthrough-usage-long-${stamp}.csv`, toCsv([['account', 'date', 'measure', 'amount'], ...(full.long ?? [])]));
+      },
+    },
   ];
 }
 
 /** The usage report for the teaching team (backend/app/usage.py), on the administrators' page. */
-export function UsageReport() {
-  const [days, setDays] = useState(7);
+export function UsageReport({ filter, onFilterChange, tags }: ReportProps) {
   const reportQuery = useQuery({
-    queryKey: ['usage-report', days],
-    queryFn: () => getUsageReport(days),
+    queryKey: ['usage-report', filter],
+    queryFn: () => getUsageReport(filter),
     placeholderData: (previous) => previous,
     refetchInterval: 60_000,
   });
   const report = reportQuery.data;
-  const keep = report?.keep_days ?? 14;
+  const [downloadError, setDownloadError] = useState('');
 
   const hourColumns = useMemo<ChartColumn[]>(
     () =>
@@ -105,7 +156,7 @@ export function UsageReport() {
   );
   const dayColumns = useMemo<ChartColumn[]>(() => {
     const list = report?.days_list ?? [];
-    const every = list.length > 10 ? 2 : 1;
+    const every = tickEvery(list.length);
     return list.map((day, index) => ({
       key: day.date,
       label: dayLabel(day.date, true),
@@ -114,38 +165,49 @@ export function UsageReport() {
     }));
   }, [report]);
 
+  const filters = (
+    <ReportFilters filter={filter} onChange={onFilterChange} tags={tags}>
+      {report ? (
+        <span className="usage-downloads">
+          download (csv):
+          {downloads(report, filter).map((download) => (
+            <button
+              className="analysis-task-link subtle"
+              key={download.label}
+              onClick={() => {
+                setDownloadError('');
+                Promise.resolve(download.run()).catch((error: Error) => setDownloadError(error.message.toLocaleLowerCase()));
+              }}
+              type="button"
+            >
+              {download.label}
+            </button>
+          ))}
+          {downloadError ? <span className="users-error">{downloadError}</span> : null}
+        </span>
+      ) : null}
+    </ReportFilters>
+  );
+
   if (reportQuery.isError) {
-    return <p className="analysis-guidance-copy usage-message">{reportQuery.error.message.toLocaleLowerCase()}</p>;
+    return (
+      <div className="usage-report">
+        {filters}
+        <p className="analysis-guidance-copy usage-message">{reportQuery.error.message.toLocaleLowerCase()}</p>
+      </div>
+    );
   }
   if (!report) return <p className="entry-empty-copy usage-message">loading…</p>;
 
   const { totals, tutorial } = report;
   const decided = totals.accepted + totals.rejected;
   const opened = Math.max(1, tutorial.opened);
+  const stageTotal = Math.max(1, ...STAGES.map((stage) => totals.stage_minutes[stage]));
+  const corrections = Object.entries(totals.corrections_by_choice).filter(([, count]) => count);
+  const gridEvery = tickEvery(report.days_list.length);
   return (
     <div className={`usage-report ${reportQuery.isFetching ? 'is-refreshing' : ''}`}>
-      <div className="usage-filters">
-        <div className="analysis-task-filter-tabs">
-          {PERIODS.filter(([value]) => value <= keep || value === 1).map(([value, label]) => (
-            <button
-              className={`analysis-task-filter-button ${days === value ? 'active' : ''}`}
-              key={value}
-              onClick={() => setDays(value)}
-              type="button"
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <span className="usage-downloads">
-          download (csv):
-          {downloads(report).map((download) => (
-            <button className="analysis-task-link subtle" key={download.label} onClick={download.run} type="button">
-              {download.label}
-            </button>
-          ))}
-        </span>
-      </div>
+      {filters}
 
       <div className="usage-stats">
         <Stat
@@ -164,45 +226,123 @@ export function UsageReport() {
           value={totals.analyses}
         />
         <Stat label="steps decided" note={`${totals.accepted} accepted, ${totals.rejected} rejected`} value={decided} />
+        <Stat
+          label="pathway corrections"
+          note={corrections.length ? corrections.map(([choice, count]) => `${count} ${CORRECTION_NAMES[choice] ?? choice}`).join(', ') : 'none yet'}
+          value={totals.corrections}
+        />
         <Stat label="exports" note={plural(totals.figures, 'pathway figure', 'pathway figures')} value={totals.exports} />
         <Stat label="opened the tutorial" note={`${tutorial.finished} solved all ${tutorial.lessons.length} lessons`} value={tutorial.opened} />
       </div>
 
-      <ColumnChart
-        columns={hourColumns}
-        mode="nested"
-        series={PEOPLE}
-        title="people at each hour of the day (each counted once a day)"
-      />
-      <ColumnChart columns={dayColumns} mode="nested" series={PEOPLE} title="people each day" />
+      <div className="usage-row">
+        <ColumnChart
+          columns={hourColumns}
+          mode="nested"
+          series={PEOPLE}
+          title="people at each hour of the day (each counted once a day)"
+        />
+        <ColumnChart columns={dayColumns} mode="nested" series={PEOPLE} title="people each day" />
+      </div>
+
+      <div className="usage-row">
+        <section className="usage-section">
+          <p className="usage-section-head">time in the app, by the page open</p>
+          <ol className="usage-lessons">
+            {STAGES.map((stage) => (
+              <li className="usage-lesson" key={stage}>
+                <span className="usage-lesson-name">{STAGE_NAMES[stage]}</span>
+                <span aria-label={`${hours(totals.stage_minutes[stage])} on ${STAGE_NAMES[stage]}`} className="usage-meter" role="img">
+                  <span style={{ width: `${(totals.stage_minutes[stage] / stageTotal) * 100}%` }} />
+                </span>
+                <span className="usage-lesson-figure">{hours(totals.stage_minutes[stage])}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="analysis-parameter-annotation">
+            all browsers together. the run comparison was opened {plural(totals.comparisons, 'time', 'times')}, the
+            pathway's boxes switched {plural(totals.boxes_switched, 'time', 'times')} and the guide opened{' '}
+            {plural(totals.guide_opened, 'time', 'times')}.
+          </p>
+        </section>
+
+        <section className="usage-section">
+          <p className="usage-section-head">
+            pathway tutorial: {plural(tutorial.invited, 'browser', 'browsers')} invited, {tutorial.opened} opened it
+            {Object.keys(tutorial.opened_from).length
+              ? ` (${Object.entries(tutorial.opened_from).map(([from, count]) => `${count} from the ${from === 'about' ? 'about panel' : from}`).join(', ')})`
+              : ''}
+            {tutorial.median_minutes !== null ? `, usually for ${Math.round(tutorial.median_minutes)} min` : ''}
+          </p>
+          <ol className="usage-lessons">
+            {tutorial.lessons.map((lesson) => (
+              <li className="usage-lesson" key={lesson.lesson}>
+                <span className="usage-lesson-name">
+                  {lesson.lesson}. {TUTORIAL_LESSON_NAMES[lesson.lesson - 1] ?? ''}
+                </span>
+                <span aria-label={`${lesson.solved} of ${tutorial.opened} solved it`} className="usage-meter" role="img">
+                  <span style={{ width: `${(lesson.solved / opened) * 100}%` }} />
+                </span>
+                <span className="usage-lesson-figure">
+                  {lesson.solved} of {lesson.reached} solved it{lesson.show_me ? `; show me used ${plural(lesson.show_me, 'time', 'times')}` : ''}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      </div>
 
       <section className="usage-section">
         <p className="usage-section-head">
-          pathway tutorial: {plural(tutorial.invited, 'browser', 'browsers')} invited, {tutorial.opened} opened it
-          {Object.keys(tutorial.opened_from).length
-            ? ` (${Object.entries(tutorial.opened_from).map(([from, count]) => `${count} from the ${from === 'about' ? 'about panel' : from}`).join(', ')})`
-            : ''}
-          {tutorial.median_minutes !== null ? `, usually for ${Math.round(tutorial.median_minutes)} min` : ''}
+          minutes making changes, per account and day
+          <span className="usage-days-legend">
+            {GRID_STEPS.map(([from, colour, label]) => (
+              <span key={from}>
+                <i style={{ background: colour }} /> {label}
+              </span>
+            ))}
+            <span>
+              <i className="usage-days-none" /> none
+            </span>
+          </span>
         </p>
-        <ol className="usage-lessons">
-          {tutorial.lessons.map((lesson) => (
-            <li className="usage-lesson" key={lesson.lesson}>
-              <span className="usage-lesson-name">
-                {lesson.lesson}. {TUTORIAL_LESSON_NAMES[lesson.lesson - 1] ?? ''}
-              </span>
-              <span
-                aria-label={`${lesson.solved} of ${tutorial.opened} solved it`}
-                className="usage-meter"
-                role="img"
-              >
-                <span style={{ width: `${(lesson.solved / opened) * 100}%` }} />
-              </span>
-              <span className="usage-lesson-figure">
-                {lesson.solved} of {lesson.reached} solved it{lesson.show_me ? `; show me used ${plural(lesson.show_me, 'time', 'times')}` : ''}
-              </span>
-            </li>
-          ))}
-        </ol>
+        <div className="usage-table-scroll">
+          <table className="usage-days-grid">
+            <thead>
+              <tr>
+                <th />
+                {report.days_list.map((day, index) => (
+                  <th key={day.date} scope="col" title={dayLabel(day.date, true)}>
+                    {index % gridEvery === 0 ? <span>{dayLabel(day.date)}</span> : null}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {report.accounts.map((row) => (
+                <tr key={row.id}>
+                  <th scope="row">{row.name}</th>
+                  {row.worked.map((minutes, index) => {
+                    const colour = shade(minutes);
+                    const label = `${row.name}, ${dayLabel(report.days_list[index].date, true)}: ${minutes ? `${minutes} min making changes` : 'no changes'}`;
+                    return (
+                      <td aria-label={label} key={report.days_list[index].date} title={label}>
+                        {colour ? <span style={{ background: colour }} /> : null}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              {!report.accounts.length ? (
+                <tr>
+                  <td className="usage-empty" colSpan={report.days_list.length + 1}>
+                    nobody yet in this period.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section className="usage-section">
@@ -215,12 +355,17 @@ export function UsageReport() {
                 <th title="logins in separate browsers: the people working under the account">people</th>
                 <th>in the app</th>
                 <th>making changes</th>
+                <th title="days on which changes were made">days</th>
                 <th>logins</th>
                 <th>videos</th>
                 <th>analyses</th>
                 <th>accepted</th>
                 <th>rejected</th>
                 <th>titles and notes</th>
+                <th>pathway corrections</th>
+                <th>importing</th>
+                <th>analysing and reviewing</th>
+                <th>pathway</th>
                 <th>exports</th>
                 <th>tutorial</th>
               </tr>
@@ -235,12 +380,17 @@ export function UsageReport() {
                   <td>{row.browsers}</td>
                   <td>{hours(row.open_minutes)}</td>
                   <td>{hours(row.working_minutes)}</td>
+                  <td>{row.active_days}</td>
                   <td>{row.logins}</td>
                   <td>{row.uploads}</td>
                   <td>{row.analyses}</td>
                   <td>{row.accepted}</td>
                   <td>{row.rejected}</td>
                   <td>{row.annotations}</td>
+                  <td>{row.corrections}</td>
+                  <td>{hours(row.stage_minutes.import)}</td>
+                  <td>{hours(row.stage_minutes.analysis)}</td>
+                  <td>{hours(row.stage_minutes.pathway)}</td>
                   <td>{row.exports}</td>
                   <td>
                     {row.tutorial_browsers ? `${row.tutorial_browsers} opened, ${row.tutorial_finished} solved all` : 'not opened'}
@@ -249,7 +399,7 @@ export function UsageReport() {
               ))}
               {!report.accounts.length ? (
                 <tr>
-                  <td className="usage-empty" colSpan={12}>
+                  <td className="usage-empty" colSpan={17}>
                     nobody yet in this period.
                   </td>
                 </tr>
@@ -262,9 +412,9 @@ export function UsageReport() {
       <p className="analysis-parameter-annotation usage-privacy">
         people are counted by their login in each browser, so everyone working under one shared account counts as a person of
         their own (someone who logs in on two browsers, or logs out and in again, counts twice). recorded on this server for accounts
-        that are not administrators: when someone is in the app (in {report.slot_minutes}-minute slots), what they do
-        (such as an analysis, a decision or an export) and how far the tutorial goes; never names, addresses, files or
-        what anyone writes. kept for {plural(keep, 'day', 'days')} (admin panel, under server), then deleted.
+        that are not administrators: when someone is in the app (in {report.slot_minutes}-minute slots) and on which page, what they
+        do (such as an analysis, a decision, a correction or an export) and how far the tutorial goes; never names, addresses, files or
+        what anyone writes. {keptNote(report.keep_days)} (admin panel, under server).
       </p>
     </div>
   );

@@ -1315,6 +1315,7 @@ export function AnalysisScreen({
     const pair = defaultComparisonPair(runs);
     if (!pair) return;
     setComparison({ recordingId, ...pair });
+    track({ kind: 'comparison_opened' });
     window.setTimeout(() => jumpToAnchor('analysis-run-compare'), 0);
   }
 

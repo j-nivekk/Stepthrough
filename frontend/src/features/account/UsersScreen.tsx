@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { listUsers } from '../../api';
-import type { AdminUser } from '../../types';
+import type { AdminUser, ReportFilter } from '../../types';
 import { AddPeoplePanel } from './AddPeoplePanel';
+import { ProgressReport } from './ProgressReport';
 import { ServerSettingsPanel } from './ServerSettingsPanel';
 import { TrafficReport } from './TrafficReport';
 import { UsageReport } from './UsageReport';
@@ -24,7 +25,9 @@ export function UsersScreen({ currentUserId, onBack }: UsersScreenProps) {
   const usersQuery = useQuery({ queryKey: ['admin-users'], queryFn: listUsers });
   const users = usersQuery.data ?? [];
   const [notice, setNotice] = useState('');
-  const [view, setView] = useState<'users' | 'usage' | 'traffic'>('users');
+  const [view, setView] = useState<'users' | 'progress' | 'usage' | 'traffic'>('users');
+  // One period and class for every report, so switching between them keeps the question asked.
+  const [filter, setFilter] = useState<ReportFilter>({ period: { days: 7 }, tag: '' });
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<'name' | 'recent'>('name');
   const [selectMode, setSelectMode] = useState(false);
@@ -68,6 +71,13 @@ export function UsersScreen({ currentUserId, onBack }: UsersScreenProps) {
     setSelectedIds(new Set());
   }
 
+  // The classes to look at one by one: the tags of accounts that are not administrators.
+  const tags = useMemo(
+    () => [...new Set(users.filter((user) => !user.is_admin).flatMap((user) => user.tags))].filter((tag) => tag !== 'shared').sort(),
+    [users],
+  );
+  const reportProps = { filter, onFilterChange: setFilter, tags };
+
   const adminCount = users.filter((user) => user.is_admin && !user.is_builtin).length;
   const switchedOffCount = users.filter((user) => user.is_disabled).length;
   const peopleCount = users.filter((user) => !user.is_builtin).length;
@@ -82,7 +92,7 @@ export function UsersScreen({ currentUserId, onBack }: UsersScreenProps) {
               projects
             </button>
             <span aria-hidden="true" className="stage-pill-sep">·</span>
-            {(['users', 'usage', 'traffic'] as const).map((page, index) => (
+            {(['users', 'progress', 'usage', 'traffic'] as const).map((page, index) => (
               <span className="stage-pill-group" key={page}>
                 {index ? <span aria-hidden="true" className="stage-pill-sep">·</span> : null}
                 <button
@@ -99,8 +109,9 @@ export function UsersScreen({ currentUserId, onBack }: UsersScreenProps) {
           </nav>
         </div>
 
-        {view === 'usage' ? <UsageReport /> : null}
-        {view === 'traffic' ? <TrafficReport /> : null}
+        {view === 'progress' ? <ProgressReport {...reportProps} /> : null}
+        {view === 'usage' ? <UsageReport {...reportProps} /> : null}
+        {view === 'traffic' ? <TrafficReport {...reportProps} /> : null}
 
         <div className="users-grid" hidden={view !== 'users'}>
           <div className="users-side">

@@ -230,22 +230,43 @@ in `server_settings` once changed, unless changed back to the configuration's va
 `login` (and `login_failed`, without an account), `open` and `working` in five-minute slots (any request, and a
 change; noted in `current_user`), `project_created`, `recording_uploaded` (its minutes), `analysis_started` and
 `analysis_finished` (status, seconds waited and taken, steps), `step_decided`, `steps_decided` (status, count),
-`step_annotated` (title or notes, not the text), `step_added`, `review_carried_over`, `screens_merged` and `exported`
-(mode, steps). Browsers add what only they see through `POST /me/usage`, from a fixed list (`CLIENT_EVENTS`): the
-page, and the pathway tutorial (invited, opened and from where, each lesson reached and solved, "show me", closed
-with lessons solved and minutes), and pathway figures downloaded. Each event carries a browser key derived from
-the session (`User.browser`), so the people under one shared account count apart; no names, addresses, files or
-text. Events are queued in memory and written in batches, and deleted after `usage_keep_days` (14; 0 records
-nothing) by the hourly clean-up. `GET /admin/usage?days=&tz=` adds them up in the reader's time zone (minutes east
-of UTC): totals, per hour of the day and per day (browsers in the app and making changes, each counted once a
-day), per account, the tutorial per lesson, and pages. `tests/test_usage.py` covers it.
+`step_annotated` (title or notes, not the text), `step_added`, `screen_corrected` (which choice: the same screen
+as, a new screen, back to automatic, pop-up or not), `review_carried_over`, `screens_merged`, `exported` (mode,
+steps) and `figure_downloaded` (format; `POST /runs/{id}/pathway/figure`). Browsers add what only they see through
+`POST /me/usage`, from a fixed list (`CLIENT_EVENTS`): the page, the pathway tutorial (invited, opened and from
+where, each lesson reached and solved, "show me", closed with lessons solved and minutes), the run comparison
+opened, the pathway's boxes switched, and the guide opened. Each event carries a browser key derived from the
+session (`User.browser`), so the people under one shared account count apart; no names, addresses, files or text.
+Events are queued in memory and written in batches, and deleted after `usage_keep_days` by the hourly clean-up (14
+by default; 0 records nothing; null keeps them for ever; at most 3650).
+
+`GET /admin/usage` adds them up for a period (`app/report_window.py`): `days` whole local days up to today (0:
+everything kept), or `start` to `end` (local dates, both included), in the reader's time zone (`tz`, minutes east
+of UTC), and only for the accounts with `tag`, when given. It returns totals, per hour of the day and per day
+(browsers in the app and making changes, each counted once a day), per account (with minutes on each page, by the
+last page a browser opened, and minutes making changes on each day), the tutorial per lesson, and pages; `long=true`
+adds a row per account, day and measure. Eight weeks of 36 groups (about 140,000 events) take under half a second.
+`tests/test_usage.py` covers it.
 
 `app/traffic.py` counts bytes in (request bodies) and out (response bodies, after compression: it is the outermost
 middleware) per hour, account and kind (`uploads`, `media`, `exports`, `live`, `data`, `app`, from the path), as
 totals in `traffic`, kept and deleted with the usage events. A request counts for the account `current_user`
 found, or else for the account whose session cookie it carries (remembered in memory, keyed by a hash of the
-token, at login and on every checked request), or for nobody. `GET /admin/traffic?days=&tz=` adds it up like the
-usage report, with the busiest hour.
+token, at login and on every checked request), or for nobody. `GET /admin/traffic` adds it up for a period and tag
+like the usage report, with the busiest hour.
+
+## Progress report
+
+`app/progress.py` reads how far each account (not administrators) has got from its projects, not from the usage log,
+so it is not affected by the keeping time: per project, videos and their minutes, videos analysed, analyses (failed,
+running, and videos whose latest analysis failed), the settings of the stable-screen engine changed from their
+defaults, and, from each video's working analysis (of its completed analyses, the one with the most decisions), steps
+found, added, accepted, rejected and undecided, accepted steps with a title or notes, and accepted steps with a
+screen correction. Each stage (`videos`, `analysed`, `reviewed`, `described`, `pathway`, `exported`) comes with the
+date it was reached: the first video, analysis, figure (`figure_downloaded_at` on the run, set the first time a
+group downloads one) and kept export, and for reviewed and described the last change to the steps once they were
+done. `GET /admin/progress?tag=` returns it; the admin panel decides what counts as done. `tests/test_progress.py`
+covers it.
 
 ## Shared accounts
 

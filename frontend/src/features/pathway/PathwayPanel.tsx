@@ -1,7 +1,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 
-import { absoluteApiUrl, getRunPathway, mergePathwayScreens } from '../../api';
+import { absoluteApiUrl, getRunPathway, mergePathwayScreens, notePathwayFigure } from '../../api';
 import interItalicUrl from '../../assets/fonts/InterVariable-Italic.ttf?url';
 import interUrl from '../../assets/fonts/InterVariable.ttf?url';
 import { markPathwayTutorialSeen, PathwayTutorial, pathwayTutorialSeen } from '../../components/pathwayTutorial/PathwayTutorial';
@@ -208,7 +208,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
       const name = `${splitFilename(filename).base}-pathway.${format}`;
       if (format === 'svg') downloadText(name, `<?xml version="1.0" encoding="UTF-8"?>\n${file.svg}\n`, 'image/svg+xml');
       else downloadBlob(name, await renderPathwayPng(file, { regular: interUrl, italic: interItalicUrl }));
-      track({ kind: 'figure_downloaded', format });
+      void notePathwayFigure(run.summary.id, format).catch(() => undefined); // for the usage and progress reports
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : 'could not make the figure.');
     } finally {
@@ -337,7 +337,10 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
                   aria-pressed={view.detail === value}
                   className={`candidate-filter-tab ${view.detail === value ? 'active' : ''}`}
                   key={value}
-                  onClick={() => setView((current) => ({ ...current, detail: value }))}
+                  onClick={() => {
+                    if (view.detail !== value) track({ kind: 'boxes_switched', to: value });
+                    setView((current) => ({ ...current, detail: value }));
+                  }}
                   title={hint}
                   type="button"
                 >

@@ -119,22 +119,36 @@ docker compose exec stepthrough python -m app.users --help                 # eve
 **The server's settings.** Under **server** in the admin panel, administrators change, while Stepthrough runs and for
 everyone at once: how many analyses run at a time (it starts as `STEPTHROUGH_MAX_CONCURRENT_RUNS` has it), whether
 answers are compressed (a switch in case something goes wrong with it), and over how many seconds the browsers of a
-shared account spread reloading a task after a change, and how many days the usage report keeps what it records.
+shared account spread reloading a task after a change, and how long usage and traffic are kept: 2, 3, 4 or 8 weeks,
+a number of days, for ever (until a shorter time is chosen), or off (nothing recorded). A shorter time asks first,
+then deletes what is older at once.
 The changes are kept in the database and outlast restarts; each says when it differs from the server's configuration.
 
-**Usage.** Under **usage** in the admin panel, administrators see how Stepthrough is used, for the last day, week or
-two weeks, in their own time zone: how many people are in the app at each hour of the day and on each day, logins,
-analyses (how long they took and waited), decisions, exports, how far people get with the pathway tutorial, and the
-same per account; each can be downloaded as CSV for a report. People are counted by their login in each browser, so
-the several people working under one shared account count separately. It records accounts that are not
-administrators, never names, addresses, files or what anyone writes, and deletes everything after 14 days (set it
-under **server**; 0 records nothing). Stepthrough without logins records nothing.
+**Progress.** Under **progress** in the admin panel, administrators see how far each account has got with its
+projects: videos, analysed, reviewed (no undecided steps), described (every accepted step has a title or notes),
+pathway figure and exported, with the date each was reached, the share done where it is not, and the accounts that
+need a look (not started, no change for a week, or a failed analysis not run again). Whether the pathway figure
+counts toward done is a switch, for courses that do not ask for one. It is read from the projects themselves, so it
+covers a whole course whatever the keeping time, and can be downloaded as CSV.
+
+**Usage.** Under **usage** in the admin panel, administrators see how Stepthrough is used, for today, the last 7 or
+14 days, 4 or 8 weeks, everything kept, or any dates, in their own time zone: how many people are in the app at each
+hour of the day and on each day, logins, analyses (how long they took and waited), decisions, pathway corrections,
+exports, time on each page, how far people get with the pathway tutorial, a grid of the minutes each account made
+changes each day, and the same per account; each can be downloaded as CSV for a report, also as one long table of
+every account, day and measure. People are counted by their login in each browser, so the several people working
+under one shared account count separately. It records accounts that are not administrators, never names,
+addresses, files or what anyone writes, and deletes everything after 14 days unless set otherwise under **server**.
+Stepthrough without logins records nothing.
+
+**One class at a time.** Progress, usage and traffic can each be narrowed to the accounts with one tag, such as the
+tag given to a class when its accounts were imported.
 
 **Traffic.** Under **traffic** in the admin panel, administrators see how much goes in and out of the server, as it
 goes over the network: per hour of the day and per day, by kind (video uploads, videos and screenshots, exports,
 live updates, other data and the app's own files), and per account, administrators included, with what came before
-a login apart. It is kept as totals per hour, account and kind for as long as the usage report keeps its events,
-and can be downloaded as CSV.
+a login apart. It is kept as totals per hour, account and kind for as long as usage is kept, and can be downloaded as
+CSV.
 
 **Upgrading from a version without accounts.** Projects made before then belong to a built-in account that nobody
 logs in with, so they appear in nobody's list. Take them over with **take over its projects** on the built-in

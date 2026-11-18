@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { DemoPhone } from './DemoPhone';
 import { DemoTimeline, LABEL_COLOURS } from './DemoTimeline';
 import { DURATION, LABEL_TEXT, STEPS } from './demoScript';
+import { track } from '../../lib/usage';
 
 const SPEED = 1.6; // the 14-second recording plays in about 9 seconds
 const GUIDE_URL = 'https://github.com/j-nivekk/Stepthrough/blob/main/GUIDE.md';
@@ -212,7 +213,13 @@ export function HowItWorksDemo({ onClose }: HowItWorksDemoProps) {
               </span>
               <h3>{current.title}</h3>
               <p>{current.text}</p>
-              <a className="demo-guide-link" href={`${GUIDE_URL}${current.guide}`} rel="noreferrer" target="_blank">
+              <a
+                className="demo-guide-link"
+                href={`${GUIDE_URL}${current.guide}`}
+                onClick={() => track({ kind: 'guide_opened', from: 'about' })}
+                rel="noreferrer"
+                target="_blank"
+              >
                 more in the guide on github ↗
               </a>
             </div>

@@ -8,7 +8,8 @@ database once an administrator changes it, so it outlasts restarts. Changes take
 - ``compression``: send JSON, pages, scripts and styles compressed (``app/compression.py``).
 - ``live_spread_seconds``: in shared accounts, browsers showing a task reload it after a change at a random moment
   within this many seconds (after a short pause), so that they do not all ask at once.
-- ``usage_keep_days``: how long the usage report's events are kept (``app/usage.py``); 0 records nothing.
+- ``usage_keep_days``: how many days usage and traffic are kept (``app/usage.py``, ``app/traffic.py``); 0 records
+  nothing, null keeps them for ever.
 """
 
 from __future__ import annotations
@@ -20,11 +21,14 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from . import traffic, usage
+from .report_window import MAX_DAYS
 from .accounts import CurrentUser, require_admin
 from .repository import get_server_settings, set_server_settings
 
 DEFAULT_LIVE_SPREAD_SECONDS = 1.5
 DEFAULT_USAGE_KEEP_DAYS = 14
+# Settings that may be null on purpose (sent as null, unlike one left out, which stays as it is).
+NULLABLE = {"usage_keep_days"}
 
 _changed: dict[str, Any] = {}
 _configured_analyses: int | None = None
@@ -64,11 +68,16 @@ def compression_enabled() -> bool:
     return bool(value("compression"))
 
 
+def keep_days() -> int | None:
+    """How many days usage and traffic are kept: 0 records nothing, None keeps them for ever."""
+    return value("usage_keep_days")
+
+
 class ServerSettingsUpdate(BaseModel):
     analyses_at_a_time: int | None = Field(default=None, ge=0, le=64)
     compression: bool | None = None
     live_spread_seconds: float | None = Field(default=None, ge=0, le=10)
-    usage_keep_days: int | None = Field(default=None, ge=0, le=90)
+    usage_keep_days: int | None = Field(default=None, ge=0, le=MAX_DAYS)  # null: for ever
 
 
 def _describe() -> dict[str, dict[str, Any]]:
@@ -88,13 +97,14 @@ def read_server_settings(user: CurrentUser) -> dict[str, dict[str, Any]]:
 def change_server_settings(payload: ServerSettingsUpdate, request: Request, user: CurrentUser) -> dict[str, dict[str, Any]]:
     require_admin(user)
     known = defaults()
-    changes = {key: new for key, new in payload.model_dump(exclude_none=True).items()}
+    sent = payload.model_dump(exclude_unset=True)
+    changes = {key: new for key, new in sent.items() if new is not None or key in NULLABLE}
     # A value equal to the configuration's is not stored, so a later change of the configuration applies again.
     set_server_settings({key: None if new == known[key] else json.dumps(new) for key, new in changes.items()})
     load(_configured_analyses)
     if "analyses_at_a_time" in changes:
         request.app.state.job_manager.set_max_concurrent_runs(analyses_limit())
     if "usage_keep_days" in changes:
-        usage.purge(value("usage_keep_days"))  # a shorter time applies to what is kept already
-        traffic.purge(value("usage_keep_days"))
+        usage.purge(keep_days())  # a shorter time applies to what is kept already
+        traffic.purge(keep_days())
     return _describe()

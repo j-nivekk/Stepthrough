@@ -280,7 +280,9 @@ export type UsageEvent =
   | { kind: 'tutorial_opened'; from: 'invitation' | 'pathway' | 'about' }
   | { kind: 'tutorial_lesson' | 'tutorial_solved' | 'tutorial_show_me'; lesson: number }
   | { kind: 'tutorial_closed'; solved: number; minutes: number }
-  | { kind: 'figure_downloaded'; format: 'svg' | 'png' };
+  | { kind: 'comparison_opened' }
+  | { kind: 'boxes_switched'; to: 'screens' | 'steps' }
+  | { kind: 'guide_opened'; from: 'tutorial' | 'about' };
 
 export interface UsageAccountRow {
   id: string;
@@ -305,14 +307,42 @@ export interface UsageAccountRow {
   figures: number;
   tutorial_browsers: number;
   tutorial_finished: number;
+  corrections: number;
+  comparisons: number;
+  /** Days with changes made. */
+  active_days: number;
+  /** Minutes in the app at each stage, by the page open (the step review is part of analysis). */
+  stage_minutes: Record<UsageStage, number>;
+  /** Minutes making changes on each day of `days_list`, in its order. */
+  worked: number[];
+}
+
+export type UsageStage = 'projects' | 'import' | 'analysis' | 'pathway';
+
+/** The period of a report: the last so many whole days (0: everything kept), or from one local date to another. */
+export type ReportPeriod = { days: number } | { start: string; end: string };
+
+export interface ReportFilter {
+  period: ReportPeriod;
+  /** Only the accounts with this tag; empty for all. */
+  tag: string;
+}
+
+/** What every report says about its period (backend/app/report_window.py). */
+interface ReportWindow {
+  since: string;
+  until: string;
+  /** The first and last local date, YYYY-MM-DD. */
+  start: string;
+  end: string;
+  days: number;
+  tag: string | null;
+  /** Days usage and traffic are kept; null: for ever. */
+  keep_days: number | null;
 }
 
 /** The usage report of the last `days` days, in the reader's local time. */
-export interface UsageReport {
-  since: string;
-  until: string;
-  days: number;
-  keep_days: number;
+export interface UsageReport extends ReportWindow {
   slot_minutes: number;
   totals: {
     browsers: number;
@@ -328,6 +358,12 @@ export interface UsageReport {
     rejected: number;
     exports: number;
     figures: number;
+    corrections: number;
+    corrections_by_choice: Partial<Record<'same_screen' | 'new_screen' | 'automatic' | 'popup' | 'not_popup' | 'popup_automatic', number>>;
+    comparisons: number;
+    boxes_switched: number;
+    guide_opened: number;
+    stage_minutes: Record<UsageStage, number>;
   };
   /** Per hour of the day: browsers in the app (open) and making changes (working), each counted once a day. */
   hours: Array<{ hour: number; open: number; working: number }>;
@@ -342,16 +378,14 @@ export interface UsageReport {
     lessons: Array<{ lesson: number; reached: number; solved: number; show_me: number }>;
   };
   pages: Record<string, number>;
+  /** With `long`: account, local date, measure and amount. */
+  long?: Array<[string, string, string, number]>;
 }
 
 export type TrafficKind = 'uploads' | 'media' | 'exports' | 'live' | 'data' | 'app';
 
 /** Bytes in (uploads, request bodies) and out (answers, as sent), of the last `days` days in local time. */
-export interface TrafficReport {
-  since: string;
-  until: string;
-  days: number;
-  keep_days: number;
+export interface TrafficReport extends ReportWindow {
   totals: { bytes_in: number; bytes_out: number; requests: number };
   busiest_hour: { start: string; bytes: number } | null;
   categories: Array<{ category: TrafficKind; bytes_in: number; bytes_out: number; requests: number }>;
@@ -375,8 +409,8 @@ export interface ServerSettings {
   analyses_at_a_time: { value: number; default: number };
   compression: { value: boolean; default: boolean };
   live_spread_seconds: { value: number; default: number };
-  /** Days the usage report's events are kept; 0 records nothing. */
-  usage_keep_days: { value: number; default: number };
+  /** Days usage and traffic are kept; 0 records nothing, null keeps them for ever. */
+  usage_keep_days: { value: number | null; default: number };
 }
 
 export type ServerSettingsChanges = Partial<{ [K in keyof ServerSettings]: ServerSettings[K]['value'] }>;
@@ -572,4 +606,52 @@ export interface UserImportResult {
   errors: { row: number; name: string | null; message: string }[];
   /** People whose password from the list was kept although it would be refused as a new one. */
   weak_passwords: string[];
+}
+
+/** How far each account has got with its projects (backend/app/progress.py), read from the projects themselves. */
+export type ProgressStage = 'videos' | 'analysed' | 'reviewed' | 'described' | 'pathway' | 'exported';
+
+export interface ProgressProject {
+  id: string;
+  name: string;
+  created_at: string;
+  last_change: string | null;
+  videos: number;
+  video_minutes: number;
+  videos_analysed: number;
+  runs: number;
+  runs_failed: number;
+  runs_active: number;
+  /** Videos whose latest analysis failed. */
+  failed_unretried: number;
+  /** Settings of the analysis changed from their defaults, in any analysis of the project. */
+  settings_changed: string[];
+  found: number;
+  added: number;
+  accepted: number;
+  rejected: number;
+  pending: number;
+  /** Accepted steps with a title or notes. */
+  described: number;
+  /** Accepted steps whose screen was corrected for the pathway. */
+  corrections: number;
+  /** When each stage was reached; null when not (yet). */
+  reached: Record<ProgressStage, string | null>;
+}
+
+export interface ProgressAccount {
+  id: string;
+  name: string;
+  shared: boolean;
+  tags: string[];
+  created_at: string;
+  last_seen_at: string | null;
+  projects: ProgressProject[];
+}
+
+export interface ProgressReport {
+  generated_at: string;
+  tag: string | null;
+  stages: ProgressStage[];
+  accounts: ProgressAccount[];
 }

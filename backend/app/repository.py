@@ -678,6 +678,15 @@ def get_run(run_id: str) -> dict[str, Any] | None:
     return _row_to_dict(row)
 
 
+def mark_figure_downloaded(run_id: str) -> None:
+    """The first time a pathway figure of the run is downloaded (app/progress.py); the run itself is unchanged."""
+    with connect() as conn:
+        conn.execute(
+            "UPDATE detection_runs SET figure_downloaded_at = ? WHERE id = ? AND figure_downloaded_at IS NULL",
+            (utc_now(), run_id),
+        )
+
+
 def update_run(run_id: str, **fields: Any) -> dict[str, Any] | None:
     if not fields:
         return get_run(run_id)
@@ -827,12 +836,18 @@ def insert_usage_events(rows: list[tuple[str, str | None, str | None, str, str |
         conn.executemany("INSERT INTO usage_events (at, account_id, browser, kind, detail) VALUES (?, ?, ?, ?, ?)", rows)
 
 
-def list_usage_events(since: str) -> list[dict[str, Any]]:
+def list_usage_events(since: str, until: str | None = None) -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
-            "SELECT at, account_id, browser, kind, detail FROM usage_events WHERE at >= ? ORDER BY at", (since,)
+            "SELECT at, account_id, browser, kind, detail FROM usage_events WHERE at >= ? AND at < ? ORDER BY at",
+            (since, until or "9999"),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def first_usage_event() -> str | None:
+    with connect() as conn:
+        return conn.execute("SELECT MIN(at) FROM usage_events").fetchone()[0]
 
 
 def delete_usage_before(before: str) -> int:
@@ -855,13 +870,19 @@ def add_traffic(rows: list[tuple[str, str, str, int, int, int]]) -> None:
         )
 
 
-def list_traffic(since: str) -> list[dict[str, Any]]:
+def list_traffic(since: str, until: str | None = None) -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
-            "SELECT hour, account_id, category, requests, bytes_in, bytes_out FROM traffic WHERE hour >= ? ORDER BY hour",
-            (since,),
+            "SELECT hour, account_id, category, requests, bytes_in, bytes_out FROM traffic"
+            " WHERE hour >= ? AND hour < ? ORDER BY hour",
+            (since, until or "9999"),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def first_traffic_hour() -> str | None:
+    with connect() as conn:
+        return conn.execute("SELECT MIN(hour) FROM traffic").fetchone()[0]
 
 
 def delete_traffic_before(before: str) -> int:
@@ -870,7 +891,7 @@ def delete_traffic_before(before: str) -> int:
 
 
 def list_usage_accounts() -> dict[str, dict[str, Any]]:
-    """Every account's name, and whether it is shared or an administrator, for the usage and traffic reports."""
+    """Every account's name and tags, and whether it is shared or an administrator, for the usage and traffic reports."""
     with connect() as conn:
         rows = conn.execute("SELECT id, name, tags FROM users").fetchall()
     accounts = {}
@@ -880,6 +901,7 @@ def list_usage_accounts() -> dict[str, dict[str, Any]]:
             "name": row["name"],
             "shared": SHARED_TAG in tags and ADMIN_TAG not in tags,
             "admin": ADMIN_TAG in tags,
+            "tags": tags,
         }
     return accounts
 

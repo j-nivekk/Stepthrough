@@ -72,12 +72,15 @@ export function Stat({ label, value, note }: { label: string; value: ReactNode; 
 export function ColumnChart({
   columns,
   format = (value) => value.toLocaleString(),
+  height = 170,
   mode,
   series,
   title,
 }: {
   columns: ChartColumn[];
   format?: (value: number) => string;
+  /** Of the plot with its axis, in pixels. */
+  height?: number;
   mode: 'nested' | 'stacked';
   series: ChartSeries[];
   title: string;
@@ -86,8 +89,7 @@ export function ColumnChart({
   const [asTable, setAsTable] = useState(false);
   const titleId = useId();
   const [frameRef, measured] = useElementWidth<HTMLDivElement>();
-  const width = Math.max(320, measured);
-  const height = 170;
+  const width = Math.max(280, measured);
   const top = 10;
   const bottom = 22;
   const left = 56;
@@ -99,10 +101,24 @@ export function ColumnChart({
   const max = Math.max(1, ...columns.map(columnTop));
   const step = niceStep(max);
   const scaleTop = Math.ceil(max / step) * step;
-  const ticks = Array.from({ length: scaleTop / step + 1 }, (_, index) => index * step);
+  // a short chart gets fewer gridlines: the top and the middle
+  const every = height < 140 && scaleTop / step > 2 ? Math.ceil(scaleTop / step / 2) : 1;
+  const ticks = Array.from({ length: scaleTop / step + 1 }, (_, index) => index * step).filter((_, index, all) => index % every === 0 || index === all.length - 1);
   const band = (width - left) / Math.max(1, columns.length);
   const barWidth = Math.min(24, band - 2);
   const y = (value: number) => top + plot - (value / scaleTop) * plot;
+  // Labels under the columns that would run into the one before are left out (about 6px a character).
+  const labelled = new Set<number>();
+  let lastLabel = -Infinity;
+  columns.forEach((column, index) => {
+    if (!column.tick) return;
+    const centre = left + (index + 0.5) * band;
+    const room = column.tick.length * 6 + 8;
+    if (centre - lastLabel >= room) {
+      labelled.add(index);
+      lastLabel = centre;
+    }
+  });
 
   /** A column part from `from` to `to` (values); rounded at the top only when it is the column's top. */
   function part(x: number, from: number, to: number, rounded: boolean, colour: string, key: string) {
@@ -196,7 +212,7 @@ export function ColumnChart({
                 >
                   <rect className="usage-hit" height={plot + top} width={band} x={left + index * band} y={0} />
                   {parts(column, x)}
-                  {column.tick ? (
+                  {column.tick && labelled.has(index) ? (
                     <text className="usage-axis" textAnchor="middle" x={x + barWidth / 2} y={height - 6}>
                       {column.tick}
                     </text>

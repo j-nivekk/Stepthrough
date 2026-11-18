@@ -11,7 +11,7 @@ What is recorded, and what is not:
   it changes when they log in again.
 - Being in the app is kept in five-minute slots: ``open`` for any request, ``working`` for a change.
 - Events are kept ``usage_keep_days`` days (14 unless an administrator changes it under **server**; 0 records
-  nothing), then deleted every hour.
+  nothing, null keeps them for ever), then deleted every hour.
 
 Events are queued in memory and written in batches, so recording costs a request nothing noticeable.
 """
@@ -27,6 +27,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from .report_window import Window
 from .repository import delete_usage_before, insert_usage_events, list_usage_accounts, list_usage_events
 
 SLOT_MINUTES = 5
@@ -35,8 +36,12 @@ FLUSH_EVENTS = 200
 TUTORIAL_LESSONS = 7
 
 PAGES = {"projects", "import", "analysis", "review", "pathway"}
+# Time in the app goes to the stage of the page open: the step review is part of the analysis page.
+STAGE_OF_PAGE = {"projects": "projects", "import": "import", "analysis": "analysis", "review": "analysis", "pathway": "pathway"}
+STAGES = ("projects", "import", "analysis", "pathway")
 TUTORIAL_FROM = {"invitation", "pathway", "about"}
 FIGURE_FORMATS = {"svg", "png"}
+GUIDE_FROM = {"tutorial", "about"}  # the guide links in the pathway tutorial and in how it works
 
 # What a browser may report about itself, and the details each may carry (validated, the rest dropped).
 CLIENT_EVENTS: dict[str, dict[str, Any]] = {
@@ -47,7 +52,10 @@ CLIENT_EVENTS: dict[str, dict[str, Any]] = {
     "tutorial_solved": {"lesson": range(1, TUTORIAL_LESSONS + 1)},
     "tutorial_show_me": {"lesson": range(1, TUTORIAL_LESSONS + 1)},
     "tutorial_closed": {"solved": range(0, TUTORIAL_LESSONS + 1), "minutes": range(0, 600)},
-    "figure_downloaded": {"format": FIGURE_FORMATS},
+    "figure_downloaded": {"format": FIGURE_FORMATS},  # sent by browsers before 1.3; now by the server
+    "comparison_opened": {},
+    "boxes_switched": {"to": {"screens", "steps"}},
+    "guide_opened": {"from": GUIDE_FROM},
 }
 
 
@@ -86,6 +94,11 @@ def configure(enabled: Callable[[], bool]) -> None:
 
 def _counts(user: Any) -> bool:
     return user is not None and not getattr(user, "is_admin", True) and _enabled()
+
+
+def counts(user: Any) -> bool:
+    """Whether what this user does is recorded: on a server with logins, while usage is kept, not administrators."""
+    return _counts(user)
 
 
 def _add(kind: str, account_id: str | None, browser: str | None, detail: dict[str, Any] | None, at: datetime) -> None:
@@ -176,9 +189,11 @@ def flush() -> None:
         insert_usage_events(rows)
 
 
-def purge(keep_days: int) -> int:
-    """Delete what is older than the keeping time (everything, with 0)."""
+def purge(keep_days: int | None) -> int:
+    """Delete what is older than the keeping time (everything, with 0; nothing, with None: kept for ever)."""
     flush()
+    if keep_days is None:
+        return 0
     return delete_usage_before((_now() - timedelta(days=keep_days)).isoformat())
 
 
@@ -205,13 +220,27 @@ def _median(values: list[int]) -> float | None:
     return round(statistics.median(values), 1) if values else None
 
 
-def report(days: int, tz_minutes: int) -> dict[str, Any]:
-    """Everything of the last ``days`` days, in the reader's local time (``tz_minutes`` east of UTC)."""
+def accounts_tagged(names: dict[str, dict[str, Any]], tag: str | None) -> set[str] | None:
+    """The accounts with ``tag``, for a report of one class; None for every account."""
+    return None if not tag else {account_id for account_id, info in names.items() if tag in info.get("tags", ())}
+
+
+# What the long table (``long=True``) counts per account and day; most events count once, slots their minutes.
+LONG_MEASURES = {
+    "open": "minutes in the app", "working": "minutes making changes", "login": "logins", "project_created": "projects",
+    "recording_uploaded": "videos uploaded", "analysis_started": "analyses", "step_decided": "steps decided",
+    "steps_decided": "steps decided", "step_annotated": "titles and notes", "step_added": "steps added",
+    "screen_corrected": "pathway corrections", "screens_merged": "screens merged", "exported": "exports",
+    "figure_downloaded": "pathway figures", "comparison_opened": "comparisons", "tutorial_opened": "tutorial opened",
+}
+
+
+def report(window: Window, tag: str | None = None, long: bool = False) -> dict[str, Any]:
+    """Everything in ``window``, in the reader's local time; only the accounts with ``tag``, when given. ``long``
+    adds a table of every account, day and measure (``LONG_MEASURES``), for analysis elsewhere."""
     flush()
-    until = _now()
-    since = until - timedelta(days=days)
-    shift = timedelta(minutes=tz_minutes)
     names = list_usage_accounts()
+    only = accounts_tagged(names, tag)
 
     browsers: set[str] = set()
     accounts: dict[str, dict[str, Any]] = {}
@@ -225,17 +254,20 @@ def report(days: int, tz_minutes: int) -> dict[str, Any]:
     tutorial: dict[str, dict[str, Any]] = defaultdict(lambda: {"reached": set(), "solved": set(), "opened": False})
     tutorial_from: Counter = Counter()
     show_me: Counter = Counter()
+    page_of: dict[str, str] = {}  # the stage each browser is at, from the last page it opened
+    per_day: dict[tuple[str, str, str], float] = defaultdict(float)  # (account, date, measure) for the long table
+    worked: dict[str, Counter] = defaultdict(Counter)  # minutes making changes, per account and local date
     invited: set[str] = set()
     closed_minutes: list[int] = []
 
-    first_day = (since + shift).date()
-    for offset in range(days + 1):
-        date = (first_day + timedelta(days=offset)).isoformat()
+    for date in window.dates():
         day[date] = {"date": date, "open": set(), "working": set(), "accounts": set(), "logins": 0, "analyses": 0, "decisions": 0}
 
-    for row in list_usage_events(since.isoformat()):
-        at = datetime.fromisoformat(row["at"]) + shift
+    for row in list_usage_events(window.since.isoformat(), window.until.isoformat()):
+        at = window.local(datetime.fromisoformat(row["at"]))
         kind, account_id, browser = row["kind"], row["account_id"], row["browser"]
+        if only is not None and account_id not in only:
+            continue
         detail = json.loads(row["detail"]) if row["detail"] else {}
         date = at.date().isoformat()
         today = day.get(date)
@@ -252,16 +284,27 @@ def report(days: int, tz_minutes: int) -> dict[str, Any]:
             "logins": 0, "projects": 0, "uploads": 0, "upload_minutes": 0.0, "analyses": 0, "analyses_failed": 0,
             "accepted": 0, "rejected": 0, "annotations": 0, "steps_added": 0, "carried_over": 0, "merges": 0,
             "exports": 0, "figures": 0, "tutorial_browsers": set(), "tutorial_finished": set(),
+            "corrections": 0, "comparisons": 0, "active_days": set(), "stage_minutes": dict.fromkeys(STAGES, 0),
         })
         if browser:
             stats["browsers"].add(browser)
         if today is not None:
             today["accounts"].add(account_id)
+        if long and kind in LONG_MEASURES:
+            amount = SLOT_MINUTES if kind in ("open", "working") else int(detail.get("count") or 1)
+            per_day[(account_id, date, LONG_MEASURES[kind])] += amount
         if kind in ("open", "working"):
             stats[f"{kind}_minutes"] += SLOT_MINUTES
             (hour_open if kind == "open" else hour_working)[at.hour].add((date, browser))
             if today is not None:
                 today[kind].add(browser)
+            if kind == "open":
+                stage = page_of.get(browser or "", "projects")
+                stats["stage_minutes"][stage] += SLOT_MINUTES
+                totals[f"stage:{stage}"] += SLOT_MINUTES
+            else:
+                stats["active_days"].add(date)
+                worked[account_id][date] += SLOT_MINUTES
         elif kind == "login":
             stats["logins"] += 1
             totals["logins"] += 1
@@ -310,6 +353,19 @@ def report(days: int, tz_minutes: int) -> dict[str, Any]:
             totals["figures"] += 1
         elif kind == "page":
             pages[detail.get("name", "?")] += 1
+            if browser and detail.get("name") in STAGE_OF_PAGE:
+                page_of[browser] = STAGE_OF_PAGE[detail["name"]]
+        elif kind == "screen_corrected":
+            stats["corrections"] += 1
+            totals["corrections"] += 1
+            totals[f"correction:{detail.get('choice', '?')}"] += 1
+        elif kind == "comparison_opened":
+            stats["comparisons"] += 1
+            totals["comparisons"] += 1
+        elif kind == "boxes_switched":
+            totals["boxes_switched"] += 1
+        elif kind == "guide_opened":
+            totals["guide_opened"] += 1
         elif kind == "tutorial_invited" and browser:
             invited.add(browser)
         elif kind.startswith("tutorial_") and browser:
@@ -337,6 +393,9 @@ def report(days: int, tz_minutes: int) -> dict[str, Any]:
             "upload_minutes": round(stats["upload_minutes"], 1),
             "tutorial_browsers": len(stats["tutorial_browsers"]),
             "tutorial_finished": len(stats["tutorial_finished"]),
+            "active_days": len(stats["active_days"]),
+            "stage_minutes": dict(stats["stage_minutes"]),
+            "worked": [worked[account_id].get(date, 0) for date in day],
         }
 
     lessons = []
@@ -349,9 +408,8 @@ def report(days: int, tz_minutes: int) -> dict[str, Any]:
         })
 
     return {
-        "since": since.isoformat(),
-        "until": until.isoformat(),
-        "days": days,
+        **window.describe(),
+        "tag": tag,
         "slot_minutes": SLOT_MINUTES,
         "totals": {
             "browsers": len(browsers),
@@ -367,6 +425,14 @@ def report(days: int, tz_minutes: int) -> dict[str, Any]:
             "rejected": totals["rejected"],
             "exports": totals["exports"],
             "figures": totals["figures"],
+            "corrections": totals["corrections"],
+            "corrections_by_choice": {
+                key.split(":", 1)[1]: value for key, value in totals.items() if key.startswith("correction:")
+            },
+            "comparisons": totals["comparisons"],
+            "boxes_switched": totals["boxes_switched"],
+            "guide_opened": totals["guide_opened"],
+            "stage_minutes": {stage: totals[f"stage:{stage}"] for stage in STAGES},
         },
         "hours": [
             {"hour": hour, "open": len(hour_open[hour]), "working": len(hour_working[hour])} for hour in range(24)
@@ -388,4 +454,12 @@ def report(days: int, tz_minutes: int) -> dict[str, Any]:
             "lessons": lessons,
         },
         "pages": dict(pages),
+        **(
+            {"long": [
+                [accounts[account_id]["name"], date, measure, round(value, 2)]
+                for (account_id, date, measure), value in sorted(per_day.items(), key=lambda item: (accounts[item[0][0]]["name"], item[0][1], item[0][2]))
+            ]}
+            if long
+            else {}
+        ),
     }

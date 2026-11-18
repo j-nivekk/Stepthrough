@@ -174,6 +174,53 @@ def test_events_go_after_the_keeping_time(server) -> None:
     assert events() == []
 
 
+def test_usage_can_be_kept_for_ever_or_for_a_chosen_number_of_days(server) -> None:
+    create_account("teacher", tags=["admin"], password=PASSWORD)
+    teacher = server("teacher", first=True)
+    long_ago = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat()
+    insert_usage_events([(long_ago, "x", "b1", "open", None)])
+
+    settings = ok(teacher.patch("/admin/server-settings", json={"usage_keep_days": None}))  # null: for ever
+    assert settings["usage_keep_days"] == {"value": None, "default": 14}
+    assert usage.purge(None) == 0 and [row["browser"] for row in events()] == ["b1"]
+    ok(teacher.patch("/admin/server-settings", json={"compression": False}))  # left out: unchanged
+    assert ok(teacher.get("/admin/server-settings"))["usage_keep_days"]["value"] is None
+
+    everything = ok(teacher.get("/admin/usage", params={"days": 0}))  # everything kept, from the oldest event
+    assert everything["keep_days"] is None and everything["days"] >= 200
+
+    ok(teacher.patch("/admin/server-settings", json={"usage_keep_days": 365}))  # longer than the old 90 days
+    assert [row["browser"] for row in events()] == ["b1"]
+    ok(teacher.patch("/admin/server-settings", json={"usage_keep_days": 56}))  # shorter: applies at once
+    assert events() == []
+    assert teacher.patch("/admin/server-settings", json={"usage_keep_days": 5000}).status_code == 422
+
+
+def test_a_report_covers_whole_local_days_or_the_dates_chosen(server) -> None:
+    create_account("group", tags=["shared", "group-a"], password=PASSWORD)
+    create_account("other", tags=["shared", "group-b"], password=PASSWORD)
+    create_account("teacher", tags=["admin"], password=PASSWORD)
+    teacher = server("teacher", first=True)
+    group, other = (server(name) for name in ("group", "other"))
+    ok(group.post("/projects", json={"name": "One"}))
+    ok(other.post("/projects", json={"name": "Two"}))
+    today = datetime.now(timezone.utc).date()
+
+    week = ok(teacher.get("/admin/usage", params={"days": 7}))
+    assert week["days"] == 7 and len(week["days_list"]) == 7 and week["end"] == today.isoformat()
+    chosen = ok(teacher.get("/admin/usage", params={"start": (today - timedelta(days=2)).isoformat()}))
+    assert (chosen["start"], chosen["end"], chosen["days"]) == ((today - timedelta(days=2)).isoformat(), today.isoformat(), 3)
+    past = ok(teacher.get("/admin/usage", params={"start": "2020-01-01", "end": "2020-01-31"}))
+    assert past["accounts"] == [] and past["totals"]["logins"] == 0  # nothing kept from then
+    assert teacher.get("/admin/usage", params={"start": "2026-02-01", "end": "2026-01-01"}).status_code == 422
+
+    one_class = ok(teacher.get("/admin/usage", params={"days": 7, "tag": "group-a"}))
+    assert [row["name"] for row in one_class["accounts"]] == ["group"] and one_class["tag"] == "group-a"
+    assert [row["name"] for row in ok(teacher.get("/admin/usage", params={"days": 7}))["accounts"]] == ["group", "other"]
+    traffic_names = {row["name"] for row in ok(teacher.get("/admin/traffic", params={"days": 7, "tag": "group-b"}))["accounts"]}
+    assert traffic_names == {"other"}
+
+
 # ── traffic (app/traffic.py) ────────────────────────────────────────────────────────────────────────────────────
 
 

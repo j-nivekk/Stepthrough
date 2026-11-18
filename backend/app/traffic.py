@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from .report_window import Window
 from .repository import add_traffic, delete_traffic_before, list_traffic, list_usage_accounts
 
 # In the order the report shows them.
@@ -115,8 +116,11 @@ def flush() -> None:
         add_traffic([(hour, account, kind, *counts) for (hour, account, kind), counts in pending.items()])
 
 
-def purge(keep_days: int) -> int:
+def purge(keep_days: int | None) -> int:
+    """Delete what is older than the keeping time (everything, with 0; nothing, with None: kept for ever)."""
     flush()
+    if keep_days is None:
+        return 0
     return delete_traffic_before((datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat())
 
 
@@ -155,28 +159,26 @@ class TrafficMiddleware:
                 pass
 
 
-def report(days: int, tz_minutes: int) -> dict[str, Any]:
-    """The last ``days`` days, in the reader's local time (``tz_minutes`` east of UTC)."""
+def report(window: Window, tag: str | None = None) -> dict[str, Any]:
+    """Everything in ``window``, in the reader's local time; only the accounts with ``tag``, when given (requests
+    before a login then count for no one in the report)."""
     flush()
-    until = datetime.now(timezone.utc)
-    since = (until - timedelta(days=days)).replace(minute=0, second=0, microsecond=0)
-    shift = timedelta(minutes=tz_minutes)
     names = list_usage_accounts()
+    only = None if not tag else {account_id for account_id, info in names.items() if tag in info.get("tags", ())}
+    since = window.since.replace(minute=0, second=0, microsecond=0)  # the hour it falls in
 
     totals = {"bytes_in": 0, "bytes_out": 0, "requests": 0}
     kinds = {kind: {"category": kind, "bytes_in": 0, "bytes_out": 0, "requests": 0} for kind in CATEGORIES}
     accounts: dict[str, dict[str, Any]] = {}
     hours = [{"hour": hour, "bytes_in": 0, "bytes_out": 0} for hour in range(24)]
-    days_list: dict[str, dict[str, Any]] = {}
-    first = (since + shift).date()
-    for offset in range(days + 1):
-        date = (first + timedelta(days=offset)).isoformat()
-        days_list[date] = {"date": date, "bytes_in": 0, "bytes_out": 0, "requests": 0}
+    days_list = {date: {"date": date, "bytes_in": 0, "bytes_out": 0, "requests": 0} for date in window.dates()}
     busiest: dict[str, int] = defaultdict(int)
 
-    for row in list_traffic(since.isoformat()):
-        at = datetime.fromisoformat(row["hour"]) + shift
+    for row in list_traffic(since.isoformat(), window.until.isoformat()):
+        at = window.local(datetime.fromisoformat(row["hour"]))
         account_id = row["account_id"] or None
+        if only is not None and account_id not in only:
+            continue
         bytes_in, bytes_out, requests = row["bytes_in"], row["bytes_out"], row["requests"]
         for target in (totals, kinds.setdefault(row["category"], {"category": row["category"], "bytes_in": 0, "bytes_out": 0, "requests": 0})):
             target["bytes_in"] += bytes_in
@@ -206,9 +208,8 @@ def report(days: int, tz_minutes: int) -> dict[str, Any]:
 
     peak = max(busiest.items(), key=lambda item: item[1]) if busiest else None
     return {
-        "since": since.isoformat(),
-        "until": until.isoformat(),
-        "days": days,
+        **window.describe(),
+        "tag": tag,
         "totals": totals,
         "busiest_hour": {"start": peak[0][:16], "bytes": peak[1]} if peak else None,
         "categories": list(kinds.values()),
