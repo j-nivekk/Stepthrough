@@ -1185,8 +1185,18 @@ function App({ session, onSessionChange }: AppProps) {
 
   async function confirmDeleteProject(projectId: string, projectName: string) {
     const confirmed = await confirm({
-      message: `delete ${projectName}?`,
-      detail: 'every recording, run, screenshot and export in it goes too. this cannot be undone.',
+      // In a shared account everyone sees everyone's projects, so there the question says whose project to delete.
+      ...(isShared
+        ? {
+            message: `are you sure you want to delete the project ${projectName}?`,
+            detail:
+              'only do so if this is your own project: it goes for everyone who can open it, with every recording, ' +
+              'run, screenshot and export in it. this cannot be undone.',
+          }
+        : {
+            message: `delete ${projectName}?`,
+            detail: 'every recording, run, screenshot and export in it goes too. this cannot be undone.',
+          }),
       confirmLabel: 'delete',
       danger: true,
     });
