@@ -5810,6 +5810,19 @@ button:disabled {
   min-width: 0;
 }
 
+.screen-choice-note {
+  margin: 0 0 2px;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.screen-choice-box {
+  display: block;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+}
+
 .screen-choice-step img {
   flex: none;
   width: 34px;
@@ -6091,6 +6104,13 @@ button:disabled {
   color: rgba(0, 0, 0, 0.6);
   font-size: 12px;
   line-height: 1.2;
+}
+
+/* What a control moves: one step, or every step of the box. */
+.pathway-editor-scope {
+  margin-left: 4px;
+  font-style: normal;
+  color: rgba(0, 0, 0, 0.42);
 }
 
 .pathway-editor select,

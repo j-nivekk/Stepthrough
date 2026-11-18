@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { isPopupStep, popupChange, ScreenChoice } from '../../components/ScreenChoice';
+import { isPopupStep, popupChange, ScreenChoice, type PathwayPlaces } from '../../components/ScreenChoice';
 import { formatPathwayTime } from '../../lib/pathwayFigure';
 import type { CandidateChanges, CandidateFrame, Pathway, PathwayScreen } from '../../types';
 
@@ -25,6 +25,30 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
   const byId = useMemo(() => new Map(candidates.map((candidate) => [candidate.id, candidate])), [candidates]);
   const firstCandidateId = (screen: PathwayScreen): string => steps.get(screen.image_step_id)?.source_candidate_id ?? '';
 
+  // A box is named with its steps, as "Screen 4 (step 6)", so its number is never taken for a step's.
+  const stepNumbers = (screen: PathwayScreen): number[] =>
+    screen.visits.flatMap((visit) => visit.step_ids).map((id) => steps.get(id)?.step_index ?? 0).filter(Boolean);
+  const listed = (numbers: number[]): string =>
+    numbers.length < 2 ? String(numbers[0] ?? '') : `${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`;
+  const screenName = (screen: PathwayScreen): string =>
+    screen.title === `Screen ${screen.index}` ? `Screen ${screen.index}` : `Screen ${screen.index}, ${screen.title}`;
+  const screenOption = (screen: PathwayScreen): string => {
+    const numbers = stepNumbers(screen);
+    return `${screenName(screen)} (${numbers.length === 1 ? 'step' : 'steps'} ${listed(numbers)})`;
+  };
+  const places = useMemo(() => {
+    const number = new Map<string, number>();
+    const box = new Map<string, string>();
+    for (const step of pathway.steps) number.set(step.source_candidate_id, step.step_index);
+    for (const screen of pathway.screens) {
+      for (const id of screen.visits.flatMap((visit) => visit.step_ids)) {
+        const candidateId = steps.get(id)?.source_candidate_id;
+        if (candidateId) box.set(candidateId, `Screen ${screen.index}`);
+      }
+    }
+    return { number, box };
+  }, [pathway, steps]);
+
   // A box takes the title of its first step that has one, so renaming it renames that step (or its first step).
   const titleCandidateId = selected ? steps.get(selected.title_step_id ?? selected.image_step_id)?.source_candidate_id : undefined;
   const savedTitle = selected?.title_step_id ? selected.title : '';
@@ -40,7 +64,7 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
         <option value="">{selected ? 'none' : 'choose a screen…'}</option>
         {pathway.screens.map((screen) => (
           <option key={screen.id} value={firstCandidateId(screen)}>
-            {screen.index} · {screen.title}
+            {screenOption(screen)}
           </option>
         ))}
       </select>
@@ -62,6 +86,10 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
   const first = byId.get(firstCandidateId(selected));
   const boxSteps = selected.visits.flatMap((visit) => visit.step_ids).map((id) => steps.get(id));
   const others = pathway.screens.filter((screen) => screen.id !== selected.id);
+  const ownNumbers = stepNumbers(selected);
+  const inPathway: PathwayPlaces = { ...places, boxSize: ownNumbers.length };
+  const mergeScope =
+    ownNumbers.length === 1 ? `its one step, ${ownNumbers[0]}` : ownNumbers.length === 2 ? 'both steps together' : `all ${ownNumbers.length} steps together`;
 
   function commitTitle(value: string) {
     const next = value.trim();
@@ -92,7 +120,9 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
         </label>
       ) : null}
       <div className="pathway-editor-field">
-        <span>steps and where they belong</span>
+        <span>
+          steps and where they belong <em className="pathway-editor-scope">each on its own</em>
+        </span>
         <div className="pathway-editor-steps">
           {boxSteps.map((step) => {
             const candidate = step ? byId.get(step.source_candidate_id) : undefined;
@@ -100,15 +130,27 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
             return (
               <span className="pathway-editor-step" key={step.step_id} title={`step ${step.step_index} at ${formatPathwayTime(step.timestamp_ms)}`}>
                 <b>{step.step_index}</b>
-                <ScreenChoice anyStep candidate={candidate} hidePopup onUpdate={(changes) => onUpdateCandidate(candidate.id, changes)} steps={candidates} />
+                <ScreenChoice
+                  anyStep
+                  candidate={candidate}
+                  hidePopup
+                  inPathway={inPathway}
+                  onUpdate={(changes) => onUpdateCandidate(candidate.id, changes)}
+                  steps={candidates}
+                />
               </span>
             );
           })}
         </div>
       </div>
       {others.length > 0 && first ? (
-        <label className="pathway-editor-field">
-          <span>merge into</span>
+        <label
+          className="pathway-editor-field"
+          title={`moves every step of this box (${listed(ownNumbers)}) into the screen you choose. to move one step, use its choice under steps and where they belong.`}
+        >
+          <span>
+            merge into <em className="pathway-editor-scope">{mergeScope}</em>
+          </span>
           <select
             onChange={(event) => {
               if (event.target.value) onMerge(first.id, event.target.value);
@@ -118,7 +160,7 @@ export function PathwayBoxEditor({ pathway, candidates, selected, onSelect, onUp
             <option value="">another screen…</option>
             {others.map((screen) => (
               <option key={screen.id} value={firstCandidateId(screen)}>
-                {screen.index} · {screen.title}
+                {screenOption(screen)}
               </option>
             ))}
           </select>

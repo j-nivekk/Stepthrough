@@ -492,7 +492,8 @@ choice (under **annotate** on a card, or in the **label, screen** column of the 
 - **automatic** leaves the step where the rules above put it;
 - **a new screen** gives the step a box of its own, for two pages that look alike and were taken for one;
 - **the same screen as** another step, picked from a list with screenshots, puts the step in that step's
-  box, for a return that was not recognised or the same page in a different state;
+  box, for a return that was not recognised or the same page in a different state. It moves this step alone
+  (with the steps that scroll or type on from it), not the rest of its box;
 - **this step is a pop-up** marks a menu or dialog that was not recognised (or, unticked, one that was
   recognised by mistake). A pop-up always starts a box of its own.
 
@@ -508,7 +509,13 @@ You can make the same corrections in the pathway itself. Click a screen in the c
 - **steps and where they belong** lists the steps in the box, each with its **screen** choice, where you can
   move one step to another box or give it a box of its own. Steps that follow a moved step by scrolling or
   typing move with it;
-- **merge into** puts the whole box into another one.
+- **merge into** moves all the steps of the box together into another one.
+
+Which one to use depends on what is wrong. When one step is in the wrong box, move that step with its own
+choice, **the same screen as**. When two boxes show one screen, move one box into the other with **merge
+into**. For a box with a single step, both do the same. In the pathway, steps are numbered as in `steps.csv`
+(the accepted steps only), and both lists say which box each step is in: **merge into** offers the boxes as
+"Screen 4 (step 6)", and **the same screen as** shows "in Screen 4" under each step.
 
 Everything you change here is stored on the steps, exactly as if you had chosen it in the step list.
 
