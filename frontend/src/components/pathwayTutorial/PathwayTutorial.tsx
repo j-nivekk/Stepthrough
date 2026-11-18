@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
+import { track } from '../../lib/usage';
+
 import { ART_HEIGHT, ART_WIDTH, MockArt } from './MockArt';
 import { MockPathway, type MockNotes, type ScreenMark } from './MockPathway';
 import {
@@ -97,6 +99,9 @@ const LESSONS: Lesson[] = [
   },
 ];
 
+/** The lessons' short names, in order (the usage report names them). */
+export const TUTORIAL_LESSON_NAMES = LESSONS.map((lesson) => lesson.name);
+
 type Verdict = 'right' | 'split' | 'merged';
 
 const VERDICTS: Array<[Verdict, string]> = [
@@ -161,6 +166,9 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const timers = useRef<number[]>([]);
   const [lesson, setLesson] = useState(0);
+  // For the usage report: which lessons were solved, and since when the tutorial is open.
+  const solved = useRef(new Set<number>());
+  const openedAt = useRef(Date.now());
   const [done, setDone] = useState<Set<number>>(new Set());
   const [view, setView] = useState<'line' | 'chart'>('line');
   const [folds, setFolds] = useState(0);
@@ -212,8 +220,26 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   }
 
   function complete(index: number) {
+    if (!solved.current.has(index)) {
+      solved.current.add(index);
+      track({ kind: 'tutorial_solved', lesson: index + 1 });
+    }
     setDone((previous) => (previous.has(index) ? previous : new Set(previous).add(index)));
   }
+
+  useEffect(() => {
+    track({ kind: 'tutorial_lesson', lesson: lesson + 1 });
+  }, [lesson]);
+
+  useEffect(
+    () => () =>
+      track({
+        kind: 'tutorial_closed',
+        solved: solved.current.size,
+        minutes: Math.round((Date.now() - openedAt.current) / 60_000),
+      }),
+    [],
+  );
 
   // Every lesson starts from its own state, so lessons can be taken again or out of order.
   function open(index: number) {
@@ -340,6 +366,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   }
 
   function showMe() {
+    track({ kind: 'tutorial_show_me', lesson: lesson + 1 });
     if (lesson === 0) {
       play(
         [

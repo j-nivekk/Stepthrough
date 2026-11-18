@@ -25,6 +25,7 @@ import type { CandidateChanges, Pathway, PathwayDetail, PathwayStep, RecordingSu
 import { useElementWidth } from '../analysis/useElementWidth';
 import { PathwayBoxEditor } from './PathwayBoxEditor';
 import { usePathwayPeek } from './usePathwayPeek';
+import { track } from '../../lib/usage';
 
 interface PathwayPanelProps {
   /** Opens the about panel at the bottom right, where the tutorial stays within reach. */
@@ -89,6 +90,11 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   const [tutorialOpen, setTutorialOpen] = useState(false);
   // Shown once, until the tutorial is started or the invitation dismissed.
   const [invite, setInvite] = useState(() => !pathwayTutorialSeen());
+  useEffect(() => {
+    if (invite) track({ kind: 'tutorial_invited' });
+    // once, when the pathway first shows with the invitation
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // After the invitation goes, a note in its place says where the tutorial is from then on. Its colour drains
   // from right to left as a countdown, and the note goes when it is empty (or with its ×).
   const [aboutNote, setAboutNote] = useState(false);
@@ -190,6 +196,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
       const name = `${splitFilename(filename).base}-pathway.${format}`;
       if (format === 'svg') downloadText(name, `<?xml version="1.0" encoding="UTF-8"?>\n${file.svg}\n`, 'image/svg+xml');
       else downloadBlob(name, await renderPathwayPng(file, { regular: interUrl, italic: interItalicUrl }));
+      track({ kind: 'figure_downloaded', format });
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : 'could not make the figure.');
     } finally {
@@ -198,6 +205,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   }
 
   function openTutorial() {
+    track({ kind: 'tutorial_opened', from: invite ? 'invitation' : 'pathway' });
     markPathwayTutorialSeen();
     setTutorialFromInvite(invite);
     setInvite(false);

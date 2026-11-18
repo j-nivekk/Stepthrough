@@ -8,6 +8,7 @@ import { LoginScreen } from './features/account/LoginScreen';
 import { SetPasswordScreen } from './features/account/SetPasswordScreen';
 import { forgetLinkToken, readLinkToken } from './lib/accountLinks';
 import { isSharedAccount } from './lib/live';
+import { enableUsage } from './lib/usage';
 import type { SessionInfo } from './types';
 
 const SESSION_KEY = ['session'];
@@ -73,6 +74,8 @@ export function Root() {
   // Without an answer (the backend is not running yet), the app's own notices explain what is wrong.
   // Many people signed in to one shared account see each other's changes as they happen.
   const shared = session?.mode === 'password' && isSharedAccount(session.user);
+  // Usage is reported where the server records it: logins, and not an administrator (backend/app/usage.py).
+  enableUsage(Boolean(session?.mode === 'password' && session.user && !session.user.is_admin));
   return (
     <LiveProvider enabled={shared}>
       <App onSessionChange={enter} session={session} />

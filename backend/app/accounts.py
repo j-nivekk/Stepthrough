@@ -22,7 +22,7 @@ import secrets
 import threading
 import time
 from collections import defaultdict, deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from functools import cache
 from pathlib import Path
@@ -32,6 +32,7 @@ from urllib.parse import urlsplit
 from fastapi import Depends, HTTPException
 from starlette.requests import HTTPConnection
 
+from . import traffic, usage
 from .config import AuthMode, public_url
 from .database import ADMIN_TAG, LOCAL_USER_ID, SHARED_TAG
 from .repository import (
@@ -80,6 +81,8 @@ class User:
     display_name: str | None = None
     tags: tuple[str, ...] = ()
     delete_after: str | None = None
+    # One login in one browser, for counting the people of a shared account apart (app/usage.py); no session.
+    browser: str | None = None
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> User:
@@ -217,7 +220,7 @@ def session_user(token: str) -> User | None:
         return None
     if seen + SEEN_INTERVAL <= datetime.fromisoformat(now):
         touch_session(session["token_hash"], session["user_id"], now)
-    return User.from_row(session)
+    return replace(User.from_row(session), browser=usage.browser_key(session["token_hash"]))
 
 
 def set_session_cookie(response: Any, conn: HTTPConnection, token: str) -> None:
@@ -264,7 +267,13 @@ def current_user(conn: HTTPConnection) -> User | None:
     if auth_mode(conn) == "none":
         return builtin_user()
     token = conn.cookies.get(SESSION_COOKIE)
-    return session_user(token) if token else None
+    user = session_user(token) if token else None
+    if user is not None:
+        conn.state.traffic_account = user.id  # whose traffic this request is (app/traffic.py)
+        traffic.remember(token, user.id)
+        # Being in the app, for the usage report: any request is ``open``; a change is ``working`` too.
+        usage.note_activity(user, working=conn.scope.get("method") not in (None, "GET", "HEAD", "OPTIONS"))
+    return user
 
 
 def logged_in_user(user: Annotated[User | None, Depends(current_user)]) -> User:

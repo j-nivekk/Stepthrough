@@ -171,7 +171,7 @@ With `STEPTHROUGH_AUTH=none` (the desktop app) there are no logins: every reques
 
 With `STEPTHROUGH_AUTH=password` people log in with a name and a password:
 
-- **Making accounts.** Administrators make them on the users page (account menu, then **manage users**) or with
+- **Making accounts.** Administrators make them in the admin panel (account menu, then **admin panel**) or with
   `python -m app.users`; nobody can sign up. The first administrator comes from the command line:
   `python -m app.users add NAME --admin --password`. Names match in any case, have no spaces, and do not start
   with `=`, `+`, `-` or `@` (spreadsheets would run them as formulas in a CSV of links).
@@ -201,7 +201,7 @@ With `STEPTHROUGH_AUTH=password` people log in with a name and a password:
   deleted (the server checks every hour, and `python -m app.users expire` does it at once). In the month before,
   its owner sees a notice. Deleting an account by hand does the same; projects it shares as an owner stay.
 - **Projects from before logins** belong to `local`, which cannot log in. An administrator takes them over on
-  the users page or with `python -m app.users transfer local NAME`.
+  the admin panel or with `python -m app.users transfer local NAME`.
 
 In both modes, requests that change something are refused when the browser says they come from another website
 (`Sec-Fetch-Site`, `Origin`); the origins in `STEPTHROUGH_CORS_ORIGINS` are trusted. Every answer carries
@@ -213,7 +213,7 @@ reset deletes projects but keeps accounts.
 ## Server settings and compression
 
 `app/server_settings.py` holds what an administrator changes while the server runs (`GET` and `PATCH
-/admin/server-settings`, shown on the users page under **server**). Each starts from the configuration and is stored
+/admin/server-settings`, shown in the admin panel under **server**). Each starts from the configuration and is stored
 in `server_settings` once changed, unless changed back to the configuration's value:
 
 - `analyses_at_a_time` (0: no limit) sets the job manager's limit at once; with a higher limit, runs waiting start.
@@ -223,6 +223,29 @@ in `server_settings` once changed, unless changed back to the configuration's va
   alone. A large task is a tenth of its size compressed;
 - `live_spread_seconds`: the live feed tells browsers (`pace.spread_ms`) to reload a task after a change at a
   random moment within this time, after the usual pause, so the browsers of a shared account spread their requests.
+
+## Usage report
+
+`app/usage.py` records how the app is used, on a server with logins, for accounts that are not administrators:
+`login` (and `login_failed`, without an account), `open` and `working` in five-minute slots (any request, and a
+change; noted in `current_user`), `project_created`, `recording_uploaded` (its minutes), `analysis_started` and
+`analysis_finished` (status, seconds waited and taken, steps), `step_decided`, `steps_decided` (status, count),
+`step_annotated` (title or notes, not the text), `step_added`, `review_carried_over`, `screens_merged` and `exported`
+(mode, steps). Browsers add what only they see through `POST /me/usage`, from a fixed list (`CLIENT_EVENTS`): the
+page, and the pathway tutorial (invited, opened and from where, each lesson reached and solved, "show me", closed
+with lessons solved and minutes), and pathway figures downloaded. Each event carries a browser key derived from
+the session (`User.browser`), so the people under one shared account count apart; no names, addresses, files or
+text. Events are queued in memory and written in batches, and deleted after `usage_keep_days` (14; 0 records
+nothing) by the hourly clean-up. `GET /admin/usage?days=&tz=` adds them up in the reader's time zone (minutes east
+of UTC): totals, per hour of the day and per day (browsers in the app and making changes, each counted once a
+day), per account, the tutorial per lesson, and pages. `tests/test_usage.py` covers it.
+
+`app/traffic.py` counts bytes in (request bodies) and out (response bodies, after compression: it is the outermost
+middleware) per hour, account and kind (`uploads`, `media`, `exports`, `live`, `data`, `app`, from the path), as
+totals in `traffic`, kept and deleted with the usage events. A request counts for the account `current_user`
+found, or else for the account whose session cookie it carries (remembered in memory, keyed by a hash of the
+token, at login and on every checked request), or for nobody. `GET /admin/traffic?days=&tz=` adds it up like the
+usage report, with the busiest hour.
 
 ## Shared accounts
 

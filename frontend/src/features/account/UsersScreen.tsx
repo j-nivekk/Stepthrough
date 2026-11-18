@@ -4,6 +4,8 @@ import { listUsers } from '../../api';
 import type { AdminUser } from '../../types';
 import { AddPeoplePanel } from './AddPeoplePanel';
 import { ServerSettingsPanel } from './ServerSettingsPanel';
+import { TrafficReport } from './TrafficReport';
+import { UsageReport } from './UsageReport';
 import { UserBatchBar } from './UserBatchBar';
 import { UserRow } from './UserRow';
 
@@ -22,6 +24,7 @@ export function UsersScreen({ currentUserId, onBack }: UsersScreenProps) {
   const usersQuery = useQuery({ queryKey: ['admin-users'], queryFn: listUsers });
   const users = usersQuery.data ?? [];
   const [notice, setNotice] = useState('');
+  const [view, setView] = useState<'users' | 'usage' | 'traffic'>('users');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<'name' | 'recent'>('name');
   const [selectMode, setSelectMode] = useState(false);
@@ -79,13 +82,27 @@ export function UsersScreen({ currentUserId, onBack }: UsersScreenProps) {
               projects
             </button>
             <span aria-hidden="true" className="stage-pill-sep">·</span>
-            <button aria-current="page" className="stage-pill-btn stage-pill-btn--active" disabled type="button">
-              users
-            </button>
+            {(['users', 'usage', 'traffic'] as const).map((page, index) => (
+              <span className="stage-pill-group" key={page}>
+                {index ? <span aria-hidden="true" className="stage-pill-sep">·</span> : null}
+                <button
+                  aria-current={view === page ? 'page' : undefined}
+                  className={`stage-pill-btn ${view === page ? 'stage-pill-btn--active' : ''}`}
+                  disabled={view === page}
+                  onClick={() => setView(page)}
+                  type="button"
+                >
+                  {page}
+                </button>
+              </span>
+            ))}
           </nav>
         </div>
 
-        <div className="users-grid">
+        {view === 'usage' ? <UsageReport /> : null}
+        {view === 'traffic' ? <TrafficReport /> : null}
+
+        <div className="users-grid" hidden={view !== 'users'}>
           <div className="users-side">
             <AddPeoplePanel
               onChanged={() => {

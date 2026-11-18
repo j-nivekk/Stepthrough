@@ -32,6 +32,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .account_routes import router as account_router, user_response
 from .accounts import (
+    SESSION_COOKIE,
     CurrentUser,
     MaybeUser,
     ProjectRole,
@@ -132,7 +133,7 @@ from .services.video import (
 from .compression import CompressMiddleware
 from .export_cleanup import clear_old_exports
 from .live import CLIENT_HEADER, LiveHub, TaskWrites, clean_targets
-from . import server_settings
+from . import server_settings, traffic, usage, usage_routes
 from .storage import (
     absolute_data_path,
     asset_url,
@@ -187,6 +188,14 @@ app.add_middleware(
 )
 app.include_router(account_router)
 app.include_router(server_settings.router)
+app.include_router(usage_routes.router)
+# Usage is recorded on a server with logins, while it is kept for a day or more (app/usage.py).
+def _recording() -> bool:
+    return getattr(app.state, "auth_mode", "none") == "password" and server_settings.value("usage_keep_days") > 0
+
+
+usage.configure(_recording)
+traffic.configure(_recording, SESSION_COOKIE)
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
@@ -232,6 +241,8 @@ async def add_security_headers(request: Request, call_next):
 
 # Outermost of all: what the others send is compressed when it is worth it and an administrator has not switched it off.
 app.add_middleware(CompressMiddleware, enabled=server_settings.compression_enabled)
+# Around that, so it counts the bytes as they go over the network (app/traffic.py).
+app.add_middleware(traffic.TrafficMiddleware, enabled=lambda: _recording())
 
 
 def _checking_ocr_state() -> OcrHealthState:
@@ -291,6 +302,11 @@ def _delete_expired_accounts_hourly() -> None:
         except Exception:  # pragma: no cover - keep trying every hour
             logger.exception("Could not delete expired accounts.")
         try:
+            usage.purge(server_settings.value("usage_keep_days"))
+            traffic.purge(server_settings.value("usage_keep_days"))
+        except Exception:  # pragma: no cover - keep trying every hour
+            logger.exception("Could not delete old usage events.")
+        try:
             removed, freed = clear_old_exports()
             if removed:
                 exports = "export" if removed == 1 else "exports"
@@ -298,6 +314,12 @@ def _delete_expired_accounts_hourly() -> None:
         except Exception:  # pragma: no cover - keep trying every hour
             logger.exception("Could not remove replaced exports.")
         time.sleep(3600)
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    usage.flush()
+    traffic.flush()
 
 
 def _start_account_cleanup() -> None:
@@ -917,6 +939,7 @@ def _run_detection_job(run_id: str) -> None:
             shutil.rmtree(temp_root, ignore_errors=True)
         manager.finish(run_id)
         _announce_run(run_id)
+        usage.analysis_finished(run_id, get_run(run_id))
 
 
 @app.get("/", include_in_schema=False, response_model=None)
@@ -1081,6 +1104,7 @@ def projects_index(user: CurrentUser) -> list[ProjectResponse]:
 def projects_create(payload: ProjectCreate, user: CurrentUser, client: SharedClient = None) -> ProjectResponse:
     project = create_project(payload.name, owner_id=user.id)
     _announce("projects", project_id=project["id"], user=user, client=client)
+    usage.record("project_created", user)
     return _serialize_project(project)
 
 
@@ -1161,6 +1185,7 @@ async def recordings_import(
             shutil.rmtree(destination.parent.parent, ignore_errors=True)
     _start_background_ingest(recording["id"])
     _announce("project", project_id=project_id, recording_id=recording_id, user=user, client=client)
+    usage.record("recording_uploaded", user, minutes=round((metadata.duration_ms or 0) / 60000, 2))
     return _serialize_recording(recording)
 
 
@@ -1219,6 +1244,7 @@ def runs_create(recording_id: str, settings: RunSettings, user: CurrentUser, cli
     _validate_run_settings_for_recording(recording, settings)
     run = create_run(recording_id, settings)
     _emit_run_event(run["id"], phase="queued", level="info", message="Run queued", progress=0.0)
+    usage.analysis_started(run["id"], user)
     _job_manager().start(run["id"], lambda: _run_detection_job(run["id"]))
     _announce("recording", project_id=project["id"], recording_id=recording_id, run_id=run["id"], user=user, client=client)
     return _serialize_run_summary(get_run(run["id"]))
@@ -1253,6 +1279,7 @@ def runs_pathway_merge(run_id: str, payload: PathwayMerge, user: CurrentUser, cl
         if payload.target_candidate_id not in members:
             set_candidate_screen_links(run_id, members, payload.target_candidate_id)
     _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    usage.record("screens_merged", user)
     return Response(status_code=204)
 
 
@@ -1354,6 +1381,11 @@ def candidates_update(
         if updates.get("screen_kind") == "auto":
             updates["screen_kind"] = None
         serialized = _serialize_candidate(update_candidate(candidate_id, **updates))
+        if updates.get("status") in ("accepted", "rejected"):
+            usage.record("step_decided", user, status=updates["status"])
+        for field in ("title", "notes"):
+            if updates.get(field):
+                usage.record("step_annotated", user, field=field)
         # still in turn, so that the browsers hear of changes to one step in the order they were made
         _announce(
             "candidate",
@@ -1379,6 +1411,7 @@ def runs_set_candidate_status(
         if any(candidate_id not in known for candidate_id in wanted):
             raise HTTPException(status_code=422, detail="Some of these steps are not in this task (any more).")
         set_candidate_statuses(run_id, wanted, payload.status)
+        usage.record("steps_decided", user, status=payload.status, count=len(wanted))
         _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
     return Response(status_code=204)
 
@@ -1457,6 +1490,7 @@ def runs_add_manual_candidate(
         candidate_id = _insert_manual_candidate(project, recording, get_run(run_id) or run, payload.timestamp_ms)
         manual_row = next(candidate for candidate in list_candidates(run_id) if candidate["id"] == candidate_id)
     _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    usage.record("step_added", user)
     return _serialize_candidate(manual_row)
 
 
@@ -1540,17 +1574,19 @@ def runs_carry_over_review(run_id: str, payload: ReviewCarryOver, user: CurrentU
         )
         result = ReviewCarryOverResult(**counts, added_manual=added_manual, unmatched=unmatched)
     _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    usage.record("review_carried_over", user)
     return result
 
 
 @app.post("/runs/{run_id}/export")
 def runs_export(run_id: str, payload: ExportRequest, user: CurrentUser, client: SharedClient = None) -> dict:
     project, recording, run = _run_for(run_id, user, "owner")
-    # In a shared account every export stays downloadable (until its task is deleted), so that two people
+    # In a shared account every export stays downloadable for a while (app/export_cleanup.py), so that two people
     # exporting the same task at once each get their own.
     with _busy(user, client, project["id"], run_id, "exporting this task"):
         bundle = _export_run(project, recording, run, payload, retain=user.is_shared)
     _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    usage.record("exported", user, mode=payload.mode, steps=bundle.get("item_count"))
     return bundle
 
 

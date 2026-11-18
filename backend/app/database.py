@@ -170,6 +170,27 @@ CREATE TABLE IF NOT EXISTS server_settings (
     updated_at TEXT NOT NULL
 );
 
+-- How the app is used, for the teaching team (app/usage.py); deleted after the keeping time.
+CREATE TABLE IF NOT EXISTS usage_events (
+    at TEXT NOT NULL,
+    account_id TEXT,
+    browser TEXT,
+    kind TEXT NOT NULL,
+    detail TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_usage_events_at ON usage_events(at);
+
+-- Bytes in and out per hour, account ('' before a login) and kind (app/traffic.py); deleted with the usage events.
+CREATE TABLE IF NOT EXISTS traffic (
+    hour TEXT NOT NULL,
+    account_id TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL,
+    requests INTEGER NOT NULL,
+    bytes_in INTEGER NOT NULL,
+    bytes_out INTEGER NOT NULL,
+    PRIMARY KEY (hour, account_id, category)
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_run_settings_scope ON saved_run_settings(user_id, IFNULL(project_id, ''));
 CREATE INDEX IF NOT EXISTS idx_saved_run_settings_project ON saved_run_settings(project_id);
 CREATE INDEX IF NOT EXISTS idx_project_members_member ON project_members(member);

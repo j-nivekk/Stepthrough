@@ -79,7 +79,7 @@ export function AccountPanel({ isLoggingOut, open, user, onClose, onLogOut, onOp
           <span className="account-panel-name">{user.display_name ?? user.name}</span>
           {user.is_admin && (
             <button className="app-settings-action-btn" onClick={onOpenUsers} type="button">
-              manage users
+              admin panel
             </button>
           )}
         </div>

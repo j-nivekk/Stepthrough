@@ -7678,7 +7678,7 @@ button:disabled {
   color: var(--muted);
 }
 
-/* ── accounts: login and link pages, account panel, users page ───────────────────────────────────────────
+/* ── accounts: login and link pages, account panel, admin panel ──────────────────────────────────────────
    Built from the entry screen's parts: grey fields, the green button, underlined text links. */
 
 .account-gate {
@@ -7793,7 +7793,7 @@ button:disabled {
   flex: 1 1 auto;
 }
 
-/* The users page is a control panel of its own, so it is tinted: the same lightness as the rest of the app (text and
+/* The admin panel is a control panel of its own, so it is tinted: the same lightness as the rest of the app (text and
    the green buttons keep their contrast exactly), with the hue turned about 105 degrees away from the green so the
    buttons keep their weight. Panels inherit the tint through --analysis-surface. */
 .admin-tint {
@@ -7809,7 +7809,7 @@ button:disabled {
   background: var(--admin-surface);
 }
 
-/* The users page uses the analysis page's parts: columns under a heading and a dark rule, a grey box of rows with
+/* The admin panel uses the analysis page's parts: columns under a heading and a dark rule, a grey box of rows with
    the label on the left and the control on the right, and one full-width green button. Fields inside grey boxes
    are light, like the preset text field, so a box reads as one area rather than a stack of grey blocks. */
 
@@ -8216,5 +8216,279 @@ button:disabled {
   .live-band,
   .live-pill {
     animation: none;
+  }
+}
+
+/* ── the usage report (admin panel → usage) ──────────────────────────────────────────────────────────────────── */
+
+.stage-pill-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.users-grid[hidden] {
+  display: none;
+}
+
+.usage-report {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 1080px;
+  margin-top: 20px;
+  padding-bottom: 72px;
+  transition: opacity 160ms ease;
+}
+
+/* A new period holds the previous report, dimmed, until it arrives. */
+.usage-report.is-refreshing {
+  opacity: 0.6;
+}
+
+.usage-message {
+  margin-top: 24px;
+}
+
+.usage-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usage-downloads {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.usage-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.usage-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--admin-surface);
+}
+
+.usage-stat-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.usage-stat-value {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.usage-stat-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.usage-chart {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.usage-chart-head,
+.usage-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--admin-rule);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.usage-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.usage-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.usage-chart-frame {
+  position: relative;
+}
+
+.usage-chart-svg {
+  display: block;
+  overflow: visible;
+}
+
+.usage-grid {
+  stroke: var(--admin-surface);
+  stroke-width: 1;
+}
+
+.usage-axis {
+  fill: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-hit {
+  fill: transparent;
+}
+
+.usage-column {
+  outline: none;
+  cursor: default;
+}
+
+.usage-column.is-hovered .usage-hit,
+.usage-column:focus-visible .usage-hit {
+  fill: rgba(123, 135, 149, 0.12);
+}
+
+.usage-tooltip {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--text);
+  color: #fff;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.usage-tooltip-label {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.usage-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.usage-lessons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.usage-lesson {
+  display: grid;
+  grid-template-columns: minmax(140px, 200px) minmax(80px, 1fr) minmax(150px, auto);
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.usage-lesson-figure {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The share of those who opened the tutorial that solved the lesson, on a lighter grey. */
+.usage-meter {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: #dde1e6;
+  overflow: hidden;
+}
+
+.usage-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: #3f3f3f;
+}
+
+.usage-table-scroll {
+  overflow-x: auto;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.usage-table th {
+  padding: 6px 8px;
+  text-align: right;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--admin-rule);
+}
+
+.usage-table td {
+  padding: 6px 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--admin-surface);
+  white-space: nowrap;
+}
+
+.usage-table th:first-child,
+.usage-table td:first-child {
+  text-align: left;
+}
+
+.usage-table-compact {
+  max-width: 420px;
+}
+
+.usage-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  background: var(--admin-surface);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.usage-empty {
+  color: var(--muted);
+  text-align: left !important;
+}
+
+.usage-privacy {
+  max-width: 760px;
+}
+
+@media (max-width: 720px) {
+  .usage-lesson {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }

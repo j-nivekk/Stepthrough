@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { APP_COMMIT, APP_VERSION, BUILD_LABEL, DOI, REPOSITORY_URL, VERSION_LABEL } from '../lib/buildInfo';
 import { HowItWorksDemo } from './howItWorks/HowItWorksDemo';
 import { PathwayTutorial } from './pathwayTutorial/PathwayTutorial';
+import { track } from '../lib/usage';
 
 const APP_IDENTITY = `stepthrough, ${VERSION_LABEL}`;
 
@@ -96,6 +97,7 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
             onClick={() => {
               setPanel(null);
               setShowPathways(true);
+              track({ kind: 'tutorial_opened', from: 'about' });
             }}
             type="button"
           >

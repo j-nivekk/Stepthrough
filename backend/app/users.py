@@ -1,7 +1,7 @@
 """Manage accounts from the command line: ``python -m app.users COMMAND``.
 
 On a server that uses password logins (``STEPTHROUGH_AUTH=password``, the default for ``STEPTHROUGH_DEPLOYMENT=server``)
-this is how the first administrator is made; after that, administrators can also use the users page in the app.
+this is how the first administrator is made; after that, administrators can also use the admin panel in the app.
 In Docker, run it inside the container: ``docker compose exec stepthrough python -m app.users list``.
 
   add NAME [--admin] [--tag TAG ...] [--display-name TEXT] [--delete-after DATE] [--password | --password-stdin]

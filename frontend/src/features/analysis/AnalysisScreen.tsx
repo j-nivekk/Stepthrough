@@ -82,6 +82,7 @@ import { PathwayPanel } from '../pathway/PathwayPanel';
 import { useElementWidth } from './useElementWidth';
 import { useHoverClips } from './useHoverClips';
 import { usePlaybackHighlight } from './usePlaybackHighlight';
+import { track } from '../../lib/usage';
 
 
 export interface AnalysisScreenProps {
@@ -1837,7 +1838,10 @@ export function AnalysisScreen({
                     aria-selected={reviewMode === mode}
                     className={`candidate-filter-tab ${reviewMode === mode ? 'active' : ''}`}
                     key={mode}
-                    onClick={() => setReviewMode(mode)}
+                    onClick={() => {
+                      if (mode !== reviewMode) track({ kind: 'page', name: mode === 'pathway' ? 'pathway' : 'review' });
+                      setReviewMode(mode);
+                    }}
                     role="tab"
                     title={
                       mode === 'steps'

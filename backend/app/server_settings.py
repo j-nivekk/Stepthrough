@@ -1,4 +1,4 @@
-"""Settings an administrator changes while the server runs, on the users page under **server**.
+"""Settings an administrator changes while the server runs, in the admin panel under **server**.
 
 Each starts as the server's configuration has it (``app/config.py``, from environment variables) and is stored in the
 database once an administrator changes it, so it outlasts restarts. Changes take effect at once:
@@ -8,6 +8,7 @@ database once an administrator changes it, so it outlasts restarts. Changes take
 - ``compression``: send JSON, pages, scripts and styles compressed (``app/compression.py``).
 - ``live_spread_seconds``: in shared accounts, browsers showing a task reload it after a change at a random moment
   within this many seconds (after a short pause), so that they do not all ask at once.
+- ``usage_keep_days``: how long the usage report's events are kept (``app/usage.py``); 0 records nothing.
 """
 
 from __future__ import annotations
@@ -18,10 +19,12 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from . import traffic, usage
 from .accounts import CurrentUser, require_admin
 from .repository import get_server_settings, set_server_settings
 
 DEFAULT_LIVE_SPREAD_SECONDS = 1.5
+DEFAULT_USAGE_KEEP_DAYS = 14
 
 _changed: dict[str, Any] = {}
 _configured_analyses: int | None = None
@@ -32,6 +35,7 @@ def defaults() -> dict[str, Any]:
         "analyses_at_a_time": _configured_analyses or 0,
         "compression": True,
         "live_spread_seconds": DEFAULT_LIVE_SPREAD_SECONDS,
+        "usage_keep_days": DEFAULT_USAGE_KEEP_DAYS,
     }
 
 
@@ -64,6 +68,7 @@ class ServerSettingsUpdate(BaseModel):
     analyses_at_a_time: int | None = Field(default=None, ge=0, le=64)
     compression: bool | None = None
     live_spread_seconds: float | None = Field(default=None, ge=0, le=10)
+    usage_keep_days: int | None = Field(default=None, ge=0, le=90)
 
 
 def _describe() -> dict[str, dict[str, Any]]:
@@ -89,4 +94,7 @@ def change_server_settings(payload: ServerSettingsUpdate, request: Request, user
     load(_configured_analyses)
     if "analyses_at_a_time" in changes:
         request.app.state.job_manager.set_max_concurrent_runs(analyses_limit())
+    if "usage_keep_days" in changes:
+        usage.purge(value("usage_keep_days"))  # a shorter time applies to what is kept already
+        traffic.purge(value("usage_keep_days"))
     return _describe()

@@ -821,6 +821,69 @@ def get_export_bundle(bundle_id: str) -> dict[str, Any] | None:
     return _row_to_dict(row)
 
 
+def insert_usage_events(rows: list[tuple[str, str | None, str | None, str, str | None]]) -> None:
+    """(at, account_id, browser, kind, detail as JSON or None), as app/usage.py collects them."""
+    with connect() as conn:
+        conn.executemany("INSERT INTO usage_events (at, account_id, browser, kind, detail) VALUES (?, ?, ?, ?, ?)", rows)
+
+
+def list_usage_events(since: str) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT at, account_id, browser, kind, detail FROM usage_events WHERE at >= ? ORDER BY at", (since,)
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def delete_usage_before(before: str) -> int:
+    with connect() as conn:
+        return conn.execute("DELETE FROM usage_events WHERE at < ?", (before,)).rowcount
+
+
+def add_traffic(rows: list[tuple[str, str, str, int, int, int]]) -> None:
+    """(hour, account_id or '', category, requests, bytes_in, bytes_out), added to what the hour has already."""
+    with connect() as conn:
+        conn.executemany(
+            """
+            INSERT INTO traffic (hour, account_id, category, requests, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(hour, account_id, category) DO UPDATE SET
+                requests = requests + excluded.requests,
+                bytes_in = bytes_in + excluded.bytes_in,
+                bytes_out = bytes_out + excluded.bytes_out
+            """,
+            rows,
+        )
+
+
+def list_traffic(since: str) -> list[dict[str, Any]]:
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT hour, account_id, category, requests, bytes_in, bytes_out FROM traffic WHERE hour >= ? ORDER BY hour",
+            (since,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def delete_traffic_before(before: str) -> int:
+    with connect() as conn:
+        return conn.execute("DELETE FROM traffic WHERE hour < ?", (before,)).rowcount
+
+
+def list_usage_accounts() -> dict[str, dict[str, Any]]:
+    """Every account's name, and whether it is shared or an administrator, for the usage and traffic reports."""
+    with connect() as conn:
+        rows = conn.execute("SELECT id, name, tags FROM users").fetchall()
+    accounts = {}
+    for row in rows:
+        tags = json.loads(row["tags"] or "[]")
+        accounts[row["id"]] = {
+            "name": row["name"],
+            "shared": SHARED_TAG in tags and ADMIN_TAG not in tags,
+            "admin": ADMIN_TAG in tags,
+        }
+    return accounts
+
+
 def get_server_settings() -> dict[str, str]:
     """What administrators changed (app/server_settings.py), each value as JSON."""
     with connect() as conn:

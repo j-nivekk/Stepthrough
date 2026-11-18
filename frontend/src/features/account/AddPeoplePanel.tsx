@@ -27,7 +27,7 @@ export interface AddPeoplePanelProps {
   onChanged: () => Promise<unknown>;
 }
 
-/** The left column of the users page: one form, laid out like the analysis parameters, that imports a list
+/** The left column of the admin panel: one form, laid out like the analysis parameters, that imports a list
  *  (the usual way) or adds one person, with the tags and deletion date chosen before the button. */
 export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);

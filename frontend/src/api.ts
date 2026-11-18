@@ -24,6 +24,9 @@ import type {
   ServerSettings,
   ServerSettingsChanges,
   SessionInfo,
+  TrafficReport,
+  UsageEvent,
+  UsageReport,
   UserImportResult,
   UserLink,
 } from './types';
@@ -137,6 +140,22 @@ export function waitForChanges(after: number | null, epoch: string | null, signa
 /** What this browser is doing that the others of its shared account should see; `[]` when it stops. */
 export function sendPresence(targets: LivePresenceTarget[], keepalive = false): Promise<void> {
   return request<void>('/me/presence', { ...jsonBody('PUT', { targets }), keepalive });
+}
+
+/** What this browser reports for the usage report (lib/usage.ts); ignored where usage is not recorded. */
+export function sendUsage(events: UsageEvent[], keepalive = false): Promise<void> {
+  return request<void>('/me/usage', { ...jsonBody('POST', { events }), keepalive });
+}
+
+export function getTrafficReport(days: number): Promise<TrafficReport> {
+  const tz = -new Date().getTimezoneOffset();
+  return request<TrafficReport>(`/admin/traffic?days=${days}&tz=${tz}`);
+}
+
+export function getUsageReport(days: number): Promise<UsageReport> {
+  // minutes east of UTC, so the report's hours and days are the reader's own
+  const tz = -new Date().getTimezoneOffset();
+  return request<UsageReport>(`/admin/usage?days=${days}&tz=${tz}`);
 }
 
 export interface UploadOptions {

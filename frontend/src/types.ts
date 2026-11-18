@@ -273,12 +273,110 @@ export interface LiveState {
   pace?: { spread_ms: number };
 }
 
+/** Something a browser reports about itself for the usage report (backend/app/usage.py lists what is allowed). */
+export type UsageEvent =
+  | { kind: 'page'; name: 'projects' | 'import' | 'analysis' | 'review' | 'pathway' }
+  | { kind: 'tutorial_invited' }
+  | { kind: 'tutorial_opened'; from: 'invitation' | 'pathway' | 'about' }
+  | { kind: 'tutorial_lesson' | 'tutorial_solved' | 'tutorial_show_me'; lesson: number }
+  | { kind: 'tutorial_closed'; solved: number; minutes: number }
+  | { kind: 'figure_downloaded'; format: 'svg' | 'png' };
+
+export interface UsageAccountRow {
+  id: string;
+  name: string;
+  shared: boolean;
+  browsers: number;
+  open_minutes: number;
+  working_minutes: number;
+  logins: number;
+  projects: number;
+  uploads: number;
+  upload_minutes: number;
+  analyses: number;
+  analyses_failed: number;
+  accepted: number;
+  rejected: number;
+  annotations: number;
+  steps_added: number;
+  carried_over: number;
+  merges: number;
+  exports: number;
+  figures: number;
+  tutorial_browsers: number;
+  tutorial_finished: number;
+}
+
+/** The usage report of the last `days` days, in the reader's local time. */
+export interface UsageReport {
+  since: string;
+  until: string;
+  days: number;
+  keep_days: number;
+  slot_minutes: number;
+  totals: {
+    browsers: number;
+    accounts: number;
+    logins: number;
+    login_failures: number;
+    analyses: number;
+    analyses_completed: number;
+    analyses_failed: number;
+    analysis_median_seconds: number | null;
+    analysis_wait_median_seconds: number | null;
+    accepted: number;
+    rejected: number;
+    exports: number;
+    figures: number;
+  };
+  /** Per hour of the day: browsers in the app (open) and making changes (working), each counted once a day. */
+  hours: Array<{ hour: number; open: number; working: number }>;
+  days_list: Array<{ date: string; open: number; working: number; accounts: number; logins: number; analyses: number; decisions: number }>;
+  accounts: UsageAccountRow[];
+  tutorial: {
+    invited: number;
+    opened: number;
+    opened_from: Record<string, number>;
+    finished: number;
+    median_minutes: number | null;
+    lessons: Array<{ lesson: number; reached: number; solved: number; show_me: number }>;
+  };
+  pages: Record<string, number>;
+}
+
+export type TrafficKind = 'uploads' | 'media' | 'exports' | 'live' | 'data' | 'app';
+
+/** Bytes in (uploads, request bodies) and out (answers, as sent), of the last `days` days in local time. */
+export interface TrafficReport {
+  since: string;
+  until: string;
+  days: number;
+  keep_days: number;
+  totals: { bytes_in: number; bytes_out: number; requests: number };
+  busiest_hour: { start: string; bytes: number } | null;
+  categories: Array<{ category: TrafficKind; bytes_in: number; bytes_out: number; requests: number }>;
+  accounts: Array<{
+    id: string | null;
+    name: string;
+    shared: boolean;
+    admin: boolean;
+    bytes_in: number;
+    bytes_out: number;
+    requests: number;
+    categories: Record<TrafficKind, number>;
+  }>;
+  hours: Array<{ hour: number; bytes_in: number; bytes_out: number }>;
+  days_list: Array<{ date: string; bytes_in: number; bytes_out: number; requests: number }>;
+}
+
 /** What an administrator can change while the server runs, each with the server's own configuration as default. */
 export interface ServerSettings {
   /** How many analyses run together; 0 is no limit. */
   analyses_at_a_time: { value: number; default: number };
   compression: { value: boolean; default: boolean };
   live_spread_seconds: { value: number; default: number };
+  /** Days the usage report's events are kept; 0 records nothing. */
+  usage_keep_days: { value: number; default: number };
 }
 
 export type ServerSettingsChanges = Partial<{ [K in keyof ServerSettings]: ServerSettings[K]['value'] }>;

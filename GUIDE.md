@@ -725,6 +725,12 @@ projects are deleted from the server, and you see a notice in the month before, 
 time. Ask the people who run the server how long recordings are kept, and do not upload recordings that show
 other people without their consent.
 
+A server also keeps a record of how Stepthrough is used, for the people who teach with it: when people are in the
+app, what they do (such as uploading, analysing, deciding on steps and exporting) and how far they get with the
+pathway tutorial, and how much data goes to and from each account. It counts each login in each browser, so it can
+tell how many people work under a shared account, but it does not record names, addresses, files or anything you
+write, and it deletes the record after 14 days unless the administrators set another time. Stepthrough on your own computer records none of this.
+
 ## 12. Credits and references
 
 Stepthrough is created and maintained by H. "Kevin" Jin at the University of Amsterdam. The source code is at

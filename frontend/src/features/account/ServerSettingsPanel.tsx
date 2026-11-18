@@ -130,6 +130,22 @@ export function ServerSettingsPanel() {
 
           <div className="analysis-parameter-group">
             <NumberSetting
+              label="keep usage for"
+              max={90}
+              min={0}
+              onSave={(value) => save({ usage_keep_days: value })}
+              step={1}
+              unit="d"
+              value={settings.usage_keep_days.value}
+            />
+            <span className="analysis-parameter-annotation">
+              days that the usage report under usage keeps what it records, then deletes it; 0 records nothing and
+              deletes what there is. {fromConfiguration(settings.usage_keep_days, `${settings.usage_keep_days.default} days`)}
+            </span>
+          </div>
+
+          <div className="analysis-parameter-group">
+            <NumberSetting
               label="spread live reloads over"
               max={10}
               min={0}

@@ -74,6 +74,7 @@ import {
   serializeRunPresetText,
 } from './lib/runSettings';
 import { workflowViewportMinimums, type ProjectEntryTarget, type WorkflowStage } from './lib/workflow';
+import { track } from './lib/usage';
 import type {
   AnalysisMetadata,
   CandidateChanges,
@@ -154,6 +155,10 @@ function App({ session, onSessionChange }: AppProps) {
   const closeCornerPanel = (panel: CornerPanel) =>
     setCornerPanel((current) => (current === panel ? null : current));
   const [showUsers, setShowUsers] = useState(false);
+  // For the usage report: which page is open (lib/usage.ts sends nothing where usage is not recorded).
+  useEffect(() => {
+    if (!showUsers) track({ kind: 'page', name: workflowStage });
+  }, [showUsers, workflowStage]);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const sessionUser = session?.user ?? null;
   // With password logins, who is logged in shows next to settings; the desktop app has one built-in user.
@@ -482,7 +487,7 @@ function App({ session, onSessionChange }: AppProps) {
   const hasSelectedProject = Boolean(selectedProjectId);
   const activeViewportStage: WorkflowStage =
     workflowStage === 'projects' || !hasSelectedProject ? 'projects' : workflowStage;
-  // The users page has the analysis page's columns, so it needs the same room.
+  // The admin panel has the analysis page's columns, so it needs the same room.
   const viewportMinimum = workflowViewportMinimums[showUsers ? 'analysis' : activeViewportStage];
   const isViewportTooSmall =
     viewportSize.width < viewportMinimum.width || viewportSize.height < viewportMinimum.height;

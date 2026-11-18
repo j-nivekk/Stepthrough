@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 
+from . import traffic, usage
 from .accounts import (
     SESSION_COOKIE,
     CurrentUser,
@@ -17,6 +19,7 @@ from .accounts import (
     auth_mode,
     clear_session_cookie,
     client_address,
+    current_user,
     end_session,
     find_link,
     new_user_link,
@@ -26,6 +29,7 @@ from .accounts import (
     set_password,
     set_session_cookie,
     start_session,
+    token_hash,
 )
 from .database import LOCAL_USER_ID
 from .models import (
@@ -130,6 +134,7 @@ def auth_login(payload: LoginRequest, request: Request, response: Response) -> S
     stored = get_password_hash(row["id"]) if row and row["id"] != LOCAL_USER_ID else None
     if not password_matches(payload.password, stored):
         login_limiter.failed(name, address)
+        usage.record_login_failure()
         logger.warning("Wrong password for %r from %s%s.", name, address, "" if row else " (no such account)")
         raise HTTPException(status_code=401, detail=WRONG_LOGIN)
     if row["is_disabled"]:
@@ -138,12 +143,17 @@ def auth_login(payload: LoginRequest, request: Request, response: Response) -> S
     login_limiter.succeeded(name, address)
     logger.info("%r logged in from %s.", row["name"], address)
     end_session(request.cookies.get(SESSION_COOKIE))
-    set_session_cookie(response, request, start_session(row["id"]))
-    return _session_response(request, User.from_row(row))
+    token = start_session(row["id"])
+    set_session_cookie(response, request, token)
+    traffic.remember(token, row["id"])
+    user = User.from_row(row)
+    usage.record("login", replace(user, browser=usage.browser_key(token_hash(token))))
+    return _session_response(request, user)
 
 
 @router.post("/auth/logout", status_code=204)
 def auth_logout(request: Request) -> Response:
+    usage.record("logout", current_user(request))
     end_session(request.cookies.get(SESSION_COOKIE))
     response = Response(status_code=204)
     clear_session_cookie(response, request)
