@@ -36,9 +36,21 @@ interface PathwayPanelProps {
   run: RunDetail;
 }
 
-const DETAILS: Array<[PathwayDetail, string, string]> = [
-  ['screens', 'screens', 'one box per screen: scrolling, typing and small changes stay in the same box'],
-  ['steps', 'steps', 'one box per step; a step that returns to an earlier screen still shares its box'],
+/** Both draw boxes as screens; they differ in how readily two steps count as one. The tooltip says when to use
+ * which, the line under the controls what the chosen one does. */
+const DETAILS: Array<[PathwayDetail, string, string, string]> = [
+  [
+    'screens',
+    'screens',
+    'for the journey as places: how many screens, in what order, and where people came back',
+    'by screens, a page stays one box while it is scrolled or typed in, and after a pop-up over it closes.',
+  ],
+  [
+    'steps',
+    'steps',
+    'for every action on its own, such as each scroll through a feed; also to check what screens put together',
+    'by steps, every step has a box of its own; only a return to an earlier screen, or your own correction, shares one.',
+  ],
 ];
 type FigureFormat = 'svg' | 'png';
 const FORMATS: Array<[FigureFormat, string]> = [
@@ -424,6 +436,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
             </div>
           </div>
         </div>
+        <p className="pathway-controls-hint">{DETAILS.find(([value]) => value === view.detail)?.[3]}</p>
       </div>
       {pathway && figure ? (
         <PathwayBoxEditor

@@ -6072,6 +6072,14 @@ button:disabled {
   line-height: 1.2;
 }
 
+/* What the chosen kind of boxes does, in one line under the controls (the tooltips say when to use which). */
+.pathway-controls-hint {
+  margin: -6px 0 0;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 /* Changes to the selected box of the pathway, in a strip above the figure. It stays in view while a long
    chart scrolls, so a box picked further down can still be changed. */
 .pathway-editor {

@@ -547,7 +547,9 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
             {value}
           </button>
         ))}
-        <span className="pt-tool-hint">by steps, only revisits and your choices share a box</span>
+        <span className="pt-tool-hint">
+          <b>steps</b> keeps only the first two rules: your choice and a revisit
+        </span>
       </div>
     );
   } else if (lesson === 3) {

@@ -399,7 +399,8 @@ export interface AcceptedStep {
   export_filename: string;
 }
 
-/** `screens`: scrolling, typing and small changes stay on one screen; `steps`: every step is its own box. */
+/** `screens`: scrolling, typing and small changes stay on one screen; `steps`: every step is its own box, except a
+ * revisit or the reviewer's choice. */
 export type PathwayDetail = 'screens' | 'steps';
 
 export interface PathwayStep {

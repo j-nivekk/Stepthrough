@@ -486,6 +486,11 @@ pop-up, also when something on that screen changed in the meantime, such as a sw
 As with labels, this goes by what the screen looks like: two screens that look alike count as one, and the
 same screen in a different state can count as two.
 
+Both kinds of boxes are screens; they differ in how readily two steps count as one. Use **screens** for the
+journey as places: how many screens, in what order, and where people came back. Use **steps** to see every
+action on its own, such as each scroll through a feed, or to check what **screens** put together before you
+correct it.
+
 **When the pathway gets it wrong**, correct it on the step itself, under **steps**. Each step has a **screen**
 choice (under **annotate** on a card, or in the **label, screen** column of the list):
 
