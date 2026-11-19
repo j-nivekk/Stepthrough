@@ -162,7 +162,9 @@ def test_merging_a_box_moves_all_its_steps(client: TestClient, video_factory, wa
     response = client.post(f'/runs/{run_id}/pathway/merge', json={
         'source_candidate_id': first['id'], 'target_candidate_id': second['id'], 'detail': 'screens',
     })
-    assert response.status_code == 204
+    assert response.status_code == 200
+    # it says which steps it linked, the rejected member too, so that a browser can take it back
+    assert sorted(response.json()['changed']) == sorted([first['id'], third['id']])
     client.patch(f"/candidates/{third['id']}", json={'status': 'accepted'})
     pathway = client.get(f'/runs/{run_id}/pathway').json()
     assert _screens_of(pathway) == ['screen-01'] * 3
@@ -352,3 +354,94 @@ def test_run_pathway_and_its_export(client: TestClient, video_factory, wait_for_
     assert all((bundle / step['image_path']).exists() for step in exported['steps'])
     assert all('image_url' not in step and 'export_filename' not in step for step in exported['steps'])
     assert 'the step it arrives at' in exported['field_notes']['transitions.passes']
+
+
+def test_phases_are_named_stretches_of_time() -> None:
+    from app.services.pathway import phase_at, set_phase
+
+    phases = set_phase([], 'Sign up', 2_000, 5_000)
+    assert phases == [(2_000, 'Sign up'), (5_000, '')]
+    assert [phase_at(phases, ms) for ms in (0, 2_000, 4_999, 5_000)] == [None, 'Sign up', 'Sign up', None]
+    # a phase in the middle of another leaves what comes after it in the one it was in
+    assert set_phase(phases, 'Code', 3_000, 4_000) == [(2_000, 'Sign up'), (3_000, 'Code'), (4_000, 'Sign up'), (5_000, '')]
+    # the same name next to it makes one phase; to the end of the recording when it has no end
+    assert set_phase(phases, 'Sign up', 5_000, None) == [(2_000, 'Sign up')]
+    # an empty name takes a stretch out of every phase
+    assert set_phase(phases, '', 2_000, 5_000) == []
+
+
+def test_the_pathway_counts_the_steps_screens_and_time_of_each_phase() -> None:
+    # Home, Form, Form scrolled, Code, Form again, Done
+    candidates = [
+        _candidate(1, 'opening_screen'), _candidate(2, 'navigation'), _candidate(3, 'scroll'),
+        _candidate(4, 'navigation'), _candidate(5, 'navigation', similar_to=2), _candidate(6, 'navigation', dwell=1_500),
+    ]
+    phases = [(2_000, 'Sign up'), (6_000, 'Finish')]
+    pathway = build_pathway(build_accepted_steps('demo', candidates), candidates, 'screens', phases)
+    assert [step['phase'] for step in pathway['steps']] == [None, 'Sign up', 'Sign up', 'Sign up', 'Sign up', 'Finish']
+    assert [(p['name'], p['first_step_index'], p['last_step_index'], p['step_count'], p['screen_count'], p['duration_ms'])
+            for p in pathway['phases']] == [('Sign up', 2, 5, 4, 2, 4_000), ('Finish', 6, 6, 1, 1, 1_500)]
+    assert pathway['phases'][0]['screen_ids'] == ['screen-02', 'screen-03']
+
+
+def test_the_first_step_with_a_say_about_its_row_decides_for_its_box() -> None:
+    candidates = [_candidate(1, 'opening_screen'), _candidate(2, 'scroll'), _candidate(3, 'navigation')]
+    candidates[1]['pathway_row'] = 'continue'
+    candidates[2]['pathway_row'] = 'below'
+    pathway = _pathway(candidates)
+    assert [screen['row_choice'] for screen in pathway['screens']] == ['continue', 'below']
+    candidates[0]['pathway_row'] = 'below'
+    assert [screen['row_choice'] for screen in _pathway(candidates)['screens']] == ['below', 'below']
+
+
+def test_phases_are_set_by_steps_and_exported(client: TestClient, video_factory, wait_for_run) -> None:
+    detail = _import_run(client, video_factory, wait_for_run)
+    run_id = detail['summary']['id']
+    steps = sorted(detail['candidates'], key=lambda c: c['timestamp_ms'])
+    for candidate in steps:
+        assert client.patch(f"/candidates/{candidate['id']}", json={'status': 'accepted'}).status_code == 200
+    first, second, third = (candidate['id'] for candidate in steps)
+
+    def named() -> list[tuple[str, int, int]]:
+        pathway = client.get(f'/runs/{run_id}/pathway').json()
+        return [(p['name'], p['first_step_index'], p['last_step_index']) for p in pathway['phases']]
+
+    answer = client.put(f'/runs/{run_id}/phases', json={'name': ' Look ', 'first_step': first, 'last_step': second})
+    assert answer.status_code == 200
+    assert named() == [('Look', 1, 2)]
+    # the answer is every phase after the change, so a browser can take it back
+    after_first = answer.json()['phases']
+    assert [b['name'] for b in after_first] == ['Look', '']
+    # changed: the old stretch is let go before the new one is named
+    changed = {'name': 'Look', 'first_step': second, 'last_step': third, 'replacing': {'first_step': first, 'last_step': second}}
+    assert client.put(f'/runs/{run_id}/phases', json=changed).status_code == 200
+    assert named() == [('Look', 2, 3)]
+    # taken back as a whole, as long as nobody changed them since
+    current = client.get(f'/runs/{run_id}').json()['phases']
+    assert client.put(f'/runs/{run_id}/phases/all', json={'phases': after_first, 'expected': after_first}).status_code == 409
+    assert client.put(f'/runs/{run_id}/phases/all', json={'phases': after_first, 'expected': current}).json()['phases'] == after_first
+    assert named() == [('Look', 1, 2)]
+    assert client.put(f'/runs/{run_id}/phases/all', json={'phases': current}).status_code == 200
+    assert named() == [('Look', 2, 3)]
+    # the run itself says where each phase starts, for the step review
+    boundaries = client.get(f'/runs/{run_id}').json()['phases']
+    assert [b['name'] for b in boundaries] == ['Look'] and boundaries[0]['start_ms'] == steps[1]['timestamp_ms']
+    # backwards, or steps that are not accepted steps of this run, are refused
+    assert client.put(f'/runs/{run_id}/phases', json={'name': 'x', 'first_step': third, 'last_step': first}).status_code == 422
+    assert client.put(f'/runs/{run_id}/phases', json={'name': 'x', 'first_step': 'missing', 'last_step': first}).status_code == 422
+    client.patch(f'/candidates/{first}', json={'pathway_row': 'below'})
+    assert client.get(f'/runs/{run_id}/pathway').json()['screens'][0]['row_choice'] == 'below'
+    assert client.patch(f'/candidates/{first}', json={'pathway_row': 'auto'}).json()['pathway_row'] is None
+
+    export = client.post(f'/runs/{run_id}/export', json={'mode': 'accepted'})
+    import app.storage as storage
+
+    bundle = storage.DATA_ROOT / export.json()['output_dir']
+    manifest = json.loads((bundle / 'steps.json').read_text())
+    assert [step['phase'] for step in manifest['steps']] == [None, 'Look', 'Look']
+    assert 'phase' in (bundle / 'steps.csv').read_text().splitlines()[0].split(',')
+    exported = json.loads((bundle / 'pathway.json').read_text())
+    assert [(p['name'], p['step_count']) for p in exported['phases']] == [('Look', 2)]
+
+    assert client.put(f'/runs/{run_id}/phases', json={'name': '', 'first_step': second, 'last_step': third}).status_code == 200
+    assert named() == []

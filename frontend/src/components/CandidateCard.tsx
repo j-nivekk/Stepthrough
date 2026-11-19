@@ -5,6 +5,7 @@ import { candidateLabelType, transitionLabelText, type SimilarLink } from '../li
 import { stepEditor } from '../lib/live';
 import type { StepHoverState } from '../features/analysis/useHoverClips';
 import type { CandidateChanges, CandidateFrame, CandidateStatus } from '../types';
+import { PhaseChoice } from './PhaseChoice';
 import { ScreenChoice, screenChoiceSummary } from './ScreenChoice';
 
 /** Hover intent on a step's screenshot: wait, then the clip plays and "play from here" appears. */
@@ -262,6 +263,8 @@ export interface CandidateCardProps {
   /** Every step of the run, in order, for choosing which screen this one shows. */
   steps: CandidateFrame[];
   onUpdate: (payload: CandidateChanges) => void;
+  /** The run and where its phases start, for choosing the phase of an accepted step. */
+  phases?: { runId: string; boundaries: Array<{ start_ms: number; name: string }> | undefined };
   /** Narrow card: scores and the notes toggle move out of the way until the card is active. */
   compact?: boolean;
   hover?: StepHoverProps;
@@ -283,6 +286,7 @@ export function CandidateCard({
   similarLink,
   steps,
   onUpdate,
+  phases,
   compact = false,
   hover,
 }: CandidateCardProps) {
@@ -510,6 +514,13 @@ export function CandidateCard({
               <span>screen in the pathway</span>
               <ScreenChoice candidate={candidate} onUpdate={onUpdate} steps={steps} />
             </div>
+
+            {phases && candidate.status === 'accepted' ? (
+              <div className="candidate-field-group">
+                <span>phase of the walkthrough</span>
+                <PhaseChoice candidate={candidate} phases={phases.boundaries} runId={phases.runId} />
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -529,6 +540,7 @@ export interface CandidateRowProps {
   onUpdate: CandidateCardProps['onUpdate'];
   similarLink?: SimilarLink | undefined;
   steps: CandidateFrame[];
+  phases?: CandidateCardProps['phases'];
   thumbHeight: number;
   thumbWidth: number;
   hover?: StepHoverProps;
@@ -547,6 +559,7 @@ export function CandidateRow({
   onUpdate,
   similarLink,
   steps,
+  phases,
   thumbHeight,
   thumbWidth,
   hover,
@@ -615,6 +628,9 @@ export function CandidateRow({
           </button>
         ) : null}
         <ScreenChoice candidate={candidate} onUpdate={onUpdate} prefix="screen: " steps={steps} />
+        {phases && candidate.status === 'accepted' ? (
+          <PhaseChoice candidate={candidate} phases={phases.boundaries} prefix="phase: " runId={phases.runId} />
+        ) : null}
       </div>
       <div className="candidate-row-duration" role="cell">
         {hasFiniteNumber(onScreenMs) ? formatSeconds(onScreenMs) : '–'}

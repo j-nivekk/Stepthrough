@@ -303,6 +303,8 @@ def test_stable_run_export_records_engine_and_timings(client: TestClient, video_
     detail = wait_for_run(client, run['id'])
     for candidate in detail['candidates']:
         assert client.patch(f"/candidates/{candidate['id']}", json={'status': 'accepted'}).status_code == 200
+    added = client.post(f"/runs/{run['id']}/candidates/manual", json={'timestamp_ms': 1500}).json()
+    assert client.patch(f"/candidates/{added['id']}", json={'status': 'accepted'}).status_code == 200
 
     export = client.post(f"/runs/{run['id']}/export", json={'mode': 'accepted'})
     assert export.status_code == 200
@@ -315,8 +317,13 @@ def test_stable_run_export_records_engine_and_timings(client: TestClient, video_
     assert manifest['run']['settings']['stable']['min_dwell_ms'] == 500
     assert manifest['run']['resolved_settings']['min_change_percent'] == 0.25
     header = (bundle / 'steps.csv').read_text().splitlines()[0].split(',')
-    assert {'transition_type', 'change_started_ms', 'settled_ms', 'time_on_screen_ms', 'ocr_text'} <= set(header)
+    assert {'transition_type', 'change_started_ms', 'settled_ms', 'time_on_screen_ms', 'ocr_text', 'origin'} <= set(header)
     assert manifest['steps'][1]['transition_type'] == 'navigation'
+    # A step added by hand says so, and has no timing of its own.
+    by_origin = {step['source_candidate_id']: step for step in manifest['steps']}
+    assert by_origin[added['id']]['origin'] == 'manual' and by_origin[added['id']]['settled_ms'] is None
+    assert [step['origin'] for step in manifest['steps']].count('detected') == len(detail['candidates'])
+    assert 'added by hand' in manifest['field_notes']['origin']
     # Readable without the app: no server URLs, no settings of other engines, units explained.
     assert all('image_url' not in step and 'ocr_text' in step for step in manifest['steps'])
     assert 'detector_mode' not in manifest['run'] and 'tolerance' not in manifest['run']
@@ -495,13 +502,18 @@ def test_review_carries_over_to_a_new_run_of_the_same_recording(client: TestClie
     client.patch(f"/candidates/{a[2]['id']}", json={'status': 'accepted', 'screen_link': a[0]['id']})
     manual = client.post(f"/runs/{first['summary']['id']}/candidates/manual", json={'timestamp_ms': 2500}).json()
     client.patch(f"/candidates/{manual['id']}", json={'status': 'accepted', 'title': 'Blue, later'})
+    client.patch(f"/candidates/{a[0]['id']}", json={'pathway_row': 'below'})
+    phase = {'name': 'Opening', 'first_step': a[0]['id'], 'last_step': a[0]['id']}
+    assert client.put(f"/runs/{first['summary']['id']}/phases", json=phase).status_code == 200
     # already done on the new run: stays
     client.patch(f"/candidates/{b[1]['id']}", json={'title': 'Green'})
 
     pairs = [{'source_candidate_id': x['id'], 'target_candidate_id': y['id']} for x, y in zip(a, b)]
     response = client.post(f"/runs/{second['summary']['id']}/review-from", json={'source_run_id': first['summary']['id'], 'pairs': pairs})
     assert response.status_code == 200, response.text
-    assert response.json() == {'decisions': 4, 'titles': 2, 'notes': 1, 'screen_choices': 1, 'added_manual': 1, 'unmatched': 0}
+    assert response.json() == {
+        'decisions': 4, 'titles': 2, 'notes': 1, 'screen_choices': 2, 'added_manual': 1, 'unmatched': 0, 'phases': True,
+    }
 
     after = sorted(client.get(f"/runs/{second['summary']['id']}").json()['candidates'], key=lambda c: c['timestamp_ms'])
     by_time = {c['timestamp_ms']: c for c in after}
@@ -509,7 +521,11 @@ def test_review_carries_over_to_a_new_run_of_the_same_recording(client: TestClie
     assert [c['title'] for c in after] == ['Red', 'Green', None, 'Blue, later']
     assert after[0]['notes'] == 'first screen'
     assert after[2]['screen_link'] == after[0]['id']  # pointed at the new run's own step
+    assert after[0]['pathway_row'] == 'below'
     assert by_time[2500]['candidate_origin'] == 'manual'
+    # the phases go by time, so the same moments are in them
+    pathway = client.get(f"/runs/{second['summary']['id']}/pathway").json()
+    assert [(phase['name'], phase['first_step_index'], phase['last_step_index']) for phase in pathway['phases']] == [('Opening', 1, 1)]
 
     # pairs must name steps of these two runs, each once
     bad = client.post(
@@ -518,3 +534,65 @@ def test_review_carries_over_to_a_new_run_of_the_same_recording(client: TestClie
     )
     assert bad.status_code == 422
     assert client.post(f"/runs/{second['summary']['id']}/review-from", json={'source_run_id': second['summary']['id'], 'pairs': []}).status_code == 422
+
+
+def test_runs_keep_their_number_when_renamed_or_when_another_is_deleted(client: TestClient, video_factory) -> None:
+    project = _create_project(client)
+    recording = _import_video(client, project['id'], video_factory('numbers.mp4', ['red']))
+    runs = [client.post(f"/recordings/{recording['id']}/runs/manual").json() for _ in range(3)]
+    assert [run['run_number'] for run in runs] == [1, 2, 3]
+    assert [run['name'] for run in runs] == [None, None, None]
+
+    assert client.delete(f"/runs/{runs[1]['id']}").status_code == 204
+    # a new run never takes the number of a deleted one, and the others keep theirs
+    assert client.post(f"/recordings/{recording['id']}/runs/manual").json()['run_number'] == 4
+
+    renamed = client.patch(f"/runs/{runs[2]['id']}", json={'name': '  Second try  '})
+    assert renamed.status_code == 200
+    assert (renamed.json()['name'], renamed.json()['run_number']) == ('Second try', 3)
+    listed = client.get(f"/recordings/{recording['id']}").json()['runs']
+    assert sorted((run['run_number'], run['name']) for run in listed) == [(1, None), (3, 'Second try'), (4, None)]
+
+    cleared = client.patch(f"/runs/{runs[2]['id']}", json={'name': ' '}).json()
+    assert (cleared['name'], cleared['run_number']) == (None, 3)
+    assert client.patch(f"/runs/{runs[2]['id']}", json={'name': 'x' * 121}).status_code == 422
+
+
+def test_a_run_and_its_project_record_the_last_change_someone_made(client: TestClient, video_factory, monkeypatch) -> None:
+    import app.repository as repository
+    import app.storage as storage
+
+    project = _create_project(client)
+    recording = _import_video(client, project['id'], video_factory('changes.mp4', ['red', 'blue']))
+    monkeypatch.setattr(repository, 'utc_now', lambda: '2026-11-18T10:00:00+00:00')
+    run = client.post(f"/recordings/{recording['id']}/runs/manual").json()
+    assert run['modified_at'] == '2026-11-18T10:00:00+00:00'
+    # in the app without logins every change is the built-in user's, so no name is shown
+    assert run['modified_by_name'] is None
+
+    monkeypatch.setattr(repository, 'utc_now', lambda: '2026-11-18T11:00:00+00:00')
+    step = client.post(f"/runs/{run['id']}/candidates/manual", json={'timestamp_ms': 400}).json()
+    assert client.patch(f"/candidates/{step['id']}", json={'status': 'accepted'}).status_code == 200
+
+    # an export leaves the run as it was
+    monkeypatch.setattr(repository, 'utc_now', lambda: '2026-11-18T12:00:00+00:00')
+    assert client.post(f"/runs/{run['id']}/export", json={'mode': 'accepted'}).status_code == 200
+    summary = client.get(f"/runs/{run['id']}").json()['summary']
+    assert summary['modified_at'] == '2026-11-18T11:00:00+00:00'
+    listed = next(item for item in client.get('/projects').json() if item['id'] == project['id'])
+    assert listed['modified_at'] == '2026-11-18T11:00:00+00:00' and listed['modified_by_name'] is None
+
+    # nor does saving settings of one's own for the project
+    stable = {'analysis_engine': 'stable_v3', 'stable': {'recording_type': 'phone'}}
+    assert client.put(f"/me/run-settings/projects/{project['id']}", json=stable).status_code == 200
+    listed = next(item for item in client.get('/projects').json() if item['id'] == project['id'])
+    assert listed['modified_at'] == '2026-11-18T11:00:00+00:00'
+
+    # renaming the run is a change to it and to its project
+    monkeypatch.setattr(repository, 'utc_now', lambda: '2026-11-18T13:00:00+00:00')
+    assert client.patch(f"/runs/{run['id']}", json={'name': 'Checked'}).json()['modified_at'] == '2026-11-18T13:00:00+00:00'
+    assert client.get(f"/projects/{project['id']}").json()['project']['modified_at'] == '2026-11-18T13:00:00+00:00'
+
+    export = client.post(f"/runs/{run['id']}/export", json={'mode': 'accepted'})
+    manifest = json.loads((storage.DATA_ROOT / export.json()['output_dir'] / 'steps.json').read_text())
+    assert (manifest['run']['number'], manifest['run']['name']) == (1, 'Checked')

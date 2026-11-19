@@ -25,6 +25,7 @@ import {
   formatPercent,
   formatPhase,
   formatRelativeTime,
+  formatRunNumber,
   formatRunShortTimestamp,
   formatRunTiming,
 } from '../../lib/formatters';
@@ -128,6 +129,8 @@ export interface AnalysisScreenProps {
   onOpenPreview: (recordingId: string) => void;
   onRenameProject: (projectId: string, name: string, previousName: string) => Promise<void>;
   onRenameRecording: (recordingId: string, filename: string, previousFilename: string) => Promise<void>;
+  /** Name a run ('' takes the name away); `previousName` is the name shown when the rename began ('' for none). */
+  onRenameRun: (runId: string, name: string, previousName: string) => Promise<void>;
   onResetToProjectDefaults: () => void;
   onResetToUniversalDefaults: () => void;
   onRestoreFactorySettings: () => void;
@@ -256,6 +259,7 @@ export function AnalysisScreen({
   onOpenPreview,
   onRenameProject,
   onRenameRecording,
+  onRenameRun,
   onResetToProjectDefaults,
   onResetToUniversalDefaults,
   onRestoreFactorySettings,
@@ -447,7 +451,8 @@ export function AnalysisScreen({
             new Date(left.run.created_at).getTime() - new Date(right.run.created_at).getTime(),
         )
         .forEach((item, index) => {
-          nextMap.set(item.run.id, index + 1);
+          // stored with the run since runs have numbers; worked out from the order only for a server without them
+          nextMap.set(item.run.id, item.run.run_number ?? index + 1);
         });
     });
 
@@ -1466,6 +1471,7 @@ export function AnalysisScreen({
             groupedTaskItems={groupedTaskItems}
             onAbortRun={onAbortRun}
             onDeleteRun={handleDeleteRun}
+            onRenameRun={onRenameRun}
             onDeleteSelectedTasks={() => {
               void handleDeleteSelectedTasks();
             }}
@@ -1755,7 +1761,9 @@ export function AnalysisScreen({
             <div className="analysis-detail-header">
               <div className="analysis-detail-copy">
                 <p className="analysis-section-eyebrow">
-                  selected task{runNumberById.has(selectedRun.summary.id) ? ` · run #${runNumberById.get(selectedRun.summary.id)}` : ''}
+                  selected task: {selectedRun.summary.name ? `${selectedRun.summary.name} (` : ''}
+                  {formatRunNumber(selectedRun.summary, runNumberById.get(selectedRun.summary.id))}
+                  {selectedRun.summary.name ? ')' : ''}
                 </p>
                 <div className="run-title-row">
                   <h2>{selectedRecordingSummary?.filename ?? selectedRun.summary.recording_id}</h2>
@@ -2296,6 +2304,7 @@ export function AnalysisScreen({
                           onUpdate={(payload) => onUpdateCandidate(candidate.id, payload)}
                           similarLink={similarityLink}
                           steps={selectedRun.candidates}
+                          phases={{ runId: selectedRun.summary.id, boundaries: selectedRun.phases }}
                           thumbHeight={stepThumb.height}
                           thumbWidth={stepThumb.width}
                           hover={stepHover(candidate)}
@@ -2335,6 +2344,7 @@ export function AnalysisScreen({
                           recordingWidth={selectedRecordingSummary?.width}
                           similarLink={similarityLink}
                           steps={selectedRun.candidates}
+                          phases={{ runId: selectedRun.summary.id, boundaries: selectedRun.phases }}
                         />
                       );
                     })}

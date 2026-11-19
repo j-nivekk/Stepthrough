@@ -301,6 +301,11 @@ export function carryOverReview(
   return request<ReviewCarryOverResult>(`/runs/${runId}/review-from`, jsonBody('POST', { source_run_id: sourceRunId, pairs }));
 }
 
+/** Name a run, or with '' take its name away; `previousName` is the name this browser showed ('' for none). */
+export function updateRun(runId: string, name: string, previousName: string): Promise<RunSummary> {
+  return request<RunSummary>(`/runs/${runId}`, jsonBody('PATCH', { name, previous_name: previousName }));
+}
+
 export function createManualRun(recordingId: string): Promise<RunSummary> {
   return request<RunSummary>(`/recordings/${recordingId}/runs/manual`, { method: 'POST' });
 }
@@ -313,10 +318,35 @@ export function getRunPathway(runId: string, detail: PathwayDetail, signal?: Abo
   return request<Pathway>(`/runs/${runId}/pathway?detail=${detail}`, { signal });
 }
 
-export function mergePathwayScreens(runId: string, sourceId: string, targetId: string, detail: PathwayDetail): Promise<void> {
-  return request<void>(`/runs/${runId}/pathway/merge`, jsonBody('POST', {
+/** Stack one box onto another; returns the steps it linked (rejected ones included), for an undo. */
+export function mergePathwayScreens(runId: string, sourceId: string, targetId: string, detail: PathwayDetail): Promise<{ changed: string[] }> {
+  return request<{ changed: string[] }>(`/runs/${runId}/pathway/merge`, jsonBody('POST', {
     source_candidate_id: sourceId, target_candidate_id: targetId, detail,
   }));
+}
+
+/** The steps a phase runs from and to, by the ids of their candidates. */
+export interface PhaseSteps {
+  first_step: string;
+  last_step: string;
+}
+
+/** Where a phase starts in the recording; an empty name starts a stretch outside every phase. */
+export interface PhaseBoundary {
+  start_ms: number;
+  name: string;
+}
+
+/** Name the steps from `first_step` to `last_step` as one phase ('' takes them out of every phase); `replacing` is
+ *  the stretch the phase had before, when it is being changed. Answers with every phase after the change. */
+export function setRunPhase(runId: string, phase: PhaseSteps & { name: string; replacing?: PhaseSteps | null }): Promise<{ phases: PhaseBoundary[] }> {
+  return request<{ phases: PhaseBoundary[] }>(`/runs/${runId}/phases`, jsonBody('PUT', phase));
+}
+
+/** Put every phase back as it was (an undo), as long as they are still `expected`; refused (409) when someone else
+ *  changed them since. */
+export function restoreRunPhases(runId: string, phases: PhaseBoundary[], expected: PhaseBoundary[]): Promise<{ phases: PhaseBoundary[] }> {
+  return request<{ phases: PhaseBoundary[] }>(`/runs/${runId}/phases/all`, jsonBody('PUT', { phases, expected }));
 }
 
 export function abortRun(runId: string): Promise<RunSummary> {

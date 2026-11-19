@@ -73,6 +73,9 @@ export interface Project {
   recording_count: number;
   run_count: number;
   last_activity_at: string;
+  /** When someone last changed something in it, and who; no name for older changes or the app without logins. */
+  modified_at: string;
+  modified_by_name?: string | null;
 }
 
 export interface RecordingSummary {
@@ -131,6 +134,9 @@ export interface StableSettings {
 export interface RunSummary {
   id: string;
   recording_id: string;
+  /** Its number among the runs of its recording; it stays when the run is renamed or another run is deleted. */
+  run_number?: number | null;
+  name?: string | null;
   status: RunStatus;
   phase: RunPhase;
   analysis_engine: AnalysisEngine;
@@ -153,6 +159,9 @@ export interface RunSummary {
   started_at?: string | null;
   completed_at?: string | null;
   updated_at: string;
+  /** When someone last changed it, and who; the analysis at work changes `updated_at` only. */
+  modified_at?: string | null;
+  modified_by_name?: string | null;
   export_bundle_id?: string | null;
   is_abortable: boolean;
   is_deletable: boolean;
@@ -211,6 +220,9 @@ export interface CandidateFrame {
   screen_link?: string | null;
   /** The reviewer's say on whether the step is a pop-up. Empty leaves it to the label. */
   screen_kind?: 'screen' | 'popup' | null;
+  /** Where the step's box goes in the pathway figure: on the row of the box it was reached from, or on a row of
+   *  its own below. Empty leaves it to the layout; the box's first step with a say decides. */
+  pathway_row?: PathwayRowChoice | null;
   created_at: string;
   updated_at: string;
 }
@@ -223,6 +235,7 @@ export interface CandidateChanges {
   /** `auto`, `new`, or the id of an earlier step of the run. */
   screen_link?: string;
   screen_kind?: 'auto' | 'screen' | 'popup';
+  pathway_row?: 'auto' | PathwayRowChoice;
   /** In a shared account, the text this browser began from: if someone else saved other text meanwhile, the
    *  change is refused instead of written over theirs. */
   previous_title?: string;
@@ -437,6 +450,10 @@ export interface AcceptedStep {
  * revisit or the reviewer's choice. */
 export type PathwayDetail = 'screens' | 'steps';
 
+/** Where a box goes in the pathway figure: `continue` the row of the box it was reached from, or start a row
+ *  `below` it. Without a say, the first box reached from a box continues its row and the others go below. */
+export type PathwayRowChoice = 'continue' | 'below';
+
 export interface PathwayStep {
   step_id: string;
   step_index: number;
@@ -455,6 +472,8 @@ export interface PathwayStep {
   grouped_by?: string | null;
   screen_choice: 'automatic' | 'new_screen' | 'same_screen';
   kind_choice: 'automatic' | 'screen' | 'popup';
+  /** The phase of the walkthrough the step is in; empty outside every phase. */
+  phase?: string | null;
   source_candidate_id: string;
 }
 
@@ -476,6 +495,22 @@ export interface PathwayScreen {
   image_step_id: string;
   visits: PathwayVisit[];
   time_on_screen_ms?: number | null;
+  row_choice?: 'automatic' | PathwayRowChoice;
+}
+
+/** A named stretch of consecutive steps, such as "sign up", with how many steps and screens it takes. */
+export interface PathwayPhase {
+  name: string;
+  first_step_id: string;
+  last_step_id: string;
+  first_step_index: number;
+  last_step_index: number;
+  step_count: number;
+  screen_count: number;
+  screen_ids: string[];
+  start_ms: number;
+  end_ms?: number | null;
+  duration_ms?: number | null;
 }
 
 export interface PathwayPass {
@@ -503,6 +538,7 @@ export interface Pathway {
   steps: PathwayStep[];
   screens: PathwayScreen[];
   transitions: PathwayTransition[];
+  phases?: PathwayPhase[];
 }
 
 export interface ExportBundle {
@@ -529,6 +565,8 @@ export interface RunDetail {
   summary: RunSummary;
   candidates: CandidateFrame[];
   accepted_steps: AcceptedStep[];
+  /** Where each phase of the walkthrough starts (an empty name: outside every phase), in order. */
+  phases?: Array<{ start_ms: number; name: string }>;
   events: RunEvent[];
   export_bundle?: ExportBundle | null;
 }

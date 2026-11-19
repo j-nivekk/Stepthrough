@@ -45,7 +45,7 @@ from .accounts import (
 from .analysis_metadata import serialize_analysis_metadata
 from . import __version__
 from .config import DATA_ROOT, build_label, build_server_config, build_tool_diagnostics, ensure_app_dirs
-from .database import init_db, reset_db
+from .database import LOCAL_USER_ID, init_db, reset_db
 from .models import (
     AnalysisMetadataResponse,
     CandidateFrameResponse,
@@ -60,7 +60,9 @@ from .models import (
     ReviewCarryOverResult,
     PathwayDetail,
     PathwayFigureDownload,
+    PhaseBoundariesUpdate,
     PathwayMerge,
+    PhaseUpdate,
     PresenceUpdate,
     PathwayResponse,
     ProjectCreate,
@@ -71,6 +73,7 @@ from .models import (
     RecordingUpdate,
     RunEventResponse,
     RunSettings,
+    RunUpdate,
     SavedRunSettingsResponse,
     UserResponse,
 )
@@ -97,11 +100,15 @@ from .repository import (
     list_projects,
     list_recordings,
     list_run_events,
+    list_run_phases,
     list_runs,
     forget_run_settings,
     list_saved_run_settings,
     project_has_active_runs,
+    record_change,
     recording_has_active_runs,
+    rename_run,
+    replace_run_phases,
     replace_candidates,
     save_run_settings,
     set_candidate_screen_links,
@@ -116,7 +123,7 @@ from .repository import (
 )
 from .services.export import build_accepted_steps, create_export_bundle
 from .services.ocr import probe_paddleocr_availability
-from .services.pathway import build_pathway, pathway_screen_members
+from .services.pathway import build_pathway, pathway_screen_members, set_phase, tidy_phases
 from .services.run_control import CancellationRequested
 from .services.stable_detection import detect_candidates_stable, resolve_stable_config
 from .services.ingest import ensure_working_copy, stop_working_copy, working_copy_path
@@ -379,10 +386,19 @@ def _announce(
     user: User | None = None,
     client: str | None = None,
     accounts: set[str] | None = None,
+    changed: bool = True,
     **extra: Any,
 ) -> None:
     """Tell the browsers of the shared accounts concerned what changed, so that they show it at once. ``client`` is
-    the browser that made the change, which has shown it already."""
+    the browser that made the change, which has shown it already.
+
+    A change ``user`` made is also recorded on the project and the run as their last change, unless ``changed`` is
+    false: for what leaves both as they were (an export), or is the person's own (their saved settings)."""
+    if user is not None and changed:
+        try:
+            record_change(user.id, project_id=project_id, run_id=run_id)
+        except Exception:  # nor must recording who made it
+            logger.exception("Could not record a %s change", kind)
     try:
         audience = accounts if accounts is not None else _audience(project_id, user)
         if audience:
@@ -420,8 +436,15 @@ def _run_is_deletable(run: dict[str, Any]) -> bool:
     return run["status"] not in ACTIVE_RUN_STATUSES
 
 
+def _modifier_name(row: dict) -> str | None:
+    """Who last changed it, to show; nobody in the app without logins, where every change is the one built-in user's."""
+    return None if row.get("modified_by") == LOCAL_USER_ID else row.get("modified_by_name")
+
+
 def _serialize_project(row: dict) -> ProjectResponse:
-    return ProjectResponse(**row)
+    return ProjectResponse(
+        **{**row, "modified_at": row.get("modified_at") or row["last_activity_at"], "modified_by_name": _modifier_name(row)}
+    )
 
 
 def _json_column(row: dict, key: str) -> Any:
@@ -440,6 +463,8 @@ def _serialize_run_summary(row: dict) -> DetectionRunSummary:
     return DetectionRunSummary(
         id=row["id"],
         recording_id=row["recording_id"],
+        run_number=row.get("run_number"),
+        name=row.get("name"),
         status=row["status"],
         phase=row.get("phase") or "queued",
         analysis_engine=row.get("analysis_engine") or "scene_v1",
@@ -462,6 +487,8 @@ def _serialize_run_summary(row: dict) -> DetectionRunSummary:
         started_at=row.get("started_at"),
         completed_at=row.get("completed_at"),
         updated_at=row["updated_at"],
+        modified_at=row.get("last_modified_at") or row.get("modified_at"),
+        modified_by_name=_modifier_name(row),
         export_bundle_id=row.get("export_bundle_id"),
         is_abortable=_run_is_abortable(row),
         is_deletable=_run_is_deletable(row),
@@ -511,6 +538,7 @@ def _serialize_candidate(row: dict) -> CandidateFrameResponse:
         similarity_distance=row.get("similarity_distance"),
         screen_link=row.get("screen_link"),
         screen_kind=row.get("screen_kind"),
+        pathway_row=row.get("pathway_row"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -646,6 +674,7 @@ def _build_run_detail(run_id: str) -> DetectionRunDetail:
         accepted_steps=accepted_steps,
         events=[_serialize_run_event(event) for event in list_run_events(run_id)],
         export_bundle=_serialize_export_bundle(get_export_bundle_for_run(run_id)),
+        phases=[{"start_ms": start, "name": name} for start, name in list_run_phases(run_id)],
     )
 
 
@@ -1063,7 +1092,7 @@ def my_run_settings_save_default(
 ) -> SavedRunSettingsResponse:
     _refuse_retired_engine(settings)
     saved = save_run_settings(user.id, None, settings)
-    _announce("settings", user=user, client=client, accounts=_audience(None, user))
+    _announce("settings", user=user, client=client, accounts=_audience(None, user), changed=False)
     return SavedRunSettingsResponse(**saved)
 
 
@@ -1076,7 +1105,7 @@ def my_run_settings_save_for_project(
     _refuse_retired_engine(settings)
     saved = save_run_settings(user.id, project_id, settings)
     # saved settings belong to the account, so only its own browsers need to hear of them
-    _announce("settings", project_id=project_id, user=user, client=client, accounts=_audience(None, user))
+    _announce("settings", project_id=project_id, user=user, client=client, accounts=_audience(None, user), changed=False)
     return SavedRunSettingsResponse(**saved)
 
 
@@ -1084,7 +1113,7 @@ def my_run_settings_save_for_project(
 def my_run_settings_forget_default(user: CurrentUser, client: SharedClient = None) -> Response:
     """Back to the factory settings for new runs: forget this person's own defaults."""
     forget_run_settings(user.id, None)
-    _announce("settings", user=user, client=client, accounts=_audience(None, user))
+    _announce("settings", user=user, client=client, accounts=_audience(None, user), changed=False)
     return Response(status_code=204)
 
 
@@ -1093,7 +1122,7 @@ def my_run_settings_forget_for_project(project_id: str, user: CurrentUser, clien
     """Forget what this person saved for a project: new runs there start from their own defaults again."""
     _project_for(project_id, user, "viewer")
     forget_run_settings(user.id, project_id)
-    _announce("settings", project_id=project_id, user=user, client=client, accounts=_audience(None, user))
+    _announce("settings", project_id=project_id, user=user, client=client, accounts=_audience(None, user), changed=False)
     return Response(status_code=204)
 
 
@@ -1108,7 +1137,7 @@ def projects_create(payload: ProjectCreate, user: CurrentUser, client: SharedCli
     project = create_project(payload.name, owner_id=user.id)
     _announce("projects", project_id=project["id"], user=user, client=client)
     usage.record("project_created", user)
-    return _serialize_project(project)
+    return _serialize_project(get_project(project["id"]))
 
 
 @app.patch("/projects/{project_id}", response_model=ProjectResponse)
@@ -1119,9 +1148,9 @@ def projects_update(
     # In a shared account, a rename made from a name that someone else has changed since would undo theirs.
     if user.is_shared and payload.previous_name is not None and payload.previous_name != project["name"]:
         raise HTTPException(409, f"This project was renamed to “{project['name']}” in another browser meanwhile.")
-    renamed = update_project_name(project_id, payload.name)
+    update_project_name(project_id, payload.name)
     _announce("projects", project_id=project_id, user=user, client=client)
-    return _serialize_project(renamed)
+    return _serialize_project(get_project(project_id))
 
 
 @app.get("/projects/{project_id}")
@@ -1259,20 +1288,38 @@ def runs_show(run_id: str, user: CurrentUser) -> DetectionRunDetail:
     return _build_run_detail(run_id)
 
 
+@app.patch("/runs/{run_id}", response_model=DetectionRunSummary)
+def runs_update(run_id: str, payload: RunUpdate, user: CurrentUser, client: SharedClient = None) -> DetectionRunSummary:
+    """Name a run, or take its name away; its number stays."""
+    project, recording, run = _run_for(run_id, user, "owner")
+    current = run.get("name") or ""
+    # In a shared account, a rename made from a name that someone else has changed since would undo theirs.
+    if user.is_shared and payload.previous_name is not None and payload.previous_name.strip() != current:
+        shown = f"“{current}”" if current else f"run #{run.get('run_number')} again"
+        raise HTTPException(409, f"This run was renamed to {shown} in another browser meanwhile.")
+    rename_run(run_id, payload.name.strip() or None)
+    _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    return _serialize_run_summary(get_run(run_id))
+
+
 @app.get("/runs/{run_id}/pathway", response_model=PathwayResponse)
 def runs_pathway(run_id: str, user: CurrentUser, detail: PathwayDetail = "screens") -> PathwayResponse:
     """The accepted steps of a run as the screens they show and the moves between them."""
     _project, recording, _run = _run_for(run_id, user, "viewer")
     candidates = list_candidates(run_id)
-    pathway = build_pathway(build_accepted_steps(recording["slug"], candidates), candidates, detail)
+    pathway = build_pathway(build_accepted_steps(recording["slug"], candidates), candidates, detail, list_run_phases(run_id))
     for step in pathway["steps"]:
         step["image_url"] = asset_url(step["image_path"])
     return PathwayResponse(**pathway)
 
 
-@app.post("/runs/{run_id}/pathway/merge", status_code=204)
-def runs_pathway_merge(run_id: str, payload: PathwayMerge, user: CurrentUser, client: SharedClient = None) -> Response:
+@app.post("/runs/{run_id}/pathway/merge")
+def runs_pathway_merge(run_id: str, payload: PathwayMerge, user: CurrentUser, client: SharedClient = None) -> dict[str, list[str]]:
+    """Stack the box of ``source_candidate_id`` onto the box of ``target_candidate_id``: every step of the source
+    box, rejected ones included (they take part in the grouping), is linked to the target. Says which steps it
+    changed, so a browser can take it back step by step (its undo)."""
     project, recording, _run = _run_for(run_id, user, "owner")
+    changed: list[str] = []
     with _one_at_a_time(run_id), _busy(user, client, project["id"], run_id, "merging two screens in this task"):
         candidates = list_candidates(run_id)
         ids = {candidate["id"] for candidate in candidates}
@@ -1281,9 +1328,60 @@ def runs_pathway_merge(run_id: str, payload: PathwayMerge, user: CurrentUser, cl
         members = pathway_screen_members(candidates, payload.source_candidate_id, payload.detail)
         if payload.target_candidate_id not in members:
             set_candidate_screen_links(run_id, members, payload.target_candidate_id)
+            changed = list(members)
     _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
     usage.record("screens_merged", user)
-    return Response(status_code=204)
+    return {"changed": changed}
+
+
+def _phases_answer(boundaries: list[tuple[int, str]]) -> dict[str, list[dict[str, Any]]]:
+    return {"phases": [{"start_ms": start, "name": name} for start, name in boundaries]}
+
+
+@app.put("/runs/{run_id}/phases")
+def runs_set_phase(run_id: str, payload: PhaseUpdate, user: CurrentUser, client: SharedClient = None) -> dict[str, list[dict[str, Any]]]:
+    """Name a stretch of steps as a phase of the walkthrough, or take it out of every phase (an empty name).
+    Answers with every phase of the run after the change, so that a browser can take it back."""
+    project, recording, _run = _run_for(run_id, user, "owner")
+    with _one_at_a_time(run_id):
+        steps = sorted(
+            (candidate for candidate in list_candidates(run_id) if candidate["status"] == "accepted"),
+            key=lambda candidate: (candidate["timestamp_ms"], candidate["detector_index"]),
+        )
+        position = {candidate["id"]: index for index, candidate in enumerate(steps)}
+
+        def stretch(first_id: str, last_id: str) -> tuple[int, int | None]:
+            """From the first step's moment up to the moment of the step after the last one (or the end)."""
+            if first_id not in position or last_id not in position:
+                raise HTTPException(status_code=422, detail="A phase runs from one accepted step of this run to another.")
+            first, last = position[first_id], position[last_id]
+            if first > last:
+                raise HTTPException(status_code=422, detail="A phase cannot end before it starts.")
+            following = steps[last + 1] if last + 1 < len(steps) else None
+            return steps[first]["timestamp_ms"], following["timestamp_ms"] if following else None
+
+        boundaries = list_run_phases(run_id)
+        if payload.replacing is not None:
+            boundaries = set_phase(boundaries, "", *stretch(payload.replacing.first_step, payload.replacing.last_step))
+        boundaries = set_phase(boundaries, payload.name.strip(), *stretch(payload.first_step, payload.last_step))
+        replace_run_phases(run_id, boundaries)
+    _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    return _phases_answer(boundaries)
+
+
+@app.put("/runs/{run_id}/phases/all")
+def runs_restore_phases(run_id: str, payload: PhaseBoundariesUpdate, user: CurrentUser, client: SharedClient = None) -> dict[str, list[dict[str, Any]]]:
+    """Put every phase of the run back as it was (a browser's undo). With ``expected``, only while the phases are
+    still as that browser left them: in a shared account, a change someone else made since is not undone."""
+    project, recording, _run = _run_for(run_id, user, "owner")
+    with _one_at_a_time(run_id):
+        current = list_run_phases(run_id)
+        if payload.expected is not None and [(item.start_ms, item.name) for item in payload.expected] != current:
+            raise HTTPException(status_code=409, detail="The phases were changed in another browser meanwhile, so they were left as they are.")
+        boundaries = tidy_phases([(item.start_ms, item.name.strip()) for item in payload.phases])
+        replace_run_phases(run_id, boundaries)
+    _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    return _phases_answer(boundaries)
 
 
 @app.post("/runs/{run_id}/pathway/figure", status_code=204)
@@ -1398,6 +1496,8 @@ def candidates_update(
                     raise HTTPException(status_code=422, detail="Choose another step of the same run.")
         if updates.get("screen_kind") == "auto":
             updates["screen_kind"] = None
+        if updates.get("pathway_row") == "auto":
+            updates["pathway_row"] = None
         serialized = _serialize_candidate(update_candidate(candidate_id, **updates))
         if updates.get("status") in ("accepted", "rejected"):
             usage.record("step_decided", user, status=updates["status"])
@@ -1580,9 +1680,18 @@ def runs_carry_over_review(run_id: str, payload: ReviewCarryOver, user: CurrentU
                 if mapped and mapped != target_id:
                     updates["screen_link"] = mapped
                     choice = True
+            if after.get("pathway_row") is None and before.get("pathway_row"):
+                updates["pathway_row"] = before["pathway_row"]
+                choice = True
             counts["screen_choices"] += int(choice)
             if updates:
                 update_candidate(target_id, **updates)
+
+        # Phases go by the time in the recording, which both runs share; only to a run that has none of its own.
+        phases = list_run_phases(source_run["id"])
+        brought_phases = bool(phases) and not list_run_phases(run_id)
+        if brought_phases:
+            replace_run_phases(run_id, phases)
 
         unmatched = sum(1 for candidate in source.values() if candidate["id"] not in pairs and _is_reviewed(candidate))
         _emit_run_event(
@@ -1592,7 +1701,7 @@ def runs_carry_over_review(run_id: str, payload: ReviewCarryOver, user: CurrentU
             message=f"Brought over the review of an earlier run ({counts['decisions']} decisions)",
             progress=run.get("progress"),
         )
-        result = ReviewCarryOverResult(**counts, added_manual=added_manual, unmatched=unmatched)
+        result = ReviewCarryOverResult(**counts, added_manual=added_manual, unmatched=unmatched, phases=brought_phases)
     _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
     usage.record("review_carried_over", user)
     return result
@@ -1605,7 +1714,9 @@ def runs_export(run_id: str, payload: ExportRequest, user: CurrentUser, client: 
     # exporting the same task at once each get their own.
     with _busy(user, client, project["id"], run_id, "exporting this task"):
         bundle = _export_run(project, recording, run, payload, retain=user.is_shared)
-    _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    _announce(
+        "run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client, changed=False
+    )
     usage.record("exported", user, mode=payload.mode, steps=bundle.get("item_count"))
     return bundle
 
@@ -1637,6 +1748,7 @@ def _export_run(project: dict, recording: dict, run: dict, payload: ExportReques
             run=run,
             candidates=candidates,
             mode=export_mode,
+            phases=list_run_phases(run_id),
         )
         bundle = create_export_bundle_record(run_id, output_dir, zip_path, item_count, bundle_id=bundle_id, retain=retain)
     except Exception as exc:

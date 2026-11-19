@@ -11,8 +11,8 @@ test('a change makes out of date only the data it touches', () => {
   assert.deepEqual(staleQueries(event('projects', { recording_id: null, run_id: null })), [['projects'], ['project', 'p']]);
   assert.deepEqual(staleQueries(event('project', { run_id: null })), [['projects'], ['project', 'p'], ['recording', 'r']]);
   assert.deepEqual(staleQueries(event('recording')), [['projects'], ['project', 'p'], ['recording', 'r'], ['run', 'run']]);
-  assert.deepEqual(staleQueries(event('run')), [['recording', 'r'], ['run', 'run'], ['pathway', 'run']]);
-  assert.deepEqual(staleQueries(event('candidate')), [['run', 'run'], ['pathway', 'run']]);
+  assert.deepEqual(staleQueries(event('run')), [['projects'], ['recording', 'r'], ['run', 'run'], ['pathway', 'run']]);
+  assert.deepEqual(staleQueries(event('candidate')), [['projects'], ['recording', 'r'], ['run', 'run'], ['pathway', 'run']]);
   assert.deepEqual(staleQueries(event('settings')), [['saved-run-settings']]);
   assert.deepEqual(staleQueries(event('state')), []);
 });

@@ -93,12 +93,15 @@ def write_requests(w: World) -> list[tuple[str, str, dict]]:
         ('POST', f'/recordings/{w.recording_id}/runs/manual', {}),
         ('POST', f'/recordings/{w.recording_id}/runs', {'json': {}}),
         ('POST', f'/runs/{w.run_id}/cancel', {}),
+        ('PATCH', f'/runs/{w.run_id}', {'json': {'name': 'Renamed'}}),
         ('PATCH', f'/candidates/{w.candidate_id}', {'json': {'status': 'accepted'}}),
         ('PATCH', f'/candidates/{w.candidate_id}', {'json': {'screen_link': 'new', 'screen_kind': 'popup'}}),
         ('POST', f'/runs/{w.run_id}/pathway/merge', {'json': {
             'source_candidate_id': w.candidate_id, 'target_candidate_id': w.candidate_id,
         }}),
         ('POST', f'/runs/{w.run_id}/candidates/manual', {'json': {'timestamp_ms': 500}}),
+        ('PUT', f'/runs/{w.run_id}/phases', {'json': {'name': 'Phase', 'first_step': w.candidate_id, 'last_step': w.candidate_id}}),
+        ('PUT', f'/runs/{w.run_id}/phases/all', {'json': {'phases': []}}),
         ('POST', f'/runs/{w.run_id}/export', {'json': {'mode': 'all'}}),
         ('DELETE', f'/runs/{w.run_id}', {}),
         ('DELETE', f'/recordings/{w.recording_id}', {}),
@@ -153,6 +156,36 @@ def test_a_viewer_can_look_but_not_change(client: TestClient, world: World, act_
         assert response.json()['detail'] == 'You can view this project but not change it.'
     act_as(None)
     assert_world_unchanged(client, world)
+
+
+def test_projects_and_runs_say_who_changed_them_last(client: TestClient, world: World, act_as) -> None:
+    ada = User.from_row(create_user('ada', display_name='Ada L.', tags=('seminar-a',)))
+    bo = make_user('bo', 'seminar-a')
+    set_project_member(world.project_id, 'tag:seminar-a', 'owner')
+
+    def last_change(user: User) -> tuple[str | None, str | None]:
+        act_as(user)
+        project = client.get(f'/projects/{world.project_id}').json()['project']
+        run = client.get(f'/runs/{world.run_id}').json()['summary']
+        return project['modified_by_name'], run['modified_by_name']
+
+    act_as(ada)
+    assert client.patch(f'/runs/{world.run_id}', json={'name': 'First pass'}).status_code == 200
+    assert last_change(bo) == ('Ada L.', 'Ada L.')  # the display name, where there is one
+
+    act_as(bo)
+    assert client.patch(f'/projects/{world.project_id}', json={'name': 'Renamed'}).status_code == 200
+    assert last_change(ada) == ('bo', 'Ada L.')  # a change to the project alone leaves its runs as they were
+    act_as(bo)
+    assert client.patch(f'/candidates/{world.candidate_id}', json={'notes': 'seen'}).status_code == 200
+    assert last_change(ada) == ('bo', 'bo')
+
+    # looking changes nothing, and neither does someone who may only look
+    viewer = make_user('viewer')
+    set_project_member(world.project_id, viewer.id, 'viewer')
+    act_as(viewer)
+    assert client.patch(f'/runs/{world.run_id}', json={'name': 'Mine'}).status_code == 403
+    assert last_change(ada) == ('bo', 'bo')
 
 
 def test_a_tag_shares_a_project_with_everyone_who_has_it(client: TestClient, world: World, act_as) -> None:

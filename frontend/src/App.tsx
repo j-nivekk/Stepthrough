@@ -32,6 +32,7 @@ import {
   updateCandidate,
   updateProject,
   updateRecording,
+  updateRun,
 } from './api';
 import { AppSettings } from './components/AppSettings';
 import { AppWatermark, type CornerPanel } from './components/AppWatermark';
@@ -908,6 +909,15 @@ function App({ session, onSessionChange }: AppProps) {
     onError: (error: Error) => setAppError(error.message),
   });
 
+  const updateRunMutation = useMutation({
+    mutationFn: ({ name, previousName, runId }: { name: string; previousName: string; runId: string }) =>
+      updateRun(runId, name, previousName),
+    onSuccess: (run) => {
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      return refreshRunQueries(run.id, run.recording_id);
+    },
+  });
+
   const deleteRecordingMutation = useMutation({
     mutationFn: ({ recordingId }: { localId?: string; recordingId: string }) => deleteRecording(recordingId),
     onSuccess: (_result, variables) => {
@@ -1215,6 +1225,12 @@ function App({ session, onSessionChange }: AppProps) {
   async function handleRenameRecording(recordingId: string, filename: string, previousFilename: string) {
     clearAnalysisMessages();
     await updateRecordingMutation.mutateAsync({ filename, previousFilename, recordingId });
+  }
+
+  async function handleRenameRun(runId: string, name: string, previousName: string) {
+    clearAnalysisMessages();
+    // a refusal (renamed in another browser meanwhile) is shown next to the name, where the rename was typed
+    await updateRunMutation.mutateAsync({ name, previousName, runId });
   }
 
   async function handleRenameImportItem(localId: string, filename: string, previousFilename: string) {
@@ -1807,6 +1823,7 @@ function App({ session, onSessionChange }: AppProps) {
         onOpenPreview={setPreviewRecordingId}
         onRenameProject={handleRenameProject}
         onRenameRecording={handleRenameRecording}
+        onRenameRun={handleRenameRun}
         onResetToProjectDefaults={handleResetToProjectDefaults}
         onResetToUniversalDefaults={handleResetToUniversalDefaults}
         onRestoreFactorySettings={handleRestoreFactorySettings}

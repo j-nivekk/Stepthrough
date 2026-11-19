@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { compareRunSettings, compareRuns, defaultComparisonPair } from '../src/lib/runComparison';
-import type { CandidateFrame, RunSummary } from '../src/types';
+import { formatChangedAgo, formatLastChange, formatProjectSummary, formatRunNumber, formatRunTitle } from '../src/lib/formatters';
+import type { CandidateFrame, Project, RunSummary } from '../src/types';
 
 const step = (id: string, ms: number, extra: Partial<CandidateFrame> = {}) =>
   ({ id, timestamp_ms: ms, timestamp_tc: '', status: 'pending', candidate_origin: 'detected', title: null, notes: null, ...extra }) as CandidateFrame;
@@ -37,4 +38,26 @@ test('only the settings that differ are marked', () => {
     run('b', '2', { stable: { recording_type: 'phone', min_dwell_ms: 2500 } as RunSummary['stable'] }),
   );
   assert.deepEqual(rows.filter((row) => row.changed).map((row) => [row.label, row.value, row.right]), [['minimum time on screen', '450 ms', '2500 ms']]);
+});
+
+test('a run is called by its name or its number, and keeps the number in sight', () => {
+  assert.equal(formatRunTitle({ name: null, run_number: 3 }), 'run #3');
+  assert.equal(formatRunTitle({ name: '  ', run_number: 3 }), 'run #3');
+  assert.equal(formatRunTitle({ name: 'Second try', run_number: 3 }), 'Second try');
+  assert.equal(formatRunNumber({ run_number: 3 }), 'run #3');
+  // a server from before stored numbers: the number worked out from the order
+  assert.equal(formatRunTitle({ name: null, run_number: null }, 2), 'run #2');
+});
+
+test('the last change says when, and who where it is known', () => {
+  const now = Date.parse('2026-11-18T12:00:00Z');
+  assert.equal(formatChangedAgo('2026-11-18T11:59:40Z', now), 'just now');
+  assert.equal(formatChangedAgo('2026-11-18T11:35:00Z', now), '25 min ago');
+  assert.equal(formatLastChange(new Date(Date.now() - 30_000).toISOString(), 'Ada L.'), 'changed just now by Ada L.');
+  assert.equal(formatLastChange(new Date(Date.now() - 30_000).toISOString(), null), 'changed just now');
+  const project = {
+    recording_count: 1, run_count: 3, last_activity_at: '2026-01-01T00:00:00Z',
+    modified_at: new Date(Date.now() - 30_000).toISOString(), modified_by_name: 'bo',
+  } as Project;
+  assert.equal(formatProjectSummary(project), '1 video and 3 runs, changed just now by bo');
 });

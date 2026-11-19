@@ -239,12 +239,19 @@ def test_two_exports_at_once_are_both_downloadable(group, video_factory, monkeyp
 
 def test_renaming_from_a_name_changed_meanwhile_is_refused(group, video_factory):
     a, b = group
-    project_id, recording_id, _run, _steps = a_task(a, video_factory)
+    project_id, recording_id, run_id, _steps = a_task(a, video_factory)
     ok(a.patch(f"/projects/{project_id}", json={"name": "A's name", "previous_name": "Group project"}))
     stale = b.patch(f"/projects/{project_id}", json={"name": "B's name", "previous_name": "Group project"})
     assert stale.status_code == 409 and "A's name" in stale.json()["detail"]
     ok(a.patch(f"/recordings/{recording_id}", json={"filename": "renamed.mp4", "previous_filename": "walkthrough.mp4"}))
     assert b.patch(f"/recordings/{recording_id}", json={"filename": "b.mp4", "previous_filename": "walkthrough.mp4"}).status_code == 409
+    # a run without a name is shown by its number; "" says that is what the browser saw
+    ok(a.patch(f"/runs/{run_id}", json={"name": "A's run", "previous_name": ""}))
+    stale = b.patch(f"/runs/{run_id}", json={"name": "B's run", "previous_name": ""})
+    assert stale.status_code == 409 and "A's run" in stale.json()["detail"]
+    ok(a.patch(f"/runs/{run_id}", json={"name": "", "previous_name": "A's run"}))
+    stale = b.patch(f"/runs/{run_id}", json={"name": "B's run", "previous_name": "A's run"})
+    assert stale.status_code == 409 and "run #1 again" in stale.json()["detail"]
 
 
 def test_regular_accounts_keep_working_as_before(logins, video_factory):

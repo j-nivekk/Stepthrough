@@ -8,6 +8,8 @@ step it arrives at, so the journey can be read back from the chart.
 from __future__ import annotations
 
 import json
+from bisect import bisect_right
+from collections.abc import Sequence
 from typing import Any
 
 from ..models import PathwayDetail
@@ -20,6 +22,10 @@ SAME_SCREEN_LABELS = frozenset({"scroll", "text_entry", "feed_card_swap", "conte
 POPUP_LABEL = "modal"
 POPUP_CLOSED_LABEL = "modal_close"
 _SCREEN_CHOICES = {None: "automatic", "new": "new_screen"}  # any other value is the step chosen as the same screen
+# Where a box goes in the figure, as the reviewer chose on one of its steps (`pathway_row`): on the row of the box
+# it was reached from, or on a row of its own below. Without a choice, the first box reached from a box continues
+# its row and any others start rows below.
+ROW_CHOICES = ("continue", "below")
 
 FIELD_NOTES = {
     "detail": "screens: steps reached by scrolling, typing or a small change share a box with the step before; "
@@ -38,6 +44,13 @@ FIELD_NOTES = {
     "screens.title": "the title of the first step on the screen that has one (title_step_id), otherwise Screen N",
     "screens.reached_from": "the screen the user was on when they first arrived; null for the first screen",
     "screens.visits": "each stay on the screen: the steps taken there before moving to another screen",
+    "screens.row_choice": "where the reviewer put the box in the figure: automatic, continue (on the row of the "
+                          "screen it was reached from) or below (on a row of its own under it)",
+    "steps.phase": "the phase of the walkthrough the step is in, as the reviewer named it; null outside every phase",
+    "phases": "stretches of consecutive steps that the reviewer named, such as sign up or verify identity, in order",
+    "phases.screen_count": "how many different screens the steps of the phase are on",
+    "phases.duration_ms": "from the phase's first step to the step after its last one (for the last phase: to the "
+                          "end of its last step's time on screen); null when that is not known",
     "time_on_screen_ms": "the time the screens of these steps stayed still, added up; null when a step has no timing",
     "transitions": "moves between two different screens, in order of the first move",
     "transitions.kind": "return when the move goes to a screen that was first visited earlier than the one it leaves",
@@ -161,10 +174,91 @@ def pathway_screen_members(candidates: list[dict[str, Any]], candidate_id: str, 
     return [member for member, member_group in groups.items() if member_group == group]
 
 
-def build_pathway(rows: list[dict[str, Any]], candidates: list[dict[str, Any]], detail: PathwayDetail = "screens") -> dict[str, Any]:
+# ── phases ───────────────────────────────────────────────────────────────────────────────────────────────────────
+# A phase is a named stretch of the recording. It is kept as where it starts: a list of (start_ms, name), in order,
+# where each name holds until the next start, and "" ends the phase before it. Going by time rather than by step,
+# a step added by hand inside a phase belongs to it, and a step that is rejected leaves the phase as it was.
+
+
+def phase_at(boundaries: Sequence[tuple[int, str]], ms: int) -> str | None:
+    """The phase a moment of the recording is in, or None."""
+    index = bisect_right([start for start, _name in boundaries], ms) - 1
+    return (boundaries[index][1] or None) if index >= 0 else None
+
+
+def tidy_phases(boundaries: Sequence[tuple[int, str]]) -> list[tuple[int, str]]:
+    """In order, without starts that change nothing (the same name again, or an end where no phase is)."""
+    tidy: list[tuple[int, str]] = []
+    for start, name in sorted(boundaries):
+        if name != (tidy[-1][1] if tidy else ""):
+            tidy.append((start, name))
+    return tidy
+
+
+def set_phase(boundaries: Sequence[tuple[int, str]], name: str, start_ms: int, end_ms: int | None) -> list[tuple[int, str]]:
+    """Name the stretch from ``start_ms`` up to ``end_ms`` (or to the end of the recording); "" takes it out of
+    every phase. What comes after the stretch stays in the phase it was in."""
+    after = phase_at(boundaries, end_ms) if end_ms is not None else None
+    kept = [(start, phase) for start, phase in boundaries if start < start_ms or (end_ms is not None and start > end_ms)]
+    kept.append((start_ms, name))
+    if end_ms is not None:
+        kept.append((end_ms, after or ""))
+    return tidy_phases(kept)
+
+
+def _phase_stretches(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Consecutive steps in the same phase, with how many steps and screens and how long."""
+    stretches: list[dict[str, Any]] = []
+    for index, step in enumerate(steps):
+        name = step.get("phase")
+        if not name:
+            continue
+        if stretches and stretches[-1]["name"] == name and stretches[-1]["_end"] == index - 1:
+            stretch = stretches[-1]
+        else:
+            stretch = {"name": name, "_start": index, "steps": []}
+            stretches.append(stretch)
+        stretch["_end"] = index
+        stretch["steps"].append(step)
+
+    phases = []
+    for stretch in stretches:
+        members = stretch["steps"]
+        first, last = members[0], members[-1]
+        following = steps[stretch["_end"] + 1] if stretch["_end"] + 1 < len(steps) else None
+        if following is not None:
+            end_ms = following["timestamp_ms"]
+        elif last["time_on_screen_ms"] is not None:
+            end_ms = last["timestamp_ms"] + last["time_on_screen_ms"]
+        else:
+            end_ms = None
+        screen_ids = list(dict.fromkeys(step["screen_id"] for step in members))
+        phases.append({
+            "name": stretch["name"],
+            "first_step_id": first["step_id"],
+            "last_step_id": last["step_id"],
+            "first_step_index": first["step_index"],
+            "last_step_index": last["step_index"],
+            "step_count": len(members),
+            "screen_count": len(screen_ids),
+            "screen_ids": screen_ids,
+            "start_ms": first["timestamp_ms"],
+            "end_ms": end_ms,
+            "duration_ms": None if end_ms is None else end_ms - first["timestamp_ms"],
+        })
+    return phases
+
+
+def build_pathway(
+    rows: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    detail: PathwayDetail = "screens",
+    phases: Sequence[tuple[int, str]] = (),
+) -> dict[str, Any]:
     """The pathway of ``rows`` (the steps of a run as exported: accepted steps, or every candidate).
 
-    ``candidates`` are all candidates of the run, which decide which steps show the same screen.
+    ``candidates`` are all candidates of the run, which decide which steps show the same screen; ``phases`` are the
+    starts of the run's phases (see ``set_phase``).
     """
     group_of, reasons = _group_candidates(candidates, detail)
     by_id = {candidate["id"]: candidate for candidate in candidates}
@@ -195,9 +289,13 @@ def build_pathway(rows: list[dict[str, Any]], candidates: list[dict[str, Any]], 
                 "image_step_id": row["step_id"],
                 "visits": [],
                 "time_on_screen_ms": None,
+                "row_choice": "automatic",
             }
             screens.append(screen)
             screen_of_group[group] = screen
+        # the first of the box's steps with a say about its row has it
+        if screen["row_choice"] == "automatic" and candidate.get("pathway_row") in ROW_CHOICES:
+            screen["row_choice"] = candidate["pathway_row"]
         if screen["title_step_id"] is None and (candidate.get("title") or "").strip():
             screen["title"] = candidate["title"].strip()
             screen["title_step_id"] = row["step_id"]
@@ -243,6 +341,7 @@ def build_pathway(rows: list[dict[str, Any]], candidates: list[dict[str, Any]], 
             ),
             "screen_choice": _SCREEN_CHOICES.get(candidate.get("screen_link"), "same_screen"),
             "kind_choice": candidate.get("screen_kind") or "automatic",
+            "phase": phase_at(phases, row["timestamp_ms"]),
             "source_candidate_id": row["source_candidate_id"],
         }
         steps.append(step)
@@ -262,5 +361,6 @@ def build_pathway(rows: list[dict[str, Any]], candidates: list[dict[str, Any]], 
         "steps": steps,
         "screens": screens,
         "transitions": list(transitions.values()),
+        "phases": _phase_stretches(steps),
         "field_notes": FIELD_NOTES,
     }

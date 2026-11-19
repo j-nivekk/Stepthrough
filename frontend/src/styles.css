@@ -3349,6 +3349,33 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   font-size: 12px;
 }
 
+/* A run's name, or its number when it has none. A long name wraps rather than being cut off. */
+.analysis-task-name {
+  min-width: 0;
+}
+
+.analysis-task-name-text {
+  overflow-wrap: anywhere;
+}
+
+.analysis-task-name .editable-name-input {
+  width: 100%;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+/* Who last changed a run and when, and its rename link, at the top of its details. */
+.analysis-task-changed {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 8px;
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .analysis-task-title.error,
 .analysis-task-link.danger,
 .analysis-task-progress.error {
@@ -6072,14 +6099,6 @@ button:disabled {
   line-height: 1.2;
 }
 
-/* What the chosen kind of boxes does, in one line under the controls (the tooltips say when to use which). */
-.pathway-controls-hint {
-  margin: -6px 0 0;
-  color: rgba(0, 0, 0, 0.45);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
 /* Changes to the selected box of the pathway, in a strip above the figure. It stays in view while a long
    chart scrolls, so a box picked further down can still be changed. */
 .pathway-editor {
@@ -6143,6 +6162,8 @@ button:disabled {
 /* Our own arrow, 10px in from the right like the text from the left: the browser's own sits against the right
    edge whatever the padding. */
 .pathway-editor select,
+.pathway-tool-select,
+.phase-choice-select,
 .run-compare-select,
 .users-keep-select,
 .usage-class-select {
@@ -6215,6 +6236,16 @@ button:disabled {
 }
 
 .pathway-figure [data-screen] {
+  cursor: grab;
+  outline: none;
+}
+
+.pathway-figure [data-screen]:focus-visible image {
+  outline: 2px solid rgba(205, 109, 30, 0.6);
+  outline-offset: 3px;
+}
+
+.pathway-figure [data-phase] {
   cursor: pointer;
 }
 
@@ -6257,7 +6288,503 @@ button:disabled {
 }
 
 .pathway-figure {
+  width: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: pan-x pan-y;
+}
+
+/* ── Working on the figure (PathwayCanvas). In the app's own quiet language, as the settings and account panels:
+   a grey surface with a soft shadow for what floats, rounded controls, muted small labels, short plain motion, and
+   none of it for people who asked for less motion. ── */
+
+.pathway-stage {
+  position: relative;
   margin: 0 auto;
+}
+
+.pathway-stage.is-dragging,
+.pathway-stage.is-dragging [data-screen] {
+  cursor: grabbing;
+}
+
+/* The status line and, when open, the phases stay at the top of the window while the figure scrolls. */
+.pathway-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: grid;
+  background: var(--bg);
+}
+
+.pathway-status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 28px;
+  padding: 4px 12px;
+  background: #ebebeb;
+  font-size: 12px;
+  line-height: 1.3;
+  color: rgba(0, 0, 0, 0.72);
+}
+
+.pathway-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 4px;
+  animation: pathway-status-in 600ms ease-out;
+}
+
+.pathway-status-keys {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+/* A new message lights up briefly, so it is noticed. */
+@keyframes pathway-status-in {
+  from {
+    background: rgba(205, 109, 30, 0.22);
+  }
+}
+
+/* The selection: the chart's orange frame, with small handles at its corners. */
+.pathway-selected {
+  position: absolute;
+  z-index: 3;
+  border: 2px solid #cd6d1e;
+  border-radius: 3px;
+  pointer-events: none;
+}
+
+.pathway-selected i {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: #fff;
+  border: 1.5px solid #cd6d1e;
+  border-radius: 2px;
+}
+
+.pathway-selected i:nth-child(1) {
+  left: -5px;
+  top: -5px;
+}
+
+.pathway-selected i:nth-child(2) {
+  right: -5px;
+  top: -5px;
+}
+
+.pathway-selected i:nth-child(3) {
+  left: -5px;
+  bottom: -5px;
+}
+
+.pathway-selected i:nth-child(4) {
+  right: -5px;
+  bottom: -5px;
+}
+
+.pathway-selected.is-step {
+  border-width: 1.5px;
+  border-radius: 10px;
+}
+
+.pathway-selected.is-step i {
+  display: none;
+}
+
+/* What is being dragged stays where it is, greyed, until it is let go. */
+.pathway-drag-source {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+/* Where it would go: a moving dashed outline. */
+.pathway-drop {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: 3px;
+  background:
+    linear-gradient(90deg, #cd6d1e 50%, transparent 0) repeat-x,
+    linear-gradient(90deg, #cd6d1e 50%, transparent 0) repeat-x,
+    linear-gradient(0deg, #cd6d1e 50%, transparent 0) repeat-y,
+    linear-gradient(0deg, #cd6d1e 50%, transparent 0) repeat-y;
+  background-size: 10px 2px, 10px 2px, 2px 10px, 2px 10px;
+  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  animation: pathway-ants 600ms linear infinite;
+}
+
+@keyframes pathway-ants {
+  to {
+    background-position: 10px 0, -10px 100%, 0 -10px, 100% 10px;
+  }
+}
+
+.pathway-ghost {
+  position: fixed;
+  z-index: 40;
+  padding: 3px 9px;
+  border-radius: 4px;
+  background: #d9d9d9;
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+}
+
+/* The toolbox beside the selection, and the menu: grey panels like the settings, coming in quickly. */
+.pathway-toolbox {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 8px);
+  padding: 5px;
+  background: #d9d9d9;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  animation: pathway-pop 120ms ease-out;
+}
+
+.pathway-toolbox.is-above {
+  transform: translateY(-100%);
+  animation-name: pathway-pop-above;
+}
+
+@keyframes pathway-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes pathway-pop-above {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-100% + 4px));
+  }
+}
+
+.pathway-tool,
+.pathway-tool-select,
+.pathway-tool-title {
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.pathway-tool {
+  padding: 0 9px;
+  background: transparent;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pathway-tool:hover,
+.pathway-tool:focus-visible {
+  background: rgba(0, 0, 0, 0.07);
+  outline: none;
+}
+
+.pathway-tool.is-on {
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+/* The toolbox's actions (pop-up, phase, own screen, stack together) have a border, as the settings panel's
+   buttons do, so they read as buttons beside its fields; "⋯" and the step numbers stay plain. A pop-up that is
+   on has the orange outline of what is chosen. */
+.pathway-toolbox > .pathway-tool:not([aria-label='more']) {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+.pathway-toolbox > .pathway-tool:not([aria-label='more']):hover,
+.pathway-toolbox > .pathway-tool:not([aria-label='more']):focus-visible {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.pathway-toolbox > .pathway-tool.is-on {
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px #cd6d1e;
+}
+
+.pathway-tool-title {
+  width: 170px;
+  min-width: 80px;
+  padding: 0 8px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.pathway-tool-title:focus {
+  outline: 2px solid rgba(205, 109, 30, 0.6);
+  outline-offset: 0;
+}
+
+.pathway-tool-select {
+  max-width: 190px;
+  padding: 0 26px 0 9px;
+  background-color: rgba(255, 255, 255, 0.68);
+}
+
+.pathway-tool-select:hover,
+.pathway-tool-select:focus-visible {
+  background-color: rgba(255, 255, 255, 0.95);
+  outline: none;
+}
+
+.pathway-tool-steps {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  border-right: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.pathway-tool-label {
+  padding: 0 6px;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pathway-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 230px;
+  padding: 4px;
+  background: #d9d9d9;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  animation: pathway-menu-in 100ms ease-out;
+}
+
+@keyframes pathway-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+.pathway-menu-row {
+  position: relative;
+}
+
+.pathway-menu-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pathway-menu-item:hover,
+.pathway-menu-item:focus-visible,
+.pathway-menu-item[aria-expanded='true'] {
+  background: rgba(0, 0, 0, 0.08);
+  outline: none;
+}
+
+.pathway-menu-hint {
+  color: rgba(0, 0, 0, 0.42);
+}
+
+.pathway-submenu {
+  position: absolute;
+  left: calc(100% + 2px);
+  top: -4px;
+  max-width: 360px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.pathway-submenu.to-left {
+  left: auto;
+  right: calc(100% + 2px);
+}
+
+.pathway-submenu .pathway-menu-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The phases, in a floating panel like the toolbox and the menu (PathwayPhases.tsx). */
+.pathway-phases {
+  position: fixed;
+  z-index: 30;
+  width: min(430px, calc(100vw - 16px));
+  padding: 10px 12px 12px;
+  display: grid;
+  gap: 8px;
+  background: #d9d9d9;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  animation: pathway-menu-in 100ms ease-out;
+}
+
+.pathway-phases-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.pathway-phases-hint {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.46);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.pathway-phases-hint.is-error {
+  color: var(--danger);
+}
+
+.pathway-phases-close {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+.pathway-phases-close:hover {
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.pathway-phase-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+/* A phase: its name, and its steps in grey. */
+.pathway-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  height: 26px;
+  padding: 5px 9px 0;
+  border: none;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.68);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.pathway-chip span {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+}
+
+.pathway-chip:hover,
+.pathway-chip:focus-visible {
+  background: rgba(255, 255, 255, 0.95);
+  outline: none;
+}
+
+.pathway-chip.is-on {
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px #cd6d1e;
+}
+
+.pathway-phase-form {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* A label on the left, its fields on the right, as in the settings panel. */
+.pathway-phase-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pathway-phase-row > span:first-child {
+  flex: 0 0 40px;
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.pathway-phase-row .pathway-tool-title {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.pathway-phase-row .pathway-tool-select {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+}
+
+.pathway-phase-to {
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.pathway-phase-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.pathway-phase-actions .analysis-pill {
+  height: 26px;
+  padding: 0 12px;
+}
+
+.pathway-tool.is-danger {
+  color: var(--danger);
+}
+
+@media (max-width: 760px) {
+  .pathway-tool-title {
+    width: 110px;
+  }
+
+  .pathway-tool-select {
+    max-width: 120px;
+  }
+
+  .pathway-status {
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pathway-status-text,
+  .pathway-toolbox,
+  .pathway-menu,
+  .pathway-drop {
+    animation: none;
+  }
 }
 
 .pathway-figure svg {
@@ -8753,4 +9280,35 @@ button:disabled {
     grid-template-columns: 1fr;
     gap: 4px;
   }
+}
+
+/* The phase of an accepted step, in the step review (components/PhaseChoice.tsx). */
+.phase-choice {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.phase-choice-prefix {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.phase-choice-select {
+  max-width: 180px;
+  height: 24px;
+  padding: 0 24px 0 6px;
+  border: none;
+  border-radius: 0;
+  background-color: rgba(255, 255, 255, 0.68);
+  font: inherit;
+  font-size: 12px;
+}
+
+.phase-choice-input {
+  width: 140px;
+  height: 24px;
+  font-size: 12px;
 }

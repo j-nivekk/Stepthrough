@@ -35,10 +35,10 @@ export function staleQueries(event: LiveEvent): QueryKeyPrefix[] {
       if (runId) keys.push(['run', runId]);
       break;
     case 'run':
-      if (recordingId) keys.push(['recording', recordingId]);
-      if (runId) keys.push(['run', runId], ['pathway', runId]);
-      break;
     case 'candidate':
+      // Any change to a task is also its project's and its own last change (who and when, in the lists).
+      keys.push(['projects']);
+      if (recordingId) keys.push(['recording', recordingId]);
       if (runId) keys.push(['run', runId], ['pathway', runId]);
       break;
     case 'settings':

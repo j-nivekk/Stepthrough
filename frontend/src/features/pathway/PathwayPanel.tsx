@@ -1,7 +1,7 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { absoluteApiUrl, getRunPathway, mergePathwayScreens, notePathwayFigure } from '../../api';
+import { absoluteApiUrl, getRunPathway, mergePathwayScreens, notePathwayFigure, restoreRunPhases, setRunPhase } from '../../api';
 import interItalicUrl from '../../assets/fonts/InterVariable-Italic.ttf?url';
 import interUrl from '../../assets/fonts/InterVariable.ttf?url';
 import { markPathwayTutorialSeen, PathwayTutorial, pathwayTutorialSeen } from '../../components/pathwayTutorial/PathwayTutorial';
@@ -23,7 +23,7 @@ import { recordingAspect } from '../../lib/stepLayout';
 import { splitFilename } from '../../lib/utils';
 import type { CandidateChanges, Pathway, PathwayDetail, PathwayStep, RecordingSummary, RunDetail } from '../../types';
 import { useElementWidth } from '../analysis/useElementWidth';
-import { PathwayBoxEditor } from './PathwayBoxEditor';
+import { PathwayCanvas, type PhaseRequest } from './PathwayCanvas';
 import { usePathwayPeek } from './usePathwayPeek';
 import { track } from '../../lib/usage';
 
@@ -58,8 +58,8 @@ const FORMATS: Array<[FigureFormat, string]> = [
   ['png', "a picture at twice the figure's size, for slides, documents and the web"],
 ];
 const NOTES: Array<[PathwayNotesPlacement, string, string]> = [
-  ['under', 'under screens', 'notes under each screen, cut after four lines'],
-  ['key', 'in a key', 'notes in full in a list below the chart'],
+  ['under', 'under screens', 'notes under each screen'],
+  ['key', 'in a key', 'notes in a list below the chart'],
   ['hidden', 'off', 'leave the notes out'],
 ];
 
@@ -111,8 +111,8 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   // from right to left as a countdown, and the note goes when it is empty (or with its ×).
   const [aboutNote, setAboutNote] = useState(false);
   const [tutorialFromInvite, setTutorialFromInvite] = useState(false);
-  // The selected box, kept as one of its steps: boxes are numbered again whenever the grouping changes.
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  // The phases panel, open on its list, on a stretch of steps for a new phase, or on a phase to change.
+  const [phases, setPhases] = useState<PhaseRequest | null>(null);
 
   useEffect(() => {
     savePathwayView(view);
@@ -120,7 +120,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
 
   const runId = run.summary.id;
   useEffect(() => {
-    setSelectedCandidateId(null);
+    setPhases(null);
   }, [runId]);
   const pathwayQuery = useQuery(pathwayQueryOptions(run, view.detail, getRunPathway));
   const mergeMutation = useMutation({
@@ -143,12 +143,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   );
   const filename = recording?.filename ?? run.summary.recording_id;
 
-  const selectedScreen = useMemo(() => {
-    const step = pathway?.steps.find((item) => item.source_candidate_id === selectedCandidateId);
-    return (step && pathway?.screens.find((screen) => screen.id === step.screen_id)) || null;
-  }, [pathway, selectedCandidateId]);
-
-  /** The figure of a pathway: on the page with the selected box marked and the step numbers ready for a preview. */
+  /** The figure of a pathway: on the page, its boxes and step numbers ready to be selected, dragged and previewed. */
   function figureFor(source: Pathway, imageFor: (step: PathwayStep) => string, page?: { highlight: string | null }) {
     const counts = `${plural(source.step_count, 'step', 'steps')} on ${plural(source.screen_count, 'screen', 'screens')}`;
     const parts = [projectName, counts, recording ? formatPathwayTime(recording.duration_ms) : ''].filter(Boolean);
@@ -169,24 +164,16 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   const figure = useMemo(
     () =>
       pathway && pathway.screens.length
-        ? figureFor(pathway, (step) => absoluteApiUrl(step.image_url), { highlight: selectedScreen?.id ?? null })
+        ? figureFor(pathway, (step) => absoluteApiUrl(step.image_url), { highlight: null })
         : null,
-    // figureFor reads only what is listed here
-    [pathway, options, aspect, filename, projectName, recording?.duration_ms, selectedScreen?.id],
+    // figureFor reads only what is listed here; the selection is drawn over the figure (PathwayCanvas)
+    [pathway, options, aspect, filename, projectName, recording?.duration_ms],
   );
   const peek = usePathwayPeek(pathway, figure?.svg);
   // One object per figure: React sets the markup again whenever it gets a new object, even with the same text, and
   // the analysis page renders every second for its clock. That would draw the chart anew each second and take
   // away the step a pointer is resting on.
   const figureMarkup = useMemo(() => (figure ? { __html: figure.svg } : undefined), [figure]);
-
-  /** A click on a screen selects its box for editing; a click anywhere else lets go of it. */
-  function handleFigureClick(event: MouseEvent<HTMLDivElement>) {
-    const group = event.target instanceof Element ? event.target.closest('[data-screen]') : null;
-    const screen = group ? pathway?.screens.find((item) => item.id === group.getAttribute('data-screen')) : undefined;
-    const step = screen ? pathway?.steps.find((item) => item.step_id === screen.image_step_id) : undefined;
-    setSelectedCandidateId(step?.source_candidate_id ?? null);
-  }
 
   const fitScale = figure && areaWidth > 0 ? Math.min(1, areaWidth / figure.width) : 1;
   const scale = view.zoom ?? fitScale;
@@ -299,16 +286,6 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   const barNotes: ReactNode[] = [];
   if (pathwayQuery.isError) barNotes.push('could not load the pathway.');
   else if (!pathway) barNotes.push('loading the pathway…');
-  if (figure && figure.clippedNotes > 0) {
-    barNotes.push(
-      <>
-        {plural(figure.clippedNotes, 'note is', 'notes are')} cut short;{' '}
-        <button className="analysis-task-link subtle" onClick={() => setView((current) => ({ ...current, notes: 'key' }))} type="button">
-          show notes in a key
-        </button>
-      </>,
-    );
-  }
   if (downloadError) barNotes.push(downloadError);
   if (mergeMutation.isError) barNotes.push(`could not merge the screens: ${mergeMutation.error.message}`);
   return (
@@ -330,8 +307,10 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
         <div className="pathway-controls">
           {/* what the figure shows on the left; its size on the page and the download on the right */}
           <div className="pathway-controls-group">
-            <div aria-label="boxes of the pathway" className="pathway-control" role="group">
-              <span className="pathway-control-label">boxes</span>
+            <div aria-label="view of the pathway" className="pathway-control" role="group">
+              <span className="pathway-control-label" title={DETAILS.find(([value]) => value === view.detail)?.[3]}>
+                view
+              </span>
               {DETAILS.map(([value, label, hint]) => (
                 <button
                   aria-pressed={view.detail === value}
@@ -382,6 +361,23 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
                 type="button"
               >
                 title and legend
+              </button>
+            </div>
+            <div aria-label="phases of the walkthrough" className="pathway-control" role="group">
+              <span className="pathway-control-label">phases</span>
+              <button
+                aria-expanded={phases !== null}
+                className={`candidate-filter-tab ${phases !== null ? 'active' : ''}`}
+                data-phases-toggle=""
+                disabled={!pathway}
+                onClick={(event) => {
+                  const button = event.currentTarget.getBoundingClientRect();
+                  setPhases((current) => (current ? null : { list: true, at: { x: button.left, y: button.bottom + 6 } }));
+                }}
+                title="named stretches of steps, such as sign up: drawn over the boxes, and in the export"
+                type="button"
+              >
+                {pathway?.phases?.length ? `${pathway.phases.length} named` : 'none yet'}
               </button>
             </div>
           </div>
@@ -439,32 +435,43 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
             </div>
           </div>
         </div>
-        <p className="pathway-controls-hint">{DETAILS.find(([value]) => value === view.detail)?.[3]}</p>
       </div>
-      {pathway && figure ? (
-        <PathwayBoxEditor
+      {pathway && figure && figureMarkup ? (
+        <PathwayCanvas
+          ariaLabel={`pathway of ${filename}: select a box or a step number to change it`}
+          busy={updating}
           candidates={run.candidates}
-          disabled={updating}
-          onMerge={(sourceId, targetId) => mergeMutation.mutate({ sourceId, targetId })}
-          onSelect={setSelectedCandidateId}
+          markup={figureMarkup}
+          onMerge={async (sourceId, targetId) => (await mergeMutation.mutateAsync({ sourceId, targetId })).changed}
+          onPhaseRequest={setPhases}
+          onRestorePhases={async (boundaries, expected) => {
+            try {
+              await restoreRunPhases(runId, boundaries, expected);
+            } finally {
+              await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['pathway', runId] }),
+                queryClient.invalidateQueries({ queryKey: ['run', runId] }),
+              ]);
+            }
+          }}
+          onSetPhase={async (phase) => {
+            const answer = await setRunPhase(runId, phase);
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: ['pathway', runId] }),
+              queryClient.invalidateQueries({ queryKey: ['run', runId] }),
+              queryClient.invalidateQueries({ queryKey: ['recording', run.summary.recording_id] }),
+            ]);
+            return answer.phases;
+          }}
+          phaseBoundaries={run.phases}
+          phaseRequest={phases}
+          onPointerLeave={peek.onPointerLeave}
+          onPointerOver={peek.onPointerOver}
           onUpdateCandidate={onUpdateCandidate}
           pathway={pathway}
-          selected={selectedScreen}
+          runId={runId}
+          width={Math.round(figure.width * scale)}
         />
-      ) : null}
-      {figure ? (
-        <div className="pathway-scroll">
-          <div
-            aria-label={`pathway of ${filename}; choose a screen above to change it`}
-            className="pathway-figure"
-            // The markup is built by buildPathwayFigure, which escapes every title, note and address it places.
-            dangerouslySetInnerHTML={figureMarkup}
-            onClick={handleFigureClick}
-            onPointerLeave={peek.onPointerLeave}
-            onPointerOver={peek.onPointerOver}
-            style={{ width: `${Math.round(figure.width * scale)}px` }}
-          />
-        </div>
       ) : null}
     </div>
   );

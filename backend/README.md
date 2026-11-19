@@ -80,10 +80,12 @@ Each run stores what it actually used in `analysis_config`: the resolved setting
 ## Exports
 
 An export is a zip with `images/` (one PNG per step), `steps.json` and `steps.csv`. `steps.json` holds the
-project, the recording (with the working copy's `width`, `height` and `fps`), the run (`analysis_engine`,
+project, the recording (with the working copy's `width`, `height` and `fps`), the run (its `number` among the
+runs of the recording, which never changes, the `name` someone gave it if any, `analysis_engine`,
 `engine_version`, the `settings` as chosen and the `resolved_settings` actually used, including what was
 measured), `field_notes` explaining each per-step field for that run's engine, and the steps. Per step:
-time, image path inside the bundle, the reviewer's status, title and notes, `ocr_text`, the score
+time, image path inside the bundle, the reviewer's status, title and notes, `origin` (`detected`, or `manual`
+for a step added by hand, which has no timing or label), `ocr_text`, the score
 breakdown, revisit links and the timing columns `transition_type`, `change_started_ms`, `settled_ms`,
 `time_on_screen_ms` and `grouped_states`. Changed regions are in pixels of the recording for every engine.
 `steps.csv` has the same per-step fields without the nested score breakdown.
@@ -101,6 +103,11 @@ the later one was reached by a change that stays on the screen (`scroll`, `text_
 which leads back to the screen the pop-up opened over. Every candidate of the run takes part in that
 grouping, also rejected ones, because a label describes the change from the detector's previous step.
 `GET /runs/{id}/pathway` returns the same for the accepted steps, and `?detail=steps` joins revisits only.
+`GET /runs/{id}` lists the run's `phases` too, as where each starts (`start_ms`, `name`; an empty name starts a
+stretch outside every phase), so the step review can show and set each step's phase. `PUT /runs/{id}/phases`
+(`name`, `first_step`, `last_step`, optionally `replacing`) answers with every phase after the change, and
+`PUT /runs/{id}/phases/all` puts them all back (`phases`), refusing with 409 when `expected` no longer matches:
+the pathway's undo, which leaves a change someone else made since.
 
 A reviewer can overrule the grouping per step (`PATCH /candidates/{id}`): `screen_link` is `auto`, `new` (a
 screen of its own) or the id of another step of the run that shows the same screen, and `screen_kind` is
@@ -110,7 +117,21 @@ reviewer's choice, a revisit, a pop-up closing, a label that stays on the screen
 `POST /runs/{id}/pathway/merge` takes `source_candidate_id`, `target_candidate_id` and `detail` (`screens`
 by default). It moves every member of the source box to the target together, including rejected members,
 so accepting one later preserves the merge. Both candidates must belong to that run, and the caller must
-be a project owner.
+be a project owner. It answers `{"changed": [...]}`, the steps it linked, so a browser can take the merge back
+step by step (the pathway's undo, which is each browser's own and leaves steps someone else changed since).
+
+Where a box is drawn is the reviewer's say too, on a step (`PATCH /candidates/{id}`): `pathway_row` is `auto`,
+`continue` (on the row of the box it was reached from) or `below` (on a row of its own). The box's first step with
+a say decides, and the pathway gives it as the screen's `row_choice`. It changes the figure only, not the screens
+or the moves.
+
+Phases are named stretches of a run: `PUT /runs/{id}/phases` takes `name`, `first_step` and `last_step` (ids of
+accepted steps) and names that stretch as one phase; an empty name takes it out of every phase, and `replacing`
+(another `first_step` and `last_step`) lets go of the stretch a phase had before. They are stored in `run_phases`
+as where each phase starts in the recording, up to the moment of the step after the last one, so a step added by
+hand in between belongs to the phase. The pathway gives each step its `phase` and lists the `phases` with their
+steps, screens and duration; the export puts `phase` in `steps.csv` and `steps.json` and the list in
+`pathway.json`.
 
 ## Carrying a review over
 
@@ -121,8 +142,9 @@ its comparison shows them (at most 750 ms apart; `buildCandidateComparison` in `
 and leaves steps added by hand out of the pairs. Each step can be in one pair.
 
 For every pair, only what is still empty on the target is filled in: the decision of a pending step, the title,
-the notes, the pop-up choice (`screen_kind`) and the screen choice (`screen_link`, `new` or mapped through the
-pairs). Steps of the source run that were added by hand and are not paired are added again at the same moment.
+the notes, the pop-up choice (`screen_kind`), the screen choice (`screen_link`, `new` or mapped through the
+pairs) and the row choice (`pathway_row`). Steps of the source run that were added by hand and are not paired are
+added again at the same moment. The phases come along when the target has none of its own (`phases`: true).
 The answer counts what was filled in (`decisions`, `titles`, `notes`, `screen_choices`), the steps added again
 (`added_manual`), and `unmatched`: reviewed steps of the source run without a match, whose review stays there.
 The caller must be an owner of both runs' project.

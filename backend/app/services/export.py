@@ -3,12 +3,13 @@ from __future__ import annotations
 import csv
 import json
 import shutil
+from collections.abc import Sequence
 from pathlib import Path
 
 from ..models import ExportMode
 from ..storage import absolute_data_path, asset_url, relative_data_path, run_exports_dir
 from ..utils import utc_now
-from .pathway import build_pathway
+from .pathway import build_pathway, phase_at
 from .video import export_filename
 
 
@@ -69,6 +70,11 @@ _COMMON_NOTES = {
     "timestamp_ms": "time of the screenshot, in ms from the start of the recording",
     "image_path": "the screenshot, inside this bundle",
     "status, title, notes": "the reviewer's decision and annotations",
+    "phase": "the phase of the walkthrough the step is in, as the reviewer named it in the pathway; empty outside every phase",
+    "origin": (
+        "detected: found by the analysis; manual: added by hand by the reviewer, so it has no change, "
+        "timing or label"
+    ),
     "ocr_text": "text read from the screenshot by OCR; null when OCR was off or found no text",
     "score_breakdown.changed_regions": (
         "up to 6 changed areas as boxes (x, y, width, height) in pixels of the recording "
@@ -128,6 +134,11 @@ def _timing_columns(row: dict) -> dict:
     }
 
 
+def _origin(candidate: dict) -> str:
+    """Whether the analysis found the step or the reviewer added it by hand."""
+    return "manual" if candidate.get("candidate_origin") == "manual" else "detected"
+
+
 def build_accepted_steps(recording_slug: str, candidates: list[dict]) -> list[dict]:
     accepted = [candidate for candidate in candidates if candidate["status"] == "accepted"]
     accepted_steps: list[dict] = []
@@ -153,6 +164,7 @@ def build_accepted_steps(recording_slug: str, candidates: list[dict]) -> list[di
             "image_path": candidate["image_path"],
             "image_url": asset_url(candidate["image_path"]),
             "status": candidate["status"],
+            "origin": _origin(candidate),
             "title": title,
             "notes": candidate.get("notes"),
             "scene_score": candidate["scene_score"],
@@ -185,6 +197,7 @@ def build_all_candidate_rows(recording_slug: str, candidates: list[dict]) -> lis
                 "image_path": candidate["image_path"],
                 "image_url": asset_url(candidate["image_path"]),
                 "status": candidate["status"],
+                "origin": _origin(candidate),
                 "title": (candidate.get("title") or "").strip() or f"Candidate {row_index}",
                 "notes": candidate.get("notes"),
                 "scene_score": candidate["scene_score"],
@@ -222,6 +235,7 @@ def create_export_bundle(
     run: dict,
     candidates: list[dict],
     mode: ExportMode = "accepted",
+    phases: Sequence[tuple[int, str]] = (),
 ) -> tuple[str, str, int]:
     export_rows = build_export_rows(recording["slug"], candidates, mode)
 
@@ -243,7 +257,12 @@ def create_export_bundle(
         shutil.copy2(source_path, target_path)
         exported = {key: value for key, value in row.items() if key != "image_url"}  # server-only URL
         exported["score_breakdown"] = _regions_in_recording_pixels(row.get("score_breakdown"), run, recording)
-        exported_manifest_rows.append({**exported, "image_path": f"images/{row['export_filename']}", **_timing_columns(row)})
+        exported_manifest_rows.append({
+            **exported,
+            "image_path": f"images/{row['export_filename']}",
+            "phase": phase_at(phases, row["timestamp_ms"]),
+            **_timing_columns(row),
+        })
 
     manifest = {
         "bundle_id": bundle_id,
@@ -265,6 +284,8 @@ def create_export_bundle(
         },
         "run": {
             "id": run["id"],
+            "number": run.get("run_number"),
+            "name": run.get("name"),
             "analysis_engine": run.get("analysis_engine"),
             "engine_version": (_json_value(run.get("analysis_config")) or {}).get("engine_version"),
             "settings": _run_settings(run),
@@ -287,6 +308,8 @@ def create_export_bundle(
                 "timestamp_tc",
                 "image_path",
                 "status",
+                "origin",
+                "phase",
                 "title",
                 "notes",
                 "scene_score",
@@ -308,7 +331,7 @@ def create_export_bundle(
         writer.writerows(exported_manifest_rows)
 
     # The same steps as a pathway: the screens they show and the moves between them.
-    pathway = build_pathway(export_rows, candidates)
+    pathway = build_pathway(export_rows, candidates, phases=phases)
     for step in pathway["steps"]:
         step["image_path"] = f"images/{step.pop('export_filename')}"
     pathway = {"bundle_id": bundle_id, "created_at": manifest["created_at"], "steps_file": "steps.json", **pathway}

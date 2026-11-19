@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
 import { formatElapsedDuration } from '../../../lib/utils';
-import { formatPercent, formatRunShortTimestamp } from '../../../lib/formatters';
+import { EditableName } from '../../../components/EditableName';
+import { formatLastChange, formatPercent, formatRunNumber, formatRunShortTimestamp, formatRunTitle } from '../../../lib/formatters';
 import { formatRecordingTypeLabel, getEffectiveStableValues } from '../../../lib/stableSettings';
 import type { AnalysisMetadata, RunSettings, RunSummary } from '../../../types';
 
@@ -45,6 +46,8 @@ export interface AnalysisTasksPanelProps {
   groupedTaskItems: AnalysisTaskGroup[];
   onAbortRun: (runId: string) => void;
   onDeleteRun: (runId: string) => void;
+  /** Name a run ('' takes the name away); `previousName` is the name shown when the rename began ('' for none). */
+  onRenameRun: (runId: string, name: string, previousName: string) => Promise<void>;
   onDeleteSelectedTasks: () => void;
   onEnterTaskSelectMode: () => void;
   onExitTaskSelectMode: () => void;
@@ -77,6 +80,7 @@ export function AnalysisTasksPanel({
   groupedTaskItems,
   onAbortRun,
   onDeleteRun,
+  onRenameRun,
   onDeleteSelectedTasks,
   onEnterTaskSelectMode,
   onExitTaskSelectMode,
@@ -98,6 +102,8 @@ export function AnalysisTasksPanel({
   taskSelectMode,
 }: AnalysisTasksPanelProps) {
   const [collapsedRecordingIds, setCollapsedRecordingIds] = useState<Set<string>>(loadCollapsedGroups);
+  // which run's name to edit, from its rename link; the nonce starts the edit again on a second click
+  const [renameRequest, setRenameRequest] = useState<{ id: string; nonce: number } | null>(null);
   const knownActiveRunIds = useRef<Set<string> | null>(null);
 
   function setGroupCollapsed(recordingId: string, collapsed: boolean) {
@@ -135,6 +141,7 @@ export function AnalysisTasksPanel({
     const run = isSelected && selectedRunSummary?.id === item.run.id ? selectedRunSummary : item.run;
     const busy = busyRunIds.includes(run.id);
     const runNumber = runNumberById.get(run.id) ?? 1;
+    const numberLabel = formatRunNumber(run, runNumber);
     const isExpanded = expandedTaskRunId === run.id;
     const isMarked = selectedTaskRunIds.includes(run.id);
     const isError = run.status === 'failed';
@@ -222,20 +229,29 @@ export function AnalysisTasksPanel({
               </label>
             )}
             <div className="analysis-task-title-wrap">
-              <button
-                className={`analysis-task-title ${isError ? 'error' : ''}`}
-                onClick={() => {
+              <EditableName
+                containerClassName="analysis-task-name"
+                disabled={busy}
+                displayButtonClassName={`analysis-task-title ${isError ? 'error' : ''}`}
+                editRequestToken={renameRequest?.id === run.id ? renameRequest.nonce : null}
+                onDisplayClick={() => {
                   if (isDone && hasCandidates) {
                     onReviewTaskOutputs(item.recording.id, run.id);
                   } else {
                     onSelectRun(item.recording.id, run.id, 'analysis-run-detail');
                   }
                 }}
-                type="button"
-              >
-                {`run #${runNumber}`}
-              </button>
-              <span className="analysis-task-subtitle">{runTimestampLabel}</span>
+                // Typing the number back (or the name away) takes the name away: the run is called by its number again.
+                onSave={(nextValue, previousValue) =>
+                  onRenameRun(run.id, nextValue === numberLabel ? '' : nextValue, previousValue === numberLabel ? '' : previousValue)
+                }
+                renameLabel={`rename ${numberLabel}`}
+                showRenameButton={false}
+                textClassName="analysis-task-name-text"
+                value={formatRunTitle(run, runNumber)}
+              />
+              {/* A named run keeps its number in sight: it is how the run is told apart in comparisons and logs. */}
+              <span className="analysis-task-subtitle">{run.name ? `${numberLabel}, ${runTimestampLabel}` : runTimestampLabel}</span>
             </div>
           </div>
           <div className="analysis-task-meta">
@@ -295,6 +311,19 @@ export function AnalysisTasksPanel({
                 <div className="analysis-task-bar-fill" style={{ width: isDone ? '100%' : formatPercent(run.progress) }} />
               </div>
             )}
+            <div className="analysis-task-changed">
+              {run.modified_at ? (
+                <span title={formatRunShortTimestamp(run.modified_at)}>{formatLastChange(run.modified_at, run.modified_by_name)}</span>
+              ) : null}
+              <button
+                className="analysis-task-link subtle"
+                disabled={busy}
+                onClick={() => setRenameRequest((current) => ({ id: run.id, nonce: (current?.nonce ?? 0) + 1 }))}
+                type="button"
+              >
+                rename
+              </button>
+            </div>
             <div className="analysis-task-settings">
               {taskSettings.map((setting) => (
                 <div className={`analysis-task-setting ${setting.key === 'mode' ? 'mode' : ''}`} key={setting.key}>

@@ -71,3 +71,21 @@ def test_hybrid_regions_are_exported_in_recording_pixels() -> None:
     assert _regions_in_recording_pixels(breakdown, stable, {'width': 1920, 'height': 1080}) is breakdown
     assert _regions_in_recording_pixels(breakdown, run, {'width': 640, 'height': 360}) is breakdown
 
+
+
+def test_export_rows_say_whether_a_step_was_added_by_hand() -> None:
+    from app.services.export import build_all_candidate_rows
+
+    def candidate(cid: str, index: int, **extra) -> dict:
+        return {
+            'id': cid, 'status': 'accepted', 'timestamp_ms': index * 1000, 'timestamp_tc': f'00:00:0{index}.000',
+            'image_path': f'projects/p/frames/{cid}.png', 'scene_score': 0.5, 'detector_index': index, **extra,
+        }
+
+    candidates = [
+        candidate('found', 1, candidate_origin='detected'),
+        candidate('added', 2, candidate_origin='manual', score_breakdown=None),
+        candidate('older', 3),  # rows from before the column existed were all found by the analysis
+    ]
+    assert [step['origin'] for step in build_accepted_steps('demo', candidates)] == ['detected', 'manual', 'detected']
+    assert [row['origin'] for row in build_all_candidate_rows('demo', candidates)] == ['detected', 'manual', 'detected']

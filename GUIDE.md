@@ -446,8 +446,9 @@ steps, and the screenshots of the steps only one of the runs found (or found at 
 the newest run and the earlier one with the most accepted steps; pick other runs with the two lists at the top.
 
 To go on with the newer run without reviewing it from scratch, press **review run #2 with the review of
-run #1** (with your run numbers) at the bottom of the window. Your decisions, titles, notes and screen choices go
-to the steps both runs found, and steps you added by hand are added again at the same moment. Only what is still
+run #1** (with your run numbers) at the bottom of the window. Your decisions, titles, notes and screen and row
+choices go to the steps both runs found, and steps you added by hand are added again at the same moment. The phases
+come along too, when the newer run has none yet. Only what is still
 empty in the newer run is filled in, so nothing you already did there is lost; the review of steps only the
 earlier run found stays with that run. **review run #2 as it is** and **back to run #1** leave both runs as they
 are.
@@ -479,7 +480,7 @@ How to read it:
 
 Which steps count as the same screen is decided automatically, from two things. A step that shows an earlier
 screen again (a revisit) always shares its box. A step reached by scrolling, typing, swiping to the next
-item of a feed or a small change stays in the box of the step before it. Choose **boxes: steps** to give
+item of a feed or a small change stays in the box of the step before it. Choose **view: steps** to give
 every step its own box, so that only revisits share one. A step you added by hand always has its own box.
 When a pop-up closes (**modal closed**), the step after it goes back into the box of the screen under the
 pop-up, also when something on that screen changed in the meantime, such as a switch that is now on.
@@ -505,30 +506,61 @@ choice (under **annotate** on a card, or in the **label, screen** column of the 
 Your choice comes before everything automatic and applies to both kinds of boxes. A card shows it as
 `screen: same as 3`; switch to **pathway** to see the result.
 
-You can make the same corrections in the pathway itself. Click a screen in the chart (or choose it under
-**screen** above the chart) and the strip above the chart shows that box:
+You can make the same corrections in the pathway itself, by pointing at what you want to change. What you
+select is what changes:
 
-- **title** renames the box. A box is named after its first step that has a title, so this is that step's
-  title, and the step list shows it too;
-- **pop-up** marks the box as a pop-up or as an ordinary screen;
-- **steps and where they belong** lists the steps in the box, each with its **screen** choice, where you can
-  move one step to another box or give it a box of its own. Steps that follow a moved step by scrolling or
-  typing move with it;
-- **merge into** moves all the steps of the box together into another one.
+- **click a box** to select it, with **shift** for several boxes;
+- **click the number under a box** to select that step. A number such as "4–5" stands for several steps in a
+  row: pick one of them in the toolbox;
+- **right-click** a box or a number for every action as a menu; with the keyboard, **Tab** goes from box to box,
+  **Enter** selects one and the menu key opens its actions.
 
-Which one to use depends on what is wrong. When one step is in the wrong box, move that step with its own
-choice, **the same screen as**. When two boxes show one screen, move one box into the other with **merge
-into**. For a box with a single step, both do the same. In the pathway, steps are numbered as in `steps.csv`
-(the accepted steps only), and both lists say which box each step is in: **merge into** offers the boxes as
-"Screen 4 (step 6)", and **the same screen as** shows "in Screen 4" under each step.
+A small toolbox opens beside what you selected. For a box: its **title** (a box is named after its first step
+that has a title, so this is that step's title, and the step list shows it too), **pop-up**, **stack onto…**
+another box, and **phase…**. For a step: **own screen**, **put it on…** another box, and **pop-up**. Under
+**⋯** (and in the right-click menu) are the rarer ones: **unstack**, which gives each visit of a box a screen of
+its own, and **row**, which says where the box goes in the figure: **next to** the screen it was reached from, or
+**on a row below**. Without a say, the first screen reached from a screen goes next to it and the others go
+below; use it to keep the main way through on one line and put detours underneath. The screens and the moves stay
+the same.
+
+The two most common corrections can also be dragged:
+
+- **drag a box onto another box** to stack it there: all its steps move together, for two boxes that show one
+  screen;
+- **drag a step number onto a box** to put that step there, or **off the boxes** to give it a screen of its own,
+  for one step in the wrong box. Steps that follow it by scrolling or typing move with it.
+
+A dotted outline shows where a drop would go, and the line above the chart says what it would do. Every change can
+be taken back with **⌘Z** (Ctrl+Z on Windows) or **undo** on that line. The undo is your own: in a shared account,
+each browser takes back only what it did, and a step someone else changed since stays as they left it.
 
 Everything you change here is stored on the steps, exactly as if you had chosen it in the step list.
+
+**Phases** name the parts of a walkthrough, such as "sign up", "verify identity" and "first payment". Select the
+boxes or the step a phase starts with and choose **phase…**, or click **phases** above the chart. A small panel
+opens beside it with the phases named so far: **add a phase** asks for a name and the steps it runs from and to,
+and clicking a phase (in that panel, or its bracket in the chart) lets you change or remove it. Phase changes are
+taken back with **⌘Z** like the others, unless someone else has changed the phases since. In the step list, every accepted step has a **phase** choice
+too (under **annotate** on a card, or in the **label, screen** column of the list): one of the phases named so
+far, a new one, or none. A step can be in one phase at most: a phase that takes steps from another says so before
+you add it. The figure draws each phase as a bracket over the screens it reaches first, with its name, how many
+steps it took on how many screens, and, with **times** on, how long. A phase that goes on in another row is left
+open where it breaks and says "continued" where it picks up. The export gives every step its `phase`, in
+`steps.csv` and `steps.json`, and `pathway.json` lists the phases with their steps, screens and duration, so a
+sentence such as "signing up took 14 steps on 9 screens" can be counted and checked. A phase runs from the moment
+of its first step up to the step after its last, so a step you add by hand in between belongs to it.
 
 | to | do this |
 | --- | --- |
 | see another step of a box | rest the pointer on its number under the box |
-| give every step its own box | **boxes: steps** (the default, **screens**, groups them) |
-| move the notes | **notes: under screens** (cut after four lines), **in a key** below the chart (in full), or **off** |
+| give every step its own box | **view: steps** (the default, **screens**, groups them) |
+| stack two boxes that show one screen | drag one box onto the other, or **stack onto…** |
+| move one step to another box | drag its number onto that box, or **put it on…** |
+| take a change back | **⌘Z** (Ctrl+Z), or **undo** above the chart |
+| keep the main way through on one row | **row** for a box (under **⋯**): **next to** the screen before it, or **on a row below** |
+| name the parts of the walkthrough | select boxes and choose **phase…**, or **phases** above the chart |
+| move the notes | **notes: under screens**, **in a key** below the chart, or **off** |
 | leave out the times, or the title and legend | **show: times** and **title and legend** |
 | change the size on the page | the slider; **fit** fills the width of the window |
 | save the chart | **download: svg** or **png** |
@@ -552,10 +584,19 @@ own too, which you can move or resize in a drawing program.
 
 Every run is listed under **tasks** with its number of steps. Runs of the same recording are grouped; click
 the arrow next to a recording's name to fold its runs away or show them again. **details** shows the settings
-a run used, **review outputs** opens it, **compare** sets two runs of a recording side by side (see
-[Comparing runs](#comparing-runs)), and **select** lets you delete or export several runs at once.
+a run used and who changed it last and when, **review outputs** opens it, **compare** sets two runs of a
+recording side by side (see [Comparing runs](#comparing-runs)), and **select** lets you delete or export
+several runs at once.
 
-A run you opened shows its number and when it finished at the top. **view logs**, at the right, lists what the
+Each run of a recording gets a number, run #1, run #2 and so on, which it keeps: deleting a run does not
+renumber the others, and a new run never takes the number of a deleted one. **rename**, under **details**,
+gives a run a name, such as "second try, phone settings". The number stays under the name, and it is the
+number that the comparison and the export use (`number` and `name` under `run` in `steps.json`). To take the
+name away, rename the run back to its number, such as `run #2`. The project list says, for each project, who
+changed something in it last and when; viewing, exporting and saving settings for yourself do not count as
+changes.
+
+A run you opened shows its name, its number and when it finished at the top. **view logs**, at the right, lists what the
 analysis did, step by step, which helps when a run failed or took longer than expected.
 
 ## 8. Exports
@@ -570,8 +611,9 @@ Stepthrough keeps only the latest of each task: export again whenever you need i
 - `pathway.json`: the same steps as a pathway: which screen each step is on, the visits to each screen, and
   the moves between screens with the steps they lead to.
 
-For each step, the export has its time, the screenshot's file name, its status, title and notes, and its label
-(`transition_type`). It also has when the change started (`change_started_ms`), when the screen came to rest
+For each step, the export has its time, the screenshot's file name, its status, title and notes, whether
+Stepthrough found it or you added it by hand (`origin`: `detected` or `manual`), the phase you put it in
+(`phase`), and its label (`transition_type`). It also has when the change started (`change_started_ms`), when the screen came to rest
 (`settled_ms`), how long it stayed on screen (`time_on_screen_ms`), how many typing states were grouped
 together (`grouped_states`), links to earlier visits of the same screen, the areas that changed and, if text
 recognition was on, the text in the screenshot (`ocr_text`).
@@ -674,7 +716,9 @@ section could say, for example:
 > typing were grouped into single steps. Detected steps were reviewed by the researcher; N of M were
 > accepted and K added manually.
 
-Copy the **preset text** of your settings into an appendix, so that others can repeat the analysis. Use the
+The numbers for such a sentence are in the export: count the rows of `steps.csv` from **export all** by
+`status`, and the rows whose `origin` is `manual` for the steps you added. Copy the **preset text** of your
+settings into an appendix, so that others can repeat the analysis. Use the
 same settings for all recordings you compare, and report the steps you added and rejected by hand. Name the
 version of Stepthrough as well: **about**, at the bottom right, shows it with the commit it was built from, and
 the DOI to cite.

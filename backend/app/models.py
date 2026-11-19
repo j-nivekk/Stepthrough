@@ -198,6 +198,10 @@ class ProjectResponse(BaseModel):
     recording_count: int = 0
     run_count: int = 0
     last_activity_at: str
+    # When someone last changed something in it, and who (their display name; none for changes from before this was
+    # recorded, or in the app without logins).
+    modified_at: str
+    modified_by_name: str | None = None
 
 
 class HybridAdvancedSettings(BaseModel):
@@ -301,6 +305,13 @@ class RecordingImportResponse(BaseModel):
     created_at: str
 
 
+class RunUpdate(BaseModel):
+    # Empty takes the name away, so the run is called by its number again.
+    name: str = Field(max_length=120)
+    # The name the browser showed ("" for none), to notice a rename made in another browser meanwhile.
+    previous_name: str | None = Field(default=None, max_length=120)
+
+
 class RecordingUpdate(BaseModel):
     filename: str = Field(min_length=1, max_length=240)
     previous_filename: str | None = Field(default=None, max_length=240)
@@ -313,6 +324,9 @@ class ExportRequest(BaseModel):
 class DetectionRunSummary(BaseModel):
     id: str
     recording_id: str
+    # Its number among the runs of its recording, which stays when it is renamed or another run is deleted.
+    run_number: int | None = None
+    name: str | None = None
     status: RunStatus
     phase: RunPhase
     analysis_engine: AnalysisEngine = "scene_v1"
@@ -335,6 +349,9 @@ class DetectionRunSummary(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     updated_at: str
+    # When someone last changed it, and who, as for a project; the analysis at work changes `updated_at` only.
+    modified_at: str | None = None
+    modified_by_name: str | None = None
     export_bundle_id: str | None = None
     is_abortable: bool
     is_deletable: bool
@@ -407,6 +424,8 @@ class CandidateFrameResponse(BaseModel):
     # The reviewer's say for the pathway; None leaves it to the automatic grouping.
     screen_link: str | None = None  # "new", or the id of another step that shows the same screen
     screen_kind: Literal["screen", "popup"] | None = None
+    # Where the step's box goes in the pathway figure: None (automatic), "continue" or "below" (services/pathway.py).
+    pathway_row: Literal["continue", "below"] | None = None
     created_at: str
     updated_at: str
 
@@ -445,6 +464,7 @@ class PathwayStepResponse(BaseModel):
     grouped_by: str | None = None
     screen_choice: Literal["automatic", "new_screen", "same_screen"] = "automatic"
     kind_choice: Literal["automatic", "screen", "popup"] = "automatic"
+    phase: str | None = None
     source_candidate_id: str
 
 
@@ -465,6 +485,7 @@ class PathwayScreenResponse(BaseModel):
     image_step_id: str
     visits: list[PathwayVisitResponse]
     time_on_screen_ms: int | None = None
+    row_choice: Literal["automatic", "continue", "below"] = "automatic"
 
 
 class PathwayPassResponse(BaseModel):
@@ -482,6 +503,20 @@ class PathwayTransitionResponse(BaseModel):
     passes: list[PathwayPassResponse]
 
 
+class PathwayPhaseResponse(BaseModel):
+    name: str
+    first_step_id: str
+    last_step_id: str
+    first_step_index: int
+    last_step_index: int
+    step_count: int
+    screen_count: int
+    screen_ids: list[str]
+    start_ms: int
+    end_ms: int | None = None
+    duration_ms: int | None = None
+
+
 class PathwayResponse(BaseModel):
     """The accepted steps of a run as screens and the moves between them; see services/pathway.py."""
 
@@ -492,6 +527,7 @@ class PathwayResponse(BaseModel):
     steps: list[PathwayStepResponse]
     screens: list[PathwayScreenResponse]
     transitions: list[PathwayTransitionResponse]
+    phases: list[PathwayPhaseResponse] = []
     field_notes: dict[str, str]
 
 
@@ -515,12 +551,21 @@ class RunEventResponse(BaseModel):
     created_at: str
 
 
+class PhaseBoundary(BaseModel):
+    """Where a phase of the walkthrough starts in the recording; an empty name starts a stretch outside every phase."""
+
+    start_ms: int = Field(ge=0)
+    name: str = Field(max_length=80)
+
+
 class DetectionRunDetail(BaseModel):
     summary: DetectionRunSummary
     candidates: list[CandidateFrameResponse]
     accepted_steps: list[AcceptedStepResponse]
     events: list[RunEventResponse]
     export_bundle: ExportBundleResponse | None = None
+    # so that the step review can say and change which phase each step is in
+    phases: list[PhaseBoundary] = []
 
 
 class RecordingDetailResponse(BaseModel):
@@ -555,6 +600,29 @@ class CandidateUpdate(BaseModel):
     # Which screen the step shows, for the pathway: "auto", "new", or the id of another step of the run.
     screen_link: str | None = Field(default=None, min_length=1, max_length=64)
     screen_kind: Literal["auto", "screen", "popup"] | None = None
+    # Where the box goes in the pathway figure: "auto", on the row of the box it was reached from, or below it.
+    pathway_row: Literal["auto", "continue", "below"] | None = None
+
+
+class PhaseSteps(BaseModel):
+    first_step: str = Field(min_length=1, max_length=64)
+    last_step: str = Field(min_length=1, max_length=64)
+
+
+class PhaseUpdate(PhaseSteps):
+    """Name the steps from ``first_step`` to ``last_step`` (ids of steps of the run) as one phase; an empty name takes
+    them out of every phase. ``replacing`` is the stretch the phase had before, when it is being changed."""
+
+    name: str = Field(max_length=80)
+    replacing: PhaseSteps | None = None
+
+
+class PhaseBoundariesUpdate(BaseModel):
+    """Every phase of a run at once, as where each starts: for taking a change back (a browser's undo). With
+    ``expected``, only if the phases are still as that browser left them."""
+
+    phases: list[PhaseBoundary] = Field(max_length=2_000)
+    expected: list[PhaseBoundary] | None = Field(default=None, max_length=2_000)
 
 
 class PathwayFigureDownload(BaseModel):
@@ -596,6 +664,8 @@ class ReviewCarryOverResult(BaseModel):
     screen_choices: int
     added_manual: int
     unmatched: int
+    # whether the phases of the earlier run were brought over (only to a run that has none)
+    phases: bool = False
 
 
 class ManualCandidateCreate(BaseModel):

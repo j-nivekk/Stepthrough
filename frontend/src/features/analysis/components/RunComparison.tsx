@@ -50,10 +50,10 @@ export function RunComparison({
     () => runs.filter((run) => run.status === 'completed').sort((a, b) => a.created_at.localeCompare(b.created_at)),
     [runs],
   );
-  // run numbers as in the tasks list: in the order the runs were made
+  // run numbers as in the tasks list: stored with each run, in the order the runs were made
   const numberOf = useMemo(() => {
     const ordered = [...runs].sort((a, b) => a.created_at.localeCompare(b.created_at));
-    return new Map(ordered.map((run, index) => [run.id, index + 1]));
+    return new Map(ordered.map((run, index) => [run.id, run.run_number ?? index + 1]));
   }, [runs]);
   // a no-break space, so that a run's name never wraps apart
   const name = (runId: string) => `run\u00a0#${numberOf.get(runId) ?? '?'}`;
@@ -81,7 +81,8 @@ export function RunComparison({
     >
       {finished.map((run) => (
         <option key={run.id} value={run.id}>
-          {name(run.id)} · {formatRunShortTimestamp(run.started_at ?? run.created_at)} · {run.accepted_count} accepted
+          {name(run.id)}
+          {run.name ? ` “${run.name}”` : ''}, {formatRunShortTimestamp(run.started_at ?? run.created_at)}, {run.accepted_count} accepted
         </option>
       ))}
     </select>

@@ -3,9 +3,13 @@
  * SVG for it. The same code draws the figure on the page and in the downloaded file.
  *
  * Layout: a screen sits one column to the right of the screen it was first reached from. The first screen
- * reached from somewhere continues that row; further ones start a new row below (a branch). A row that
- * reaches the last column continues on a new row at the left (a wrap). Moves along those links are drawn
- * between the sides of the screenshots; every other move runs over the top of the row.
+ * reached from somewhere continues that row; further ones start a new row below (a branch). The reviewer can say
+ * otherwise for a box (its row choice): continue the row, or start a row below. A row that reaches the last column
+ * continues on a new row at the left (a wrap). Moves along those links are drawn between the sides of the
+ * screenshots; every other move runs over the top of the row.
+ *
+ * Phases (named stretches of steps) are drawn as a bracket over the boxes they reach first, with the phase's
+ * name and how many steps and screens it takes.
  */
 import type { Pathway, PathwayScreen, PathwayStep, PathwayTransition } from '../types';
 import { BADGE_HEIGHT, BADGE_WIDTH, buildPathwayBadge } from './pathwayBadge';
@@ -51,8 +55,6 @@ export interface PathwayFigure {
   svg: string;
   width: number;
   height: number;
-  /** Notes that did not fit under their screen and were cut. */
-  clippedNotes: number;
 }
 
 const FONT = "Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif";
@@ -67,8 +69,9 @@ const FRAME_SIZE = 220;
 const FRAME_MIN_WIDTH = 120;
 /** Columns are added until the figure would be wider than this. */
 const TARGET_WIDTH = 1700;
-const NOTE_MAX_LINES = 4;
 const TRACK = 9;
+/** Line height of a phase's name and counts above its bracket. */
+const PHASE_LINE = 13;
 const STACK = 5;
 const MAX_PILLS = 4;
 
@@ -147,16 +150,6 @@ function wrapText(content: string, width: number, size: number, bold: boolean, m
   return lines;
 }
 
-/** At most `max` lines; the last one ends in an ellipsis when lines were dropped. */
-function clampLines(lines: string[], max: number, width: number, size: number, bold: boolean, measure: TextMeasurer): { lines: string[]; clipped: boolean } {
-  if (lines.length <= max) return { lines, clipped: false };
-  const kept = lines.slice(0, max);
-  let last = kept[max - 1] ?? '';
-  while (last && measure(`${last} …`, size, bold) > width) last = last.replace(/\s*\S+$/, '');
-  kept[max - 1] = `${last} …`.trim();
-  return { lines: kept, clipped: true };
-}
-
 const pillWidth = (label: string): number => (label.length === 1 ? 15 : label.length * 6.2 + 10);
 
 function pill(x: number, cy: number, label: string): string {
@@ -198,6 +191,14 @@ function placeScreens(screens: PathwayScreen[], maxCols: number): { placed: Map<
     list.push(screen);
     kids.set(screen.reached_from, list);
   }
+  // A box the reviewer put on the row comes first, one they put below comes last; the rest keep their order.
+  const rank = (screen: PathwayScreen): number => (screen.row_choice === 'continue' ? 0 : screen.row_choice === 'below' ? 2 : 1);
+  for (const list of kids.values()) list.sort((a, b) => rank(a) - rank(b));
+  /** The box that continues the row of `parent`, if any. */
+  const onRow = (parent: PathwayScreen): PathwayScreen | undefined => {
+    const first = kids.get(parent.id)?.[0];
+    return first && first.row_choice !== 'below' ? first : undefined;
+  };
   const placed = new Map<string, Placed>();
   let nextRow = 0;
   let cols = 1;
@@ -212,20 +213,21 @@ function placeScreens(screens: PathwayScreen[], maxCols: number): { placed: Map<
       cols = Math.max(cols, col + 1);
       isWrapped = false;
       inRow.push(screen);
-      const first: PathwayScreen | undefined = kids.get(screen.id)?.[0];
-      if (!first) break;
+      const next = onRow(screen);
+      if (!next) break;
       if (col + 1 >= maxCols) {
-        wraps.push(first);
+        wraps.push(next);
         break;
       }
-      screen = first;
+      screen = next;
       col += 1;
     }
     // Branches of this row come directly below it, before the row it wraps onto.
     for (const parent of inRow) {
       const at = placed.get(parent.id);
       if (!at) continue;
-      for (const child of (kids.get(parent.id) ?? []).slice(1)) {
+      const next = onRow(parent);
+      for (const child of (kids.get(parent.id) ?? []).filter((kid) => kid !== next)) {
         if (at.col + 1 >= maxCols) {
           wraps.push(child);
         } else {
@@ -266,7 +268,6 @@ interface Card {
   /** Height of everything from the top of the screenshot down. */
   below: number;
   stack: number;
-  clipped: number;
 }
 
 function buildCard(
@@ -283,9 +284,9 @@ function buildCard(
   const stack = screen.visits.some((visit) => visit.step_ids.length > 1) ? STACK : 0;
   const many = screenSteps.length > 1;
   let svg = '';
-  let clipped = 0;
 
-  const titleLines = clampLines(wrapText(screen.title, width, 12, true, measure), 2, width, 12, true, measure).lines;
+  // The title and the notes are shown in full, however long: the row grows to fit them (see buildPathwayFigure).
+  const titleLines = wrapText(screen.title, width, 12, true, measure);
   titleLines.forEach((line, index) => {
     svg += text(0, -9 - (titleLines.length - 1 - index) * 15, line, { size: 12, bold: true, halo: true });
   });
@@ -344,9 +345,7 @@ function buildCard(
       const note = (step.notes ?? '').trim();
       if (!note) continue;
       const number = String(step.step_index);
-      const wrapped = wrapText(many ? `${number} ${note}` : note, width, 10.5, false, measure);
-      const { lines, clipped: cut } = clampLines(wrapped, NOTE_MAX_LINES, width, 10.5, false, measure);
-      if (cut) clipped += 1;
+      const lines = wrapText(many ? `${number} ${note}` : note, width, 10.5, false, measure);
       y += 4;
       lines.forEach((line, index) => {
         y += 13.5;
@@ -358,7 +357,7 @@ function buildCard(
       });
     }
   }
-  return { svg, above, below: y + 4, stack, clipped };
+  return { svg, above, below: y + 4, stack };
 }
 
 // ── the figure ─────────────────────────────────────────────────────────────────────────────────
@@ -481,13 +480,79 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   const headerBottom = subtitleY + Math.max(0, subtitleLines.length - 1) * 14;
   const inRow = (row: number): Card[] => [...placed.values()].filter((item) => item.row === row).map((item) => cards.get(item.screen.id)).filter((card): card is Card => Boolean(card));
 
+  // Phases: each box goes with the phase of the step it was first reached with, and the boxes of one phase that sit
+  // next to each other in a row get one bracket. The first bracket of a phase says how much it takes.
+  const phases = pathway.phases ?? [];
+  const phaseOf = new Map<string, number>();
+  for (const screen of pathway.screens) {
+    const first = steps.get(screen.visits[0]?.step_ids[0] ?? '');
+    const index = first ? phases.findIndex((phase) => first.step_index >= phase.first_step_index && first.step_index <= phase.last_step_index) : -1;
+    if (index >= 0) phaseOf.set(screen.id, index);
+  }
+  interface Bracket {
+    phase: number;
+    row: number;
+    first: Placed;
+    last: Placed;
+    lines: Array<{ text: string; bold: boolean }>;
+    /** The phase began before this bracket (on an earlier row, or before a box of another phase). */
+    continues: boolean;
+    /** The phase goes on after this bracket. */
+    goesOn: boolean;
+  }
+  const brackets: Bracket[] = [];
+  const labelled = new Set<number>();
+  for (let row = 0; row < rows; row += 1) {
+    const items = [...placed.values()].filter((item) => item.row === row).sort((a, b) => a.col - b.col);
+    let open: { phase: number; first: Placed; last: Placed } | null = null;
+    const close = () => {
+      if (!open) return;
+      const phase = phases[open.phase];
+      if (!phase) return;
+      const span = (open.last.col - open.first.col) * pitch + width + (cards.get(open.last.screen.id)?.stack ?? 0);
+      const continues = labelled.has(open.phase);
+      // A phase that goes on from an earlier bracket says so in grey, without its counts again.
+      const lines = continues
+        ? wrapText(`${phase.name}, continued`, span, 10, false, measure).map((text) => ({ text, bold: false }))
+        : wrapText(phase.name, span, 10.5, true, measure).map((text) => ({ text, bold: true }));
+      if (!continues) {
+        labelled.add(open.phase);
+        const counts =
+          `${phase.step_count} ${phase.step_count === 1 ? 'step' : 'steps'} on ` +
+          `${phase.screen_count} ${phase.screen_count === 1 ? 'screen' : 'screens'}` +
+          (options.times && phase.duration_ms != null ? `, ${formatPathwayTime(phase.duration_ms)}` : '');
+        lines.push(...wrapText(counts, span, 10, false, measure).map((text) => ({ text, bold: false })));
+      }
+      brackets.push({ phase: open.phase, row, first: open.first, last: open.last, lines, continues, goesOn: false });
+      open = null;
+    };
+    for (const item of items) {
+      const phase = phaseOf.get(item.screen.id);
+      if (open && phase === open.phase && item.col === open.last.col + 1) {
+        open.last = item;
+        continue;
+      }
+      close();
+      if (phase !== undefined) open = { phase, first: item, last: item };
+    }
+    close();
+  }
+  // Every bracket but a phase's last is left open on the right, as the phase goes on after it.
+  brackets.forEach((bracket, index) => {
+    bracket.goesOn = brackets.slice(index + 1).some((later) => later.phase === bracket.phase);
+  });
+  const bracketHeight = (bracket: Bracket): number => bracket.lines.length * PHASE_LINE + 15;
+
   const rowTop: number[] = [];
   const busBase: number[] = [];
+  const phaseTop: number[] = [];
   let y = options.caption ? headerBottom + 28 : MARGIN;
   for (let row = 0; row < rows; row += 1) {
     const tracks = busTracks[row]?.length ?? 0;
     if (tracks) y += 10 + tracks * TRACK;
     busBase[row] = y - 6;
+    phaseTop[row] = y;
+    y += Math.max(0, ...brackets.filter((bracket) => bracket.row === row).map(bracketHeight));
     y += Math.max(0, ...inRow(row).map((card) => card.above));
     rowTop[row] = y;
     y += Math.max(0, ...inRow(row).map((card) => card.below)) + ROW_GAP;
@@ -591,17 +656,45 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
       pillRow(route.pillX, route.pillY, transition.passes.map((pass) => String(pass.step_index))) +
       '</g>';
   }
-  body += '</g><g id="screens">';
-  let clippedNotes = 0;
+  body += '</g>';
+  if (brackets.length) {
+    body += '<g id="phases">';
+    for (const bracket of brackets) {
+      const x1 = left(bracket.first);
+      const x2 = right(bracket.last);
+      const top = phaseTop[bracket.row] ?? 0;
+      bracket.lines.forEach((line, index) => {
+        body += text(x1, top + 10 + index * PHASE_LINE, line.text, line.bold
+          ? { size: 10.5, bold: true, halo: true }
+          : { size: 10, fill: SUB, halo: true });
+      });
+      const lineY = top + bracket.lines.length * PHASE_LINE + 4;
+      // A closed end turns down; an open end runs on as a short dashed line, where the phase continues.
+      const start = bracket.continues ? `M${n1(x1)} ${n1(lineY)}` : `M${n1(x1)} ${n1(lineY + 5)} V${n1(lineY)}`;
+      const end = bracket.goesOn ? '' : ` V${n1(lineY + 5)}`;
+      body += `<path d="${start} H${n1(x2)}${end}" fill="none" stroke="${INK}" stroke-width="0.9"/>`;
+      if (bracket.continues) body += `<path d="M${n1(x1 - 12)} ${n1(lineY)} H${n1(x1 - 2)}" fill="none" stroke="${INK}" stroke-width="0.9" stroke-dasharray="2 2"/>`;
+      if (bracket.goesOn) body += `<path d="M${n1(x2 + 2)} ${n1(lineY)} H${n1(x2 + 12)}" fill="none" stroke="${INK}" stroke-width="0.9" stroke-dasharray="2 2"/>`;
+      if (input.peek) {
+        // on the page, the bracket can be clicked to change its phase
+        body += `<rect data-phase="${bracket.phase}" x="${n1(x1)}" y="${n1(top)}" width="${n1(Math.max(1, x2 - x1))}" height="${n1(lineY + 6 - top)}" fill="transparent"/>`;
+      }
+    }
+    body += '</g>';
+  }
+  body += '<g id="screens">';
   for (const item of placed.values()) {
     const card = cards.get(item.screen.id);
     if (!card) continue;
-    clippedNotes += card.clipped;
     const selected =
       input.highlight === item.screen.id
         ? `<rect x="-5" y="-5" width="${width + card.stack + 10}" height="${height + card.stack + 10}" fill="none" stroke="#cd6d1e" stroke-width="2.5"/>`
         : '';
-    body += `<g id="${esc(item.screen.id)}" data-screen="${esc(item.screen.id)}" transform="translate(${n1(left(item))} ${n1(top(item))})">${card.svg}${selected}</g>`;
+    // On the page a box can be reached with the keyboard: Enter selects it, the menu key opens its actions.
+    const reachable = input.peek
+      ? ` tabindex="0" role="button" aria-label="${esc(`Screen ${item.screen.index}${item.screen.title !== `Screen ${item.screen.index}` ? `, ${item.screen.title}` : ''}`)}"`
+      : '';
+    body += `<g id="${esc(item.screen.id)}" data-screen="${esc(item.screen.id)}"${reachable} transform="translate(${n1(left(item))} ${n1(top(item))})">${card.svg}${selected}</g>`;
   }
   body += '</g>';
 
@@ -656,6 +749,13 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
       [arrow(false), 28, 'move to another screen, numbered by the step it leads to'],
     ];
     if (pathway.transitions.some((transition) => transition.kind === 'return')) items.push([arrow(true), 28, 'return to an earlier screen']);
+    if (brackets.length) {
+      items.push([
+        (x, cy) => `<path d="M${n1(x)} ${n1(cy + 4)} V${n1(cy - 2)} H${n1(x + 24)} V${n1(cy + 4)}" fill="none" stroke="${INK}" stroke-width="0.9"/>`,
+        24,
+        'phase of the walkthrough, with how many steps and screens it takes',
+      ]);
+    }
     if (pathway.screens.some((screen) => screen.kind === 'popup')) {
       items.push([(x, cy) => `<rect x="${n1(x)}" y="${n1(cy - 7)}" width="10" height="14" fill="none" stroke="${INK}" stroke-width="0.75" stroke-dasharray="3 2"/>`, 10, 'pop-up']);
     }
@@ -703,5 +803,5 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
     `<title>${esc(input.title)}</title>` +
     `<defs><marker id="pathway-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5 L9 5 L1 8.5 Z" fill="${INK}"/></marker></defs>` +
     `<rect width="100%" height="100%" fill="#fff"/>${body}</svg>`;
-  return { svg, width: w, height: h, clippedNotes };
+  return { svg, width: w, height: h };
 }

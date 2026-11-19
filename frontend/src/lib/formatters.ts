@@ -88,10 +88,36 @@ function formatProjectActivity(lastActivityAt: string): string {
   return new Date(timestamp).toISOString().slice(0, 10);
 }
 
+/** When something was last changed, as a phrase: `just now`, `3h ago`, `on 2026-01-02`. */
+export function formatChangedAgo(changedAt: string, now = Date.now()): string {
+  const timestamp = new Date(changedAt).getTime();
+  if (Number.isNaN(timestamp)) return changedAt;
+  const minutes = Math.floor((now - timestamp) / 60000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const age = formatProjectActivity(changedAt);
+  return /^\d{4}-/.test(age) ? `on ${age}` : `${age} ago`;
+}
+
+/** Who last changed something and when: `changed 3h ago by Ada`, or without a name where none is known. */
+export function formatLastChange(changedAt: string, by?: string | null): string {
+  return `changed ${formatChangedAgo(changedAt)}${by ? ` by ${by}` : ''}`;
+}
+
 export function formatProjectSummary(project: Project): string {
   const videoLabel = `${project.recording_count} ${project.recording_count === 1 ? 'video' : 'videos'}`;
   const runLabel = `${project.run_count} ${project.run_count === 1 ? 'run' : 'runs'}`;
-  return `${videoLabel} • ${runLabel} • ${formatProjectActivity(project.last_activity_at)}`;
+  return `${videoLabel} and ${runLabel}, ${formatLastChange(project.modified_at ?? project.last_activity_at, project.modified_by_name)}`;
+}
+
+/** A run's number as the app shows it, `run #3`; it stays the same when the run is renamed. */
+export function formatRunNumber(run: Pick<RunSummary, 'run_number'>, fallback?: number): string {
+  return `run #${run.run_number ?? fallback ?? '?'}`;
+}
+
+/** What a run is called: the name someone gave it, or else its number. */
+export function formatRunTitle(run: Pick<RunSummary, 'name' | 'run_number'>, fallback?: number): string {
+  return run.name?.trim() || formatRunNumber(run, fallback);
 }
 
 export function formatProjectCounts(project: Project): string {

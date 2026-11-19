@@ -81,7 +81,7 @@ const LESSONS: Lesson[] = [
     title: 'correct it, step by step',
     guide: '#pathway',
     guideLabel: 'when the pathway gets it wrong',
-    task: 'put step 6 with home (the same screen as 1), and give step 8 a screen of its own.',
+    task: 'put step 6 on home (box 1), and give step 8 a screen of its own.',
   },
   {
     name: 'decide',
@@ -652,20 +652,24 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     body = (
       <>
         <p>
-          click a box. the strip above the chart lists its steps, each with a <b>screen</b> choice:
+          in the pathway, click a box to select it, or the number under it to select that one step. a toolbox
+          opens beside what you selected:
         </p>
         <ul className="pt-points">
           <li>
-            <b>automatic</b>: where the rules put it;
+            <b>own screen</b>: the step gets a box of its own;
           </li>
           <li>
-            <b>a new screen</b>: a box of its own;
+            <b>put it on</b> another box (or drag its number onto that box);
           </li>
           <li>
-            <b>the same screen as</b> another step.
+            <b>stack onto</b>: the whole box goes onto another (or drag the box).
           </li>
         </ul>
-        <p>the same choice is on every step card under <b>steps</b> (under annotate).</p>
+        <p>
+          here, click a box: its steps are listed above the chart, each with these choices. every change can be
+          taken back with ⌘Z, and the same choice is on every step card under <b>steps</b> (under annotate).
+        </p>
       </>
     );
     tools = (
@@ -679,10 +683,10 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
               <input checked={isPopup(mockStep(selectedScreen.id), choices)} onChange={(event) => setPopup(selectedScreen.id, event.target.checked)} type="checkbox" />
               pop-up
             </label>
-            <span className="pathway-control-label">steps and where they belong</span>
+            <span className="pathway-control-label">steps</span>
             {selectedScreen.steps.map((n) => {
               const link = choices[n]?.link;
-              const label = link === 'new' ? 'a new screen' : typeof link === 'number' ? `same as ${link}` : 'automatic';
+              const label = link === 'new' ? 'own screen' : typeof link === 'number' ? `on box ${link}` : 'where it was found';
               return (
                 <span className="pt-strip-step" key={n}>
                   <b>{n}</b>
@@ -698,12 +702,12 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
                   {menuStep === n ? (
                     <span className={`pt-menu ${menuLeft ? 'to-left' : ''}`} role="menu">
                       <button onClick={() => choose(n, 'auto')} role="menuitem" type="button">
-                        automatic
+                        back where it was found
                       </button>
                       <button className={shade('menu:new').trim() || undefined} onClick={() => choose(n, 'new')} role="menuitem" type="button">
-                        a new screen
+                        own screen
                       </button>
-                      <span className="pt-menu-heading">the same screen as</span>
+                      <span className="pt-menu-heading">put it on</span>
                       {pathway.screens
                         .filter((screen) => screen.id !== pathway.screenOf.get(n))
                         .map((screen) => (

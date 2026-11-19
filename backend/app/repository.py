@@ -17,6 +17,9 @@ SELECT
     p.name,
     p.slug,
     p.created_at,
+    p.modified_at,
+    p.modified_by,
+    (SELECT COALESCE(u.display_name, u.name) FROM users u WHERE u.id = p.modified_by) AS modified_by_name,
     (
         SELECT COUNT(*)
         FROM recordings r
@@ -602,6 +605,20 @@ def recording_has_active_runs(recording_id: str) -> bool:
     return bool(row[0])
 
 
+# A run with how many steps are accepted, and who last changed it. Runs from before changes were recorded give the
+# last change to one of their steps instead, or when they were made, and no one.
+RUN_SUMMARY_SELECT = """
+SELECT
+    dr.*,
+    COALESCE(SUM(CASE WHEN c.status = 'accepted' THEN 1 ELSE 0 END), 0) AS accepted_count,
+    COALESCE(dr.modified_at, MAX(c.updated_at), dr.created_at) AS last_modified_at,
+    COALESCE(u.display_name, u.name) AS modified_by_name
+FROM detection_runs dr
+LEFT JOIN candidate_frames c ON c.run_id = dr.id
+LEFT JOIN users u ON u.id = dr.modified_by
+"""
+
+
 def create_run(recording_id: str, settings: RunSettings) -> dict[str, Any]:
     run_id = uuid4().hex
     now = utc_now()
@@ -634,12 +651,14 @@ def create_run(recording_id: str, settings: RunSettings) -> dict[str, Any]:
                 id, recording_id, status, phase, analysis_engine, analysis_preset, analysis_advanced, analysis_stable,
                 analysis_config,
                 detector_mode, tolerance, min_scene_gap_ms, sample_fps, allow_high_fps_sampling,
-                extract_offset_ms, progress, message, candidate_count, created_at, updated_at
+                extract_offset_ms, progress, message, candidate_count, created_at, updated_at, run_number
             ) VALUES (
                 :id, :recording_id, :status, :phase, :analysis_engine, :analysis_preset, :analysis_advanced, :analysis_stable,
                 :analysis_config,
                 :detector_mode, :tolerance, :min_scene_gap_ms, :sample_fps, :allow_high_fps_sampling,
-                :extract_offset_ms, :progress, :message, :candidate_count, :created_at, :updated_at
+                :extract_offset_ms, :progress, :message, :candidate_count, :created_at, :updated_at,
+                -- the next number for this recording, never one a deleted run had
+                (SELECT COALESCE(MAX(run_number), 0) + 1 FROM detection_runs WHERE recording_id = :recording_id)
             )
             """,
             payload,
@@ -650,10 +669,8 @@ def create_run(recording_id: str, settings: RunSettings) -> dict[str, Any]:
 def list_runs(recording_id: str) -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
-            """
-            SELECT dr.*, COALESCE(SUM(CASE WHEN c.status = 'accepted' THEN 1 ELSE 0 END), 0) AS accepted_count
-            FROM detection_runs dr
-            LEFT JOIN candidate_frames c ON c.run_id = dr.id
+            f"""
+            {RUN_SUMMARY_SELECT}
             WHERE dr.recording_id = ?
             GROUP BY dr.id
             ORDER BY dr.created_at DESC
@@ -666,10 +683,8 @@ def list_runs(recording_id: str) -> list[dict[str, Any]]:
 def get_run(run_id: str) -> dict[str, Any] | None:
     with connect() as conn:
         row = conn.execute(
-            """
-            SELECT dr.*, COALESCE(SUM(CASE WHEN c.status = 'accepted' THEN 1 ELSE 0 END), 0) AS accepted_count
-            FROM detection_runs dr
-            LEFT JOIN candidate_frames c ON c.run_id = dr.id
+            f"""
+            {RUN_SUMMARY_SELECT}
             WHERE dr.id = ?
             GROUP BY dr.id
             """,
@@ -698,6 +713,39 @@ def update_run(run_id: str, **fields: Any) -> dict[str, Any] | None:
     return get_run(run_id)
 
 
+def list_run_phases(run_id: str) -> list[tuple[int, str]]:
+    """Where the phases of a run start, in order (see services/pathway.py)."""
+    with connect() as conn:
+        rows = conn.execute("SELECT start_ms, name FROM run_phases WHERE run_id = ? ORDER BY start_ms", (run_id,)).fetchall()
+    return [(row["start_ms"], row["name"]) for row in rows]
+
+
+def replace_run_phases(run_id: str, boundaries: Sequence[tuple[int, str]]) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM run_phases WHERE run_id = ?", (run_id,))
+        conn.executemany(
+            "INSERT INTO run_phases (run_id, start_ms, name) VALUES (?, ?, ?)",
+            [(run_id, start, name) for start, name in boundaries],
+        )
+
+
+def rename_run(run_id: str, name: str | None) -> dict[str, Any] | None:
+    """Give a run a name, or with ``None`` take it away; its number stays as it is."""
+    with connect() as conn:
+        conn.execute("UPDATE detection_runs SET name = ? WHERE id = ?", (name, run_id))
+    return get_run(run_id)
+
+
+def record_change(user_id: str, project_id: str | None = None, run_id: str | None = None) -> None:
+    """Who last changed a project or a run of it, and when: a change someone made, not the analysis at work."""
+    now = utc_now()
+    with connect() as conn:
+        if run_id:
+            conn.execute("UPDATE detection_runs SET modified_at = ?, modified_by = ? WHERE id = ?", (now, user_id, run_id))
+        if project_id:
+            conn.execute("UPDATE projects SET modified_at = ?, modified_by = ? WHERE id = ?", (now, user_id, project_id))
+
+
 def delete_run_record(run_id: str) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM detection_runs WHERE id = ?", (run_id,))
@@ -714,12 +762,12 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
                     id, run_id, recording_id, detector_index, candidate_origin, timestamp_ms, timestamp_tc, image_path,
                     scene_score, status, title, notes, image_hash, perceptual_hash, histogram_signature, ocr_text,
                     revisit_group_id, similar_to_candidate_id, similarity_distance, score_breakdown, screen_link, screen_kind,
-                    created_at, updated_at
+                    pathway_row, created_at, updated_at
                 ) VALUES (
                     :id, :run_id, :recording_id, :detector_index, :candidate_origin, :timestamp_ms, :timestamp_tc, :image_path,
                     :scene_score, :status, :title, :notes, :image_hash, :perceptual_hash, :histogram_signature, :ocr_text,
                     :revisit_group_id, :similar_to_candidate_id, :similarity_distance, :score_breakdown, :screen_link, :screen_kind,
-                    :created_at, :updated_at
+                    :pathway_row, :created_at, :updated_at
                 )
                 """,
                 [
@@ -730,6 +778,7 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
                         "candidate_origin": candidate.get("candidate_origin", "detected"),
                         "screen_link": candidate.get("screen_link"),
                         "screen_kind": candidate.get("screen_kind"),
+                        "pathway_row": candidate.get("pathway_row"),
                         "score_breakdown": (
                             candidate.get("score_breakdown")
                             if isinstance(candidate.get("score_breakdown"), str)

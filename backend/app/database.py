@@ -13,7 +13,10 @@ CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     slug TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    -- When someone last changed anything in it, and who (a user id); see repository.record_change.
+    modified_at TEXT,
+    modified_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS recordings (
@@ -54,7 +57,15 @@ CREATE TABLE IF NOT EXISTS detection_runs (
     updated_at TEXT NOT NULL,
     export_bundle_id TEXT,
     -- When a pathway figure of it was first downloaded, for the progress report (app/progress.py).
-    figure_downloaded_at TEXT
+    figure_downloaded_at TEXT,
+    -- Its number among the runs of its recording, given once and kept: renaming or deleting a run changes no number.
+    run_number INTEGER,
+    -- A name someone gave it; without one it is called by its number.
+    name TEXT,
+    -- When someone last changed it (started, renamed, reviewed, ended it), and who (a user id); the analysis at
+    -- work changes `updated_at` only.
+    modified_at TEXT,
+    modified_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS candidate_frames (
@@ -83,6 +94,9 @@ CREATE TABLE IF NOT EXISTS candidate_frames (
     -- `screen_kind`: NULL (automatic), 'screen' or 'popup'.
     screen_link TEXT,
     screen_kind TEXT,
+    -- Where the box of this step goes in the pathway figure: NULL (automatic), 'continue' (on the row of the box it
+    -- was reached from) or 'below' (on a row of its own); the box's first step with a say decides.
+    pathway_row TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(run_id, detector_index)
@@ -96,6 +110,15 @@ CREATE TABLE IF NOT EXISTS export_bundles (
     item_count INTEGER NOT NULL,
     created_at TEXT NOT NULL,
     retained INTEGER NOT NULL DEFAULT 0
+);
+
+-- The phases of a run: named stretches of the recording, kept as where each one starts (services/pathway.py). A
+-- name holds until the next start; an empty name ends the phase before it.
+CREATE TABLE IF NOT EXISTS run_phases (
+    run_id TEXT NOT NULL REFERENCES detection_runs(id) ON DELETE CASCADE,
+    start_ms INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    PRIMARY KEY (run_id, start_ms)
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
@@ -269,6 +292,24 @@ def _migrate_export_bundles(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _number_runs(conn: sqlite3.Connection) -> None:
+    """Give runs made before runs had a stored number one: in the order they were made, after any numbered runs of
+    the same recording. That is the number the tasks list showed for them, worked out on the page."""
+    rows = conn.execute(
+        """
+        SELECT id, recording_id FROM detection_runs WHERE run_number IS NULL ORDER BY recording_id, created_at, id
+        """
+    ).fetchall()
+    numbers: dict[str, int] = {}
+    for run_id, recording_id in rows:
+        if recording_id not in numbers:
+            numbers[recording_id] = conn.execute(
+                "SELECT COALESCE(MAX(run_number), 0) FROM detection_runs WHERE recording_id = ?", (recording_id,)
+            ).fetchone()[0]
+        numbers[recording_id] += 1
+        conn.execute("UPDATE detection_runs SET run_number = ? WHERE id = ?", (numbers[recording_id], run_id))
+
+
 def _backfill_detection_run_phase(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -349,16 +390,24 @@ def init_db() -> None:
         _ensure_column(conn, "detection_runs", "analysis_stable", "TEXT")
         _ensure_column(conn, "detection_runs", "allow_high_fps_sampling", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "detection_runs", "figure_downloaded_at", "TEXT")
+        _ensure_column(conn, "detection_runs", "run_number", "INTEGER")
+        _ensure_column(conn, "detection_runs", "name", "TEXT")
+        _ensure_column(conn, "detection_runs", "modified_at", "TEXT")
+        _ensure_column(conn, "detection_runs", "modified_by", "TEXT")
+        _ensure_column(conn, "projects", "modified_at", "TEXT")
+        _ensure_column(conn, "projects", "modified_by", "TEXT")
         _ensure_column(conn, "candidate_frames", "candidate_origin", "TEXT NOT NULL DEFAULT 'detected'")
         _ensure_column(conn, "candidate_frames", "perceptual_hash", "TEXT")
         _ensure_column(conn, "candidate_frames", "ocr_text", "TEXT")
         _ensure_column(conn, "candidate_frames", "score_breakdown", "TEXT")
         _ensure_column(conn, "candidate_frames", "screen_link", "TEXT")
         _ensure_column(conn, "candidate_frames", "screen_kind", "TEXT")
+        _ensure_column(conn, "candidate_frames", "pathway_row", "TEXT")
         _ensure_column(conn, "recordings", "working_path", "TEXT")
         _ensure_column(conn, "users", "notes", "TEXT")
         _ensure_column(conn, "users", "password_hash", "TEXT")
         _backfill_detection_run_phase(conn)
+        _number_runs(conn)
         _ensure_local_user(conn)
         conn.execute(
             """
