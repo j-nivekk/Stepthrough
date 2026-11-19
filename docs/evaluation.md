@@ -373,7 +373,8 @@ a settled frame after it. That approach was harder to explain and to cite, and i
 frame rate of phone recordings. Those engines are retired: runs made with them still open and export, and
 their code is at the git tag `last-with-hybrid-v2`.
 
-- Feng, S. and Chen, C. (2022). GIFdroid: An Automated Light-weight Tool for Replaying Visual Bug Reports.
-  *ICSE 2022 Companion*, pp. 95–99. https://arxiv.org/abs/2112.04128
+- Feng, S. and Chen, C. (2022). GIFdroid: Automated Replay of Visual Bug Reports for Android Apps.
+  *ICSE 2022*, pp. 1045–1057. https://doi.org/10.1145/3510003.3510048 (preprint:
+  https://arxiv.org/abs/2112.04128)
 - Feng, S., Xie, M., Xue, Y. and Chen, C. (2023). Read It, Don't Watch It: Captioning Bug Recordings
   Automatically. *ICSE 2023*, pp. 2349–2361. https://arxiv.org/abs/2302.00886
