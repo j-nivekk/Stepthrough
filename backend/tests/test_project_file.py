@@ -219,3 +219,25 @@ def test_a_refused_file_leaves_no_project_behind(client, video_factory):
     assert [project["id"] for project in ok(client.get("/projects"))] == before
     folders = list((storage.DATA_ROOT / "projects").iterdir())
     assert len(folders) == 1
+
+
+def test_a_project_file_larger_than_the_server_takes_is_refused(client, video_factory, monkeypatch):
+    from app import visitors
+
+    project_id, _run, _steps = a_project(client, video_factory)
+    data = download(client, project_id)
+    size = ok(client.get(f"/projects/{project_id}/project-file/size"))
+    # the estimate is close to the real file
+    assert abs(size["bytes"] - len(data)) < 2048 and size["limit_bytes"] == visitors.project_file_limit()
+
+    monkeypatch.setattr(visitors, "_server_project_file_limit", len(data) // 2)
+    refused = client.post("/projects/project-file", files={"file": ("p.stepthrough.zip", data, "application/zip")})
+    assert refused.status_code == 413 and "this server takes in" in refused.json()["detail"]
+    # and by the import itself, from what the file holds
+    with pytest.raises(project_file.ProjectFileError, match="this server takes in"):
+        project_file.import_into(io.BytesIO(data), ok(client.get(f"/projects/{project_id}"))["project"], max_total_bytes=10)
+
+
+def test_the_session_says_how_large_a_file_may_be(client):
+    me = ok(client.get("/me"))
+    assert me["upload_limit_bytes"] > 0 and me["project_file_limit_bytes"] >= me["upload_limit_bytes"]

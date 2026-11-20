@@ -11,10 +11,10 @@ export function isVisitor(user: SessionUser | null | undefined): boolean {
   return Boolean(user && !user.is_admin && user.tags.includes('visitor'));
 }
 
-/** Sizes as people read them, in MB as the settings are (`500 MB`, `2000 MB`), and in GB from 10 GB. */
+/** Sizes as people read them, in MB as the settings are (`500 MB`, `2000 MB`), in KB below 1 MB, and in GB from 10 GB. */
 export function formatSize(bytes: number): string {
   if (bytes >= 10 * 1024 * MB) return `${Math.round((bytes / (1024 * MB)) * 10) / 10} GB`;
-  if (bytes < MB) return bytes > 0 ? 'under 1 MB' : '0 MB';
+  if (bytes < MB) return bytes > 0 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : '0 MB';
   return `${Math.round(bytes / MB)} MB`;
 }
 
@@ -51,15 +51,21 @@ export function deletionIsNear(deletesAt: string, now = Date.now()): boolean {
 
 /**
  * Why a file cannot be uploaded by this account, before it is sent; null when it can. A video is held to the
- * account's upload limit; any file (a video or a project file) to the room the account has left. The server checks
- * again: this only spares waiting for an upload that would be refused.
+ * upload limit, a project file to the server's limit for project files, and on a visitor account either one to the
+ * room the account has left. The server checks again: this only spares waiting for an upload that would be refused.
  */
 export function uploadProblem(user: SessionUser | null | undefined, file: Pick<File, 'size'>, kind: 'video' | 'project'): string | null {
-  const limits = isVisitor(user) ? user?.visitor : null;
-  if (!limits) return null;
-  if (kind === 'video' && file.size > limits.upload_limit_bytes) {
-    return `larger than this account's ${formatSize(limits.upload_limit_bytes)} limit.`;
+  if (!user) return null;
+  const visitor = isVisitor(user);
+  const videoLimit = user.upload_limit_bytes ?? user.visitor?.upload_limit_bytes ?? null;
+  if (kind === 'video' && videoLimit && file.size > videoLimit) {
+    return visitor ? `larger than this account's ${formatSize(videoLimit)} limit.` : `larger than the ${formatSize(videoLimit)} upload limit.`;
   }
+  if (kind === 'project' && user.project_file_limit_bytes && file.size > user.project_file_limit_bytes) {
+    return `larger than the ${formatSize(user.project_file_limit_bytes)} this server takes in at once.`;
+  }
+  const limits = visitor ? user.visitor : null;
+  if (!limits) return null;
   if (limits.storage_limit_bytes !== null && limits.storage_used_bytes !== null) {
     const room = limits.storage_limit_bytes - limits.storage_used_bytes;
     if (file.size > room) {
@@ -140,4 +146,26 @@ export function listTagProblems(text: string, everyone: string[]): Array<{ row: 
     if (problem) problems.push({ row: index + 2, name: (cells[nameAt] ?? '').trim(), problem });
   });
   return problems;
+}
+
+/** The date a visitor account without one gets, `days` from `today`, as YYYY-MM-DD; null without such a setting. */
+export function visitorDeletionDate(days: number | null | undefined, today = new Date()): string | null {
+  if (!days) return null;
+  const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() + days);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/** How many rows of a list of people become visitor accounts without a date of their own (no `expires`). */
+export function visitorRowsWithoutDate(text: string, everyone: string[]): number {
+  const [header, ...rows] = parseList(text);
+  if (!header) return 0;
+  const columns = header.map((cell) => cell.trim().toLowerCase());
+  const tagsAt = columns.indexOf('tags');
+  const expiresAt = columns.indexOf('expires');
+  return rows.filter((cells) => {
+    const own = tagsAt >= 0 ? (cells[tagsAt] ?? '').split(/[,\s]+/) : [];
+    const visitor = [...everyone, ...own].some((tag) => tag.trim() === 'visitor');
+    return visitor && !(expiresAt >= 0 && (cells[expiresAt] ?? '').trim());
+  }).length;
 }

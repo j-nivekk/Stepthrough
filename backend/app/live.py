@@ -161,7 +161,8 @@ def _target_key(target: dict[str, Any]) -> tuple:
 
 
 def clean_targets(raw: Any) -> list[dict[str, Any]]:
-    """Presence from a browser, kept to the shapes the app shows: editing a step, or uploading a video."""
+    """Presence from a browser, kept to the shapes the app shows: editing a step, uploading a video, or bringing in a
+    project file from the list of projects (not in a project yet)."""
     if not isinstance(raw, list):
         raise HTTPException(422, "Presence is a list.")
     targets: list[dict[str, Any]] = []
@@ -176,6 +177,13 @@ def clean_targets(raw: Any) -> list[dict[str, Any]]:
             targets.append({
                 "kind": "uploading",
                 "project_id": item["project_id"][:64],
+                "name": item["name"][:240],
+                "progress": round(min(1.0, max(0.0, float(progress))), 2) if isinstance(progress, (int, float)) else None,
+            })
+        elif kind == "importing_project" and isinstance(item.get("name"), str):
+            progress = item.get("progress")
+            targets.append({
+                "kind": "importing_project",
                 "name": item["name"][:240],
                 "progress": round(min(1.0, max(0.0, float(progress))), 2) if isinstance(progress, (int, float)) else None,
             })

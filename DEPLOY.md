@@ -52,6 +52,7 @@ Edit `.env`, then apply it with `docker compose up -d --wait`. Every setting is 
 | `STEPTHROUGH_PORT` | `8080` | host port |
 | `STEPTHROUGH_MAX_CONCURRENT_RUNS` | `2` | analyses that run at once; `0` is no limit. Administrators can change it while the server runs (see [Accounts](#accounts)) |
 | `STEPTHROUGH_MAX_UPLOAD_MB` | `1024` | largest recording accepted; nginx's `client_max_body_size` must be at least this |
+| `STEPTHROUGH_MAX_PROJECT_FILE_MB` | `4096` | largest project file brought in at once (a whole project, every video in it; never less than the upload limit); nginx's limit for the project-file paths must be at least this. A download larger than this is warned about, as it could not come back |
 | `STEPTHROUGH_CPUS`, `STEPTHROUGH_MEMORY` | `0` (no limit) | caps for the container, for example `4` and `8g`, so analyses cannot starve other tools on the host |
 | `STEPTHROUGH_VOLUME` | `stepthrough_data` | name of the Docker volume with all data |
 | `STEPTHROUGH_OCR_MODEL_SOURCE` | `auto` | where the text recognition image downloads its models (`auto`, `huggingface`, `bos`) |
@@ -63,7 +64,9 @@ Edit `.env`, then apply it with `docker compose up -d --wait`. Every setting is 
 [`docker/nginx.conf.example`](docker/nginx.conf.example) is a complete site configuration. Beyond the usual proxy
 settings, Stepthrough needs three things from the web server:
 
-- an upload limit (`client_max_body_size`) at least as large as `STEPTHROUGH_MAX_UPLOAD_MB`;
+- an upload limit (`client_max_body_size`) at least as large as `STEPTHROUGH_MAX_UPLOAD_MB`, and a larger one, at
+  least `STEPTHROUGH_MAX_PROJECT_FILE_MB`, for the project-file paths (`/projects/project-file` and
+  `/projects/<id>/project-file`), whose downloads are also passed on unbuffered, as they are made while they go;
 - WebSocket upgrades (the `Upgrade` and `Connection` headers), which carry live progress while a run works;
 - long timeouts and no request buffering, so large uploads and long runs are not cut off. Browsers of a shared
   account also wait up to 25 seconds at a time for each other's changes (`/me/live`), so the read timeout must be longer.
@@ -110,8 +113,10 @@ Administrators look after accounts in the admin panel: open the menu with your n
   tags, never both, and administrators have neither: the panel, a list and the command line all refuse it. Under
   **add people**, administrators set for everyone at once how long visitors' projects are kept, in hours from when
   each was made (a shorter time asks first; projects older than it go within a few minutes), the largest video a
-  visitor may upload (empty: the server's own limit, `STEPTHROUGH_MAX_UPLOAD_MB`), and how much each visitor
-  account may keep at once (empty: no limit).
+  visitor may upload (empty: the server's own limit, `STEPTHROUGH_MAX_UPLOAD_MB`), how much each visitor
+  account may keep at once (empty: no limit), and for how many days an account given the visitor tag without a
+  deletion date is deleted (14 by default; empty: no date). Below them, the visitors' projects are listed with
+  when each is deleted, and **+1 day** keeps one a day longer, for a workshop that runs over.
 - **Switching off** an account logs it out at once and keeps its projects.
 - **Guessing.** After too many wrong passwords, further attempts wait 15 minutes; see the log for who and from
   where: `docker compose logs stepthrough | grep -E "Wrong|Refused"`.

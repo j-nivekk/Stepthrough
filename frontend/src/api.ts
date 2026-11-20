@@ -31,6 +31,7 @@ import type {
   UsageReport,
   UserImportResult,
   UserLink,
+  VisitorProject,
 } from './types';
 
 const configuredApiBase = import.meta.env.VITE_API_BASE_URL;
@@ -212,6 +213,11 @@ export function importProjectFromFile(file: File, options: UploadOptions = {}): 
   return sendUpload<Project>('/projects/project-file', formData, options);
 }
 
+/** About how large a project's file would be, and the largest one this server takes in. */
+export function getProjectFileSize(projectId: string): Promise<{ bytes: number; limit_bytes: number }> {
+  return request<{ bytes: number; limit_bytes: number }>(`/projects/${projectId}/project-file/size`);
+}
+
 /** Where a project's file downloads from: made as it downloads, videos included. */
 export function projectFileUrl(projectId: string): string {
   return apiUrl(`/projects/${projectId}/project-file`).toString();
@@ -256,6 +262,11 @@ function sendUpload<T>(path: string, formData: FormData, options: UploadOptions)
       }
       const detail = typeof payload === 'string' ? payload : (payload as { detail?: unknown } | null)?.detail;
       if (xhr.status === 401) window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+      if (xhr.status === 413 && typeof payload === 'string') {
+        // the web server in front refused it with a page of its own, before Stepthrough saw it
+        reject(new ApiError(413, 'too large for this server: the web server in front of it refused the file.'));
+        return;
+      }
       reject(new ApiError(xhr.status, typeof detail === 'string' && detail ? detail : 'Request failed'));
     });
     xhr.send(formData);
@@ -463,6 +474,19 @@ export function changePassword(currentPassword: string, newPassword: string): Pr
     '/me/password',
     jsonBody('POST', { current_password: currentPassword, new_password: newPassword }),
   );
+}
+
+export function listVisitorProjects(): Promise<VisitorProject[]> {
+  return request<VisitorProject[]>('/admin/visitor-projects');
+}
+
+/** Give a visitor's project more time, counted from when it would be deleted. */
+export function extendVisitorProject(projectId: string, hours = 24): Promise<VisitorProject> {
+  return request<VisitorProject>(`/admin/visitor-projects/${projectId}/extend`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hours }),
+  });
 }
 
 export function getServerSettings(): Promise<ServerSettings> {

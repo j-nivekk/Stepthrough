@@ -2931,9 +2931,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   background: rgba(205, 109, 30, 0.12);
 }
 
-.analysis-video-row.selected .analysis-video-name-text {
-  color: #cd6d1e;
-}
+
 
 .analysis-video-name {
   display: flex;
@@ -3197,8 +3195,27 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   background: rgba(205, 109, 30, 0.12);
 }
 
-.analysis-task-row.selected .analysis-task-title {
-  color: #cd6d1e;
+/* The selected run's name, and the selected video's: white on a solid orange, a shade deeper than the app's
+   orange so that the white reads well (4.9:1). */
+.analysis-task-row.selected .analysis-task-name-text,
+.analysis-video-row.selected .analysis-video-name-text {
+  margin-left: -5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #fff;
+  background: #b05a14;
+}
+
+/* A run's name may wrap: the fill follows each line. A video's stays on one line and ends in an ellipsis. */
+.analysis-task-row.selected .analysis-task-name-text {
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.analysis-video-row.selected .analysis-video-name-text {
+  display: inline-block;
+  max-width: calc(100% + 5px);
+  vertical-align: top;
 }
 
 /* A run that is working right now: a green tint (green means go) that flashes when the run starts
@@ -8522,6 +8539,30 @@ button:disabled {
 
 .users-server-number .users-control {
   width: 88px;
+}
+
+/* The visitors' projects, once opened: a list that scrolls within its own box, so that a long one does not push
+   everything below it away. */
+.users-visitor-project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.users-visitor-search {
+  width: 100%;
+}
+
+/* The visitors' projects under their settings: a name that is too long ends in an ellipsis. */
+.users-visitor-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The settings for visitor accounts, in a box of their own under adding people. */

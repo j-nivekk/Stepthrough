@@ -307,6 +307,11 @@ def test_presence_keeps_to_what_the_app_shows():
     targets = live.clean_targets([
         {"kind": "uploading", "project_id": "p", "name": "a.mp4", "progress": 3},
         {"kind": "editing", "run_id": "r"},
+        {"kind": "importing_project", "name": "p.stepthrough.zip", "progress": 0.456, "project_id": "ignored"},
+        {"kind": "importing_project"},
         "nonsense",
     ])
-    assert targets == [{"kind": "uploading", "project_id": "p", "name": "a.mp4", "progress": 1.0}]
+    assert targets == [
+        {"kind": "uploading", "project_id": "p", "name": "a.mp4", "progress": 1.0},
+        {"kind": "importing_project", "name": "p.stepthrough.zip", "progress": 0.46},
+    ]

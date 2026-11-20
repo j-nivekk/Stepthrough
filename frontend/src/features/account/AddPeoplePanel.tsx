@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
 import { createUser, importUsers } from '../../api';
 import { downloadText, linksCsv } from '../../lib/accountLinks';
-import { listTagProblems, tagProblem } from '../../lib/visitors';
+import { formatCalendarDate } from '../../lib/formatters';
+import { listTagProblems, tagProblem, visitorDeletionDate, visitorRowsWithoutDate } from '../../lib/visitors';
+import { useServerSettings } from './ServerSettingsPanel';
 import type { UserImportResult, UserLink } from '../../types';
 import { LinkBox } from './LinkBox';
 import { VisitorSettings } from './VisitorSettings';
@@ -78,6 +80,18 @@ export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
   const tagIssue = tagProblem(tagList);
   const rowIssues = source === 'list' && file && !tagIssue ? listTagProblems(file.text, tagList) : [];
   const ready = !tagIssue && (source === 'list' ? Boolean(file) : Boolean(name.trim()));
+  // Visitor accounts without a date get the visitors' one (the setting below): said before they are made.
+  const { settings } = useServerSettings();
+  const visitorDate = deleteAfter ? null : visitorDeletionDate(settings?.visitor_account_days.value);
+  const undatedVisitors = !visitorDate
+    ? 0
+    : source === 'list'
+      ? file
+        ? visitorRowsWithoutDate(file.text, tagList)
+        : 0
+      : tagList.includes('visitor')
+        ? 1
+        : 0;
   const label =
     source === 'list'
       ? pending
@@ -200,6 +214,9 @@ export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
             <span className="analysis-parameter-annotation">
               {source === 'list' ? "unless a row has its own expires date. " : ''}without a date, the account is kept until
               an administrator deletes it.
+              {undatedVisitors && visitorDate
+                ? ` ${source === 'list' ? plural(undatedVisitors, 'visitor account', 'visitor accounts') : 'a visitor account'} without one ${undatedVisitors === 1 ? 'is' : 'are'} deleted on ${formatCalendarDate(visitorDate)}.`
+                : ''}
             </span>
           </div>
         </div>

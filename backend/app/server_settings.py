@@ -15,6 +15,8 @@ database once an administrator changes it, so it outlasts restarts. Changes take
 - ``visitor_upload_mb``: the largest video a visitor account may upload; null: the server's own limit.
 - ``visitor_storage_mb``: how much a visitor account may keep at once, videos and screenshots together; null: no
   limit.
+- ``visitor_account_days``: the deletion date an account gets, so many days on, when it is given the visitor tag
+  without one; null: none.
 """
 
 from __future__ import annotations
@@ -35,8 +37,9 @@ DEFAULT_USAGE_KEEP_DAYS = 14
 DEFAULT_VISITOR_KEEP_HOURS = 72
 DEFAULT_VISITOR_UPLOAD_MB = 500
 DEFAULT_VISITOR_STORAGE_MB = 2000
+DEFAULT_VISITOR_ACCOUNT_DAYS = 14
 # Settings that may be null on purpose (sent as null, unlike one left out, which stays as it is).
-NULLABLE = {"usage_keep_days", "visitor_upload_mb", "visitor_storage_mb"}
+NULLABLE = {"usage_keep_days", "visitor_upload_mb", "visitor_storage_mb", "visitor_account_days"}
 
 _changed: dict[str, Any] = {}
 _configured_analyses: int | None = None
@@ -51,6 +54,7 @@ def defaults() -> dict[str, Any]:
         "visitor_keep_hours": DEFAULT_VISITOR_KEEP_HOURS,
         "visitor_upload_mb": DEFAULT_VISITOR_UPLOAD_MB,
         "visitor_storage_mb": DEFAULT_VISITOR_STORAGE_MB,
+        "visitor_account_days": DEFAULT_VISITOR_ACCOUNT_DAYS,
     }
 
 
@@ -92,6 +96,7 @@ class ServerSettingsUpdate(BaseModel):
     visitor_keep_hours: int | None = Field(default=None, ge=1, le=24 * 365)
     visitor_upload_mb: int | None = Field(default=None, ge=1, le=1_000_000)  # null: the server's limit
     visitor_storage_mb: int | None = Field(default=None, ge=1, le=10_000_000)  # null: no limit
+    visitor_account_days: int | None = Field(default=None, ge=1, le=3650)  # null: no date
 
 
 def _describe() -> dict[str, dict[str, Any]]:

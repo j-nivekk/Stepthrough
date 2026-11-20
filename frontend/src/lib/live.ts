@@ -94,6 +94,20 @@ export function uploadsElsewhere(presence: LivePresence[], projectId: string | n
   return uploads;
 }
 
+/** Project files other browsers of the account are bringing in from the list of projects, with how far they are. */
+export function projectImportsElsewhere(presence: LivePresence[], ownClient: string): UploadElsewhere[] {
+  const imports: UploadElsewhere[] = [];
+  for (const entry of presence) {
+    if (entry.client === ownClient) continue;
+    entry.targets.forEach((target, index) => {
+      if (target.kind === 'importing_project') {
+        imports.push({ key: `${entry.client}-${index}`, name: target.name, progress: target.progress });
+      }
+    });
+  }
+  return imports;
+}
+
 /** What other browsers are doing to a task that rewrites it, such as adding a step by hand. */
 export function busyElsewhere(busy: LiveBusy[], runId: string | null, ownClient: string): LiveBusy[] {
   return runId ? busy.filter((entry) => entry.run_id === runId && entry.by !== ownClient) : [];

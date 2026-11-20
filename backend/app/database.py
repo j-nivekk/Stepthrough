@@ -404,6 +404,8 @@ def init_db() -> None:
         _ensure_column(conn, "detection_runs", "modified_by", "TEXT")
         _ensure_column(conn, "projects", "modified_at", "TEXT")
         _ensure_column(conn, "projects", "modified_by", "TEXT")
+        # A visitor's project an administrator gave more time: kept at least until then (app/visitors.py).
+        _ensure_column(conn, "projects", "keep_until", "TEXT")
         _ensure_column(conn, "candidate_frames", "candidate_origin", "TEXT NOT NULL DEFAULT 'detected'")
         _ensure_column(conn, "candidate_frames", "perceptual_hash", "TEXT")
         _ensure_column(conn, "candidate_frames", "ocr_text", "TEXT")

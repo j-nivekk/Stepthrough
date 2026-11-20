@@ -85,6 +85,10 @@ class UserResponse(BaseModel):
     delete_after: str | None = None
     # For a visitor account: its limits (app/visitors.py).
     visitor: VisitorLimits | None = None
+    # The largest video and the largest project file this account may bring in, so the app can say so before
+    # sending one.
+    upload_limit_bytes: int | None = None
+    project_file_limit_bytes: int | None = None
 
 
 AuthModeName = Literal["none", "password"]

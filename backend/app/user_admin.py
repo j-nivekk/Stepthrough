@@ -98,6 +98,17 @@ def account_tags(raw: Iterable[str]) -> list[str]:
     return tags
 
 
+def visitor_deletion_date(old_tags: Iterable[str], new_tags: Iterable[str], delete_after: str | None) -> str | None:
+    """The deletion date an account ends up with: an account that gets the visitor tag now, without a date, gets the
+    one the administrators chose for visitors (app/visitors.py); every other account keeps what it was given, also
+    a visitor whose date an administrator took away later."""
+    if delete_after or VISITOR_TAG not in new_tags or VISITOR_TAG in old_tags:
+        return delete_after
+    from .visitors import account_deletion_date  # (visitors imports the accounts this module makes)
+
+    return account_deletion_date()
+
+
 def clean_date(raw: str | date | None) -> str | None:
     """A deletion date as YYYY-MM-DD, from a date or text such as ``2027-02-01`` (a time after it is ignored)."""
     if raw is None or isinstance(raw, date):
@@ -127,11 +138,12 @@ def create_account(
         raise AccountError(f"There is already an account called {name}.")
     if password is not None and len(password) > MAX_PASSWORD_LENGTH:
         raise AccountError(f"Password for {name}: use at most {MAX_PASSWORD_LENGTH} characters.")
+    clean = account_tags(tags)
     row = create_user(
         name,
         display_name=clean_display_name(display_name),
-        tags=account_tags(tags),
-        delete_after=clean_date(delete_after),
+        tags=clean,
+        delete_after=visitor_deletion_date((), clean, clean_date(delete_after)),
         notes=(notes or "").strip() or None,
     )
     if password is not None:

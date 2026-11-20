@@ -156,3 +156,55 @@ def test_reports_mark_visitors(client):
     create_account("group", tags=["shared"], password=PASSWORD)
     marks = {account["name"]: (account["shared"], account["visitor"]) for account in list_usage_accounts().values()}
     assert marks["guest"] == (False, True) and marks["group"] == (True, False)
+
+
+def test_a_new_visitor_account_gets_a_deletion_date(logins, monkeypatch):
+    from datetime import date
+
+    in_two_weeks = (date.today() + timedelta(days=14)).isoformat()
+    made, _link = create_account("v1", tags=["visitor"], password=PASSWORD)
+    assert made["delete_after"] == in_two_weeks
+    dated, _link = create_account("v2", tags=["visitor"], delete_after="2030-01-01", password=PASSWORD)
+    assert dated["delete_after"] == "2030-01-01"
+    plain, _link = create_account("v3", password=PASSWORD)
+    assert plain["delete_after"] is None
+
+    result = import_accounts(b"name,expires,tags\nv4,,visitor\nv5,2031-02-03,visitor\nv6,,group-a\n")
+    dates = {account["name"]: account["delete_after"] for account, _link in result.created}
+    assert dates == {"v4": in_two_weeks, "v5": "2031-02-03", "v6": None}
+
+    # becoming a visitor later gives a date; taking the date away afterwards is the administrator's to do
+    create_account("admin", tags=["admin"], password=PASSWORD)
+    tab = logins("admin", first=True)
+    changed = ok(tab.patch(f"/admin/users/{plain['id']}", json={"tags": ["visitor"], "delete_after": None}))
+    assert changed["delete_after"] == in_two_weeks
+    kept = ok(tab.patch(f"/admin/users/{plain['id']}", json={"tags": ["visitor"], "delete_after": None}))
+    assert kept["delete_after"] is None
+
+    setting(monkeypatch, visitor_account_days=None)
+    undated, _link = create_account("v7", tags=["visitor"], password=PASSWORD)
+    assert undated["delete_after"] is None
+
+
+def test_administrators_see_visitor_projects_and_give_them_more_time(visitor, logins, monkeypatch):
+    setting(monkeypatch, visitor_keep_hours=10)
+    project = ok(visitor.post("/projects", json={"name": "Workshop"}))
+    made = datetime.fromisoformat(project["created_at"])
+    assert visitor.get("/admin/visitor-projects").status_code == 403
+    assert visitor.post(f"/admin/visitor-projects/{project['id']}/extend", json={}).status_code == 403
+
+    create_account("admin", tags=["admin"], password=PASSWORD)
+    admin = logins("admin")
+    [listed] = ok(admin.get("/admin/visitor-projects"))
+    assert listed["name"] == "Workshop" and listed["owners"] == "guest"
+    assert datetime.fromisoformat(listed["deletes_at"]) == made + timedelta(hours=10)
+
+    extended = ok(admin.post(f"/admin/visitor-projects/{project['id']}/extend", json={"hours": 24}))
+    assert datetime.fromisoformat(extended["deletes_at"]) == made + timedelta(hours=34)
+    assert ok(visitor.get("/projects"))[0]["deletes_at"] == extended["deletes_at"]
+    # not deleted at its first time, but at the new one
+    assert main.delete_due_visitor_projects(made + timedelta(hours=11)) == []
+    assert main.delete_due_visitor_projects(made + timedelta(hours=34, minutes=1)) == ["Workshop"]
+
+    regular = ok(admin.post("/projects", json={"name": "Not a visitor's"}))
+    assert admin.post(f"/admin/visitor-projects/{regular['id']}/extend", json={}).status_code == 404

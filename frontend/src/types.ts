@@ -259,7 +259,8 @@ export interface LiveEvent {
  *  seconds, the server's clock) settles who came first. */
 export type LivePresenceTarget =
   | { kind: 'editing'; run_id: string; candidate_id: string; since?: number }
-  | { kind: 'uploading'; project_id: string; name: string; progress: number | null; since?: number };
+  | { kind: 'uploading'; project_id: string; name: string; progress: number | null; since?: number }
+  | { kind: 'importing_project'; name: string; progress: number | null; since?: number };
 
 export interface LivePresence {
   client: string;
@@ -320,6 +321,9 @@ export interface UsageAccountRow {
   carried_over: number;
   /** Runs duplicated (copies of a finished run). */
   duplicates?: number;
+  /** Whole projects downloaded as a file, and brought in from one. */
+  project_downloads?: number;
+  project_imports?: number;
   merges: number;
   exports: number;
   figures: number;
@@ -436,6 +440,8 @@ export interface ServerSettings {
   visitor_upload_mb: { value: number | null; default: number };
   /** How much a visitor account may keep at once; null: no limit. */
   visitor_storage_mb: { value: number | null; default: number };
+  /** The deletion date, so many days on, that an account gets with the visitor tag when it has none; null: none. */
+  visitor_account_days: { value: number | null; default: number };
 }
 
 export type ServerSettingsChanges = Partial<{ [K in keyof ServerSettings]: ServerSettings[K]['value'] }>;
@@ -611,6 +617,18 @@ export interface SessionUser {
   delete_after: string | null;
   /** For a visitor account: its limits (backend/app/visitors.py). */
   visitor?: VisitorLimits | null;
+  /** The largest video and the largest project file this account may bring in. */
+  upload_limit_bytes?: number | null;
+  project_file_limit_bytes?: number | null;
+}
+
+/** A visitor's project in the admin panel: whose it is and when it is deleted. */
+export interface VisitorProject {
+  id: string;
+  name: string;
+  owners: string;
+  created_at: string;
+  deletes_at: string;
 }
 
 export interface VisitorLimits {

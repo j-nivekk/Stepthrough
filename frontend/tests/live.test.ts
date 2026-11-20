@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { busyElsewhere, busyRunIds, isSharedAccount, patchCandidate, staleQueries, stepEditor, uploadsElsewhere } from '../src/lib/live';
+import { busyElsewhere, busyRunIds, isSharedAccount, patchCandidate, projectImportsElsewhere, staleQueries, stepEditor, uploadsElsewhere } from '../src/lib/live';
 import type { CandidateFrame, LiveBusy, LiveEvent, LivePresence, RunDetail, SessionUser } from '../src/types';
 
 const event = (kind: LiveEvent['kind'], ids: Partial<LiveEvent> = {}): LiveEvent => ({
@@ -60,4 +60,21 @@ test('only a regular account with the shared tag is shared', () => {
   assert.equal(isSharedAccount(user(['shared', 'admin'], true)), false);
   assert.equal(isSharedAccount(user(['group-a'])), false);
   assert.equal(isSharedAccount(null), false);
+});
+
+test('project files other browsers bring in show on the list of projects, not the browser\'s own', () => {
+  const presence: LivePresence[] = [
+    { client: 'me', targets: [{ kind: 'importing_project', name: 'mine.stepthrough.zip', progress: 0.2 }] },
+    { client: 'them', targets: [{ kind: 'importing_project', name: 'theirs.stepthrough.zip', progress: 0.4 }, { kind: 'uploading', project_id: 'p', name: 'a.mp4', progress: null }] },
+  ];
+  assert.deepEqual(
+    projectImportsElsewhere(presence, 'me').map((upload) => [upload.name, upload.progress]),
+    [['theirs.stepthrough.zip', 0.4]],
+  );
+});
+
+test('a visitor account is a shared one', () => {
+  const user = { id: 'g', name: 'g', display_name: null, tags: ['visitor'], is_admin: false, delete_after: null } as SessionUser;
+  assert.equal(isSharedAccount(user), true);
+  assert.equal(isSharedAccount({ ...user, is_admin: true }), false);
 });

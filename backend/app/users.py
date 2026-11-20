@@ -40,6 +40,7 @@ from .user_admin import (
     delete_account,
     delete_expired_accounts,
     import_accounts,
+    visitor_deletion_date,
 )
 
 
@@ -151,8 +152,9 @@ def cmd_link(args: argparse.Namespace) -> None:
 
 def cmd_tag(args: argparse.Namespace) -> None:
     row = _user(args.name)
-    tags = (set(User.from_row(row).tags) | set(clean_tags(args.add))) - set(args.remove)
-    user = User.from_row(update_user(row["id"], tags=account_tags(tags)))
+    old = User.from_row(row).tags
+    tags = account_tags((set(old) | set(clean_tags(args.add))) - set(args.remove))
+    user = User.from_row(update_user(row["id"], tags=tags, delete_after=visitor_deletion_date(old, tags, row.get("delete_after"))))
     _out(f"{user.name}: {', '.join(user.tags) or 'no tags'}")
 
 
@@ -249,6 +251,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     init_db()
+    # what the administrators chose in the admin panel, such as the visitors' deletion date
+    from . import server_settings
+
+    server_settings.load(None)
     try:
         args.run(args)
     except AccountError as error:

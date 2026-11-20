@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import replace
 from typing import Any
@@ -71,6 +72,7 @@ from .user_admin import (
     delete_account,
     import_accounts,
     split_tags,
+    visitor_deletion_date,
 )
 
 router = APIRouter()
@@ -97,6 +99,8 @@ def user_response(user: User) -> UserResponse:
         is_admin=user.is_admin,
         delete_after=user.delete_after,
         visitor=visitors.limits(user) or None,
+        upload_limit_bytes=visitors.upload_limit(user),
+        project_file_limit_bytes=visitors.project_file_limit(),
     )
 
 
@@ -314,6 +318,13 @@ def admin_users_update(user_id: str, payload: AdminUserUpdate, user: CurrentUser
             changes["tags"] = account_tags(payload.tags or [])
         if "delete_after" in sent:
             changes["delete_after"] = clean_date(payload.delete_after)
+        if "tags" in changes:
+            # an account that becomes a visitor without a date gets the visitors' one
+            dated = visitor_deletion_date(
+                json.loads(row.get("tags") or "[]"), changes["tags"], changes.get("delete_after", row.get("delete_after"))
+            )
+            if dated != changes.get("delete_after", row.get("delete_after")):
+                changes["delete_after"] = dated
         if "notes" in sent:
             changes["notes"] = (payload.notes or "").strip() or None
     except AccountError as error:

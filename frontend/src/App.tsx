@@ -22,6 +22,7 @@ import {
   health,
   importProjectFile,
   importProjectFromFile,
+  getProjectFileSize,
   importRecording,
   projectFileUrl,
   isAbortError,
@@ -59,7 +60,7 @@ import {
 import { downloadExportBundle, jumpToAnchor, sleep, triggerDownload } from './lib/utils';
 import { formatCalendarDate } from './lib/formatters';
 import { isSharedAccount } from './lib/live';
-import { isVisitor, uploadProblem } from './lib/visitors';
+import { formatSize, isVisitor, uploadProblem } from './lib/visitors';
 import {
   collectImportQueueItems,
   getUploadedImportItems,
@@ -910,7 +911,7 @@ function App({ session, onSessionChange }: AppProps) {
       return;
     }
     // A visitor account is told at once about a file that would be refused, rather than after sending it.
-    const problem = uploadProblem(accountUser, next.file, isProjectFile(next.file.name) ? 'project' : 'video');
+    const problem = uploadProblem(sessionUser, next.file, isProjectFile(next.file.name) ? 'project' : 'video');
     if (problem) {
       setImportQueue((current) =>
         current.map((item) => (item.localId === next.localId ? { ...item, status: 'error', progress: null, error: problem } : item)),
@@ -1130,7 +1131,7 @@ function App({ session, onSessionChange }: AppProps) {
       failed('not a project file: choose a .stepthrough.zip.');
       return;
     }
-    const problem = uploadProblem(accountUser, file, 'project');
+    const problem = uploadProblem(sessionUser, file, 'project');
     if (problem) {
       failed(problem);
       return;
@@ -1139,10 +1140,20 @@ function App({ session, onSessionChange }: AppProps) {
     const controller = new AbortController();
     projectFileController.current = controller;
     setProjectFileUpload({ name: file.name, status: 'uploading', progress: 0, error: null });
+    // In a shared account the other browsers show this import on their list of projects, in steps of a tenth.
+    const presenceKey = 'import-project';
+    let shownTenth = 0;
+    setPresence(presenceKey, { kind: 'importing_project', name: file.name, progress: 0 });
     importProjectFromFile(file, {
       signal: controller.signal,
-      onProgress: (fraction) =>
-        setProjectFileUpload((current) => (current?.status === 'uploading' ? { ...current, progress: fraction } : current)),
+      onProgress: (fraction) => {
+        setProjectFileUpload((current) => (current?.status === 'uploading' ? { ...current, progress: fraction } : current));
+        const tenth = Math.floor(fraction * 10);
+        if (tenth !== shownTenth) {
+          shownTenth = tenth;
+          setPresence(presenceKey, { kind: 'importing_project', name: file.name, progress: tenth / 10 });
+        }
+      },
     })
       .then((project) => {
         setProjectFileUpload(null);
@@ -1158,6 +1169,7 @@ function App({ session, onSessionChange }: AppProps) {
         failed(error instanceof Error ? error.message.toLocaleLowerCase() : 'the project file could not be imported.');
       })
       .finally(() => {
+        setPresence(presenceKey, null);
         if (projectFileController.current === controller) projectFileController.current = null;
       });
   }
@@ -1310,8 +1322,24 @@ function App({ session, onSessionChange }: AppProps) {
     deleteProjectMutation.mutate({ projectId });
   }
 
-  /** The whole project as one file, videos included (backend/app/project_file.py): the browser's own download. */
-  function downloadProjectFile(projectId: string) {
+  /** The whole project as one file, videos included (backend/app/project_file.py): the browser's own download.
+   *  A file larger than this server takes back is said so first, as it could only be kept, not brought back here. */
+  async function downloadProjectFile(projectId: string) {
+    try {
+      const size = await getProjectFileSize(projectId);
+      if (
+        size.bytes > size.limit_bytes &&
+        !(await confirm({
+          message: `this file is about ${formatSize(size.bytes)}, more than this server takes in (${formatSize(size.limit_bytes)}).`,
+          detail: 'you can keep it, but bringing it back here needs a larger limit, or a video less.',
+          confirmLabel: 'download anyway',
+        }))
+      ) {
+        return;
+      }
+    } catch {
+      // without an answer about its size, the download itself still works
+    }
     triggerDownload(projectFileUrl(projectId));
   }
 
@@ -1815,7 +1843,7 @@ function App({ session, onSessionChange }: AppProps) {
       )}
       {appPrefs.showPerfMonitor && <PerformanceMonitor />}
       {workflowStage !== 'projects' && !showUsers && activeProject?.deletes_at ? (
-        <VisitorNotice deletesAt={activeProject.deletes_at} onDownload={() => downloadProjectFile(activeProject.id)} />
+        <VisitorNotice deletesAt={activeProject.deletes_at} onDownload={() => void downloadProjectFile(activeProject.id)} />
       ) : null}
       {viewportWarning}
       {confirmDialog}

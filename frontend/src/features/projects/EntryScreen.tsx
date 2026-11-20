@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react';
 import { EditableName } from '../../components/EditableName';
 import { StageNavigator } from '../../components/StageNavigator';
 import { formatProjectSummary } from '../../lib/formatters';
+import { projectImportsElsewhere } from '../../lib/live';
 import { deletionDate, deletionIsNear, deletionLine } from '../../lib/visitors';
+import { useLive } from '../live/LiveProvider';
 import type { Project } from '../../types';
 import type { ProjectEntryTarget, WorkflowStage } from '../../lib/workflow';
 
@@ -89,6 +91,9 @@ export function EntryScreen({
   selectedProjectId,
 }: EntryScreenProps) {
   const [ocrWarningsExpanded, setOcrWarningsExpanded] = useState(false);
+  // In a shared account: project files another browser is bringing in from its list of projects.
+  const live = useLive();
+  const importsElsewhere = projectImportsElsewhere(live.presence, live.clientId);
   // "or import a project": a dropzone for a project file, open while it is wanted or a file is on its way
   const [importOpen, setImportOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -233,6 +238,14 @@ export function EntryScreen({
                 <span className="import-dropzone-note">.stepthrough.zip</span>
               </label>
             ) : null}
+            {importsElsewhere.map((upload) => (
+              <div className="entry-project-upload" key={upload.key}>
+                <span className="import-row-title">{upload.name}</span>
+                <span className="live-pill">
+                  importing in another browser{upload.progress !== null ? ` ${Math.round(upload.progress * 100)}%` : ''}
+                </span>
+              </div>
+            ))}
             {projectFileUpload ? (
               <div className={`entry-project-upload ${projectFileUpload.status}`}>
                 <span className="import-row-title">{projectFileUpload.name}</span>

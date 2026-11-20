@@ -30,6 +30,7 @@ import shutil
 import sqlite3
 import time
 import zipfile
+import zlib
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import IO, Any
@@ -153,6 +154,21 @@ def _plan(project: dict[str, Any]) -> tuple[dict[str, Any], list[tuple[str, Path
             )
         manifest["recordings"].append({**{field: recording.get(field) for field in RECORDING_FIELDS}, "video": video_name, "runs": runs})
     return manifest, files
+
+
+def estimated_size(project: dict[str, Any]) -> int:
+    """About how large the project file of ``project`` will be, in bytes: its files as they are, project.json, and
+    the zip's own records (the files are stored, not compressed, so this is close)."""
+    manifest, files = _plan(project)
+    sizes = 0
+    for _name, source in files:
+        try:
+            sizes += source.stat().st_size
+        except OSError:
+            pass
+    # project.json goes in compressed, and without its list of files yet, which adds about 100 bytes a file
+    listing = len(zlib.compress(json.dumps(manifest, ensure_ascii=False, indent=1).encode())) + 100 * len(files)
+    return sizes + listing + 200 * (len(files) + 1)
 
 
 def stream(project: dict[str, Any]) -> Iterator[bytes]:
@@ -309,12 +325,14 @@ def import_into(
     project: dict[str, Any],
     *,
     max_video_bytes: int | None = None,
+    max_total_bytes: int | None = None,
     room_bytes: int | None = None,
     too_full: Callable[[int], str] | None = None,
 ) -> list[str]:
     """Bring the recordings of a project file, with their runs, steps and phases, into ``project``. Returns the new
-    recordings' ids. ``max_video_bytes`` is the largest video this account may upload, and ``room_bytes`` how much
-    it may still keep (``too_full`` says so, given what the file needs). Nothing stays behind when it fails."""
+    recordings' ids. ``max_video_bytes`` is the largest video this account may upload, ``max_total_bytes`` the
+    largest project file the server takes in, and ``room_bytes`` how much the account may still keep (``too_full``
+    says so, given what the file needs). Nothing stays behind when it fails."""
     try:
         archive = zipfile.ZipFile(source)
     except (zipfile.BadZipFile, OSError):
@@ -340,6 +358,10 @@ def import_into(
                         f"The video {recording.get('filename') or info.filename} is larger than the "
                         f"{max_video_bytes // (1024 * 1024)} MB upload limit of this account."
                     )
+            if max_total_bytes is not None and needed > max_total_bytes:
+                raise ProjectFileError(
+                    f"This project file is larger than the {max_total_bytes // (1024 * 1024)} MB this server takes in at once."
+                )
             if room_bytes is not None and needed > room_bytes:
                 raise ProjectFileError(too_full(needed) if too_full else "There is not enough room left for this project file.")
             if needed > shutil.disk_usage(DATA_ROOT).free - DISK_MARGIN:

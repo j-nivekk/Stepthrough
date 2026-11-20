@@ -281,3 +281,17 @@ def test_traffic_goes_after_the_keeping_time(server) -> None:
     assert [(row["requests"], row["bytes_in"], row["bytes_out"]) for row in list_traffic("2000-01-01")] == [(3, 15, 25)]
     traffic.purge(14)
     assert list_traffic("2000-01-01") == []
+
+
+def test_whole_projects_downloaded_and_brought_in_are_counted(server, video_factory) -> None:
+    create_account("group", tags=["shared"], password=PASSWORD)
+    create_account("teacher", tags=["admin"], password=PASSWORD)
+    member = server("group", first=True)
+    run_id, _steps = a_task(member, video_factory)
+    recording_id = ok(member.get(f"/runs/{run_id}"))["summary"]["recording_id"]
+    project_id = ok(member.get(f"/recordings/{recording_id}"))["project_id"]
+    data = member.get(f"/projects/{project_id}/project-file").content
+    ok(member.post("/projects/project-file", files={"file": ("p.stepthrough.zip", data, "application/zip")}))
+    teacher = server("teacher")
+    (group,) = ok(teacher.get("/admin/usage", params={"days": 7}))["accounts"]
+    assert (group["project_downloads"], group["project_imports"]) == (1, 1)

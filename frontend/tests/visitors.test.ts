@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { formatSize, formatTimeLeft, listTagProblems, tagProblem, uploadProblem } from '../src/lib/visitors';
+import { formatSize, formatTimeLeft, listTagProblems, tagProblem, uploadProblem, visitorDeletionDate, visitorRowsWithoutDate } from '../src/lib/visitors';
 import type { SessionUser } from '../src/types';
 
 const MB = 1024 * 1024;
@@ -41,6 +41,7 @@ test('sizes and times read as people say them', () => {
   assert.equal(formatSize(500 * MB), '500 MB');
   assert.equal(formatSize(2000 * MB), '2000 MB');
   assert.equal(formatSize(20480 * MB), '20 GB');
+  assert.equal(formatSize(43909), '43 KB');
   const now = Date.parse('2026-11-20T12:00:00Z');
   assert.equal(formatTimeLeft('2026-11-21T08:00:00Z', now), 'in 20 hours');
   assert.equal(formatTimeLeft('2026-11-20T12:30:00Z', now), 'in 30 minutes');
@@ -60,4 +61,23 @@ test('a list of people is checked for tags that cannot go together before it is 
   );
   assert.deepEqual(listTagProblems('name;tags\r\ndora;visitor shared\r\n', []).map(({ name }) => name), ['dora']);
   assert.deepEqual(listTagProblems('name\nemil\n', ['shared']), []);
+});
+
+test('every account is told before sending a file larger than the server takes in', () => {
+  const ordinary: SessionUser = {
+    id: 'ada', name: 'ada', display_name: null, tags: [], is_admin: false, delete_after: null, visitor: null,
+    upload_limit_bytes: 1024 * MB, project_file_limit_bytes: 4096 * MB,
+  };
+  assert.match(uploadProblem(ordinary, { size: 1025 * MB }, 'video') ?? '', /1024 MB upload limit/);
+  assert.equal(uploadProblem(ordinary, { size: 3000 * MB }, 'project'), null);
+  assert.match(uploadProblem(ordinary, { size: 4097 * MB }, 'project') ?? '', /4096 MB this server takes in/);
+  assert.equal(uploadProblem(null, { size: 9999 * MB }, 'project'), null);
+});
+
+test('visitor accounts without a date are told the one they get', () => {
+  assert.equal(visitorDeletionDate(14, new Date(2026, 10, 20)), '2026-12-04');
+  assert.equal(visitorDeletionDate(null), null);
+  const list = 'name,expires,tags\nann,,visitor\nbob,2027-01-01,visitor\ncarl,,group-a\n';
+  assert.equal(visitorRowsWithoutDate(list, []), 1);
+  assert.equal(visitorRowsWithoutDate(list, ['visitor']), 2);
 });

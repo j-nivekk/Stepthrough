@@ -306,11 +306,14 @@ def projects_owned_only_by(user_id: str) -> list[dict[str, Any]]:
 
 def visitor_projects() -> list[dict[str, Any]]:
     """Projects only visitor accounts own (app/visitors.py): at least one owner, and every owner a visitor account
-    (not an administrator, and not a tag)."""
+    (not an administrator, and not a tag). ``owners`` are their names, separated by commas."""
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT p.id, p.name, p.slug, p.created_at FROM projects p
+            SELECT p.id, p.name, p.slug, p.created_at, p.keep_until,
+                (SELECT group_concat(u.name, ', ') FROM project_members m JOIN users u ON u.id = m.member
+                 WHERE m.project_id = p.id AND m.role = 'owner') AS owners
+            FROM projects p
             WHERE EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.role = 'owner')
               AND NOT EXISTS (
                 SELECT 1 FROM project_members m
@@ -326,6 +329,11 @@ def visitor_projects() -> list[dict[str, Any]]:
             (VISITOR_TAG, ADMIN_TAG),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def set_project_keep_until(project_id: str, keep_until: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE projects SET keep_until = ? WHERE id = ?", (keep_until, project_id))
 
 
 def projects_owned_by(user_id: str) -> list[dict[str, Any]]:

@@ -94,9 +94,11 @@ LABEL org.opencontainers.image.title="Stepthrough" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}"
-# Which build this is, for /health (the app's own version number is in the code).
+# Which build this is, for /health (the app's own version number is in the code). Uploads on their way in are
+# kept on the data volume (TMPDIR), not on the container's own disk: a project file can be gigabytes.
 ENV STEPTHROUGH_BUILD=${VERSION} \
-    STEPTHROUGH_REVISION=${REVISION}
+    STEPTHROUGH_REVISION=${REVISION} \
+    TMPDIR=/data/tmp
 USER stepthrough
 VOLUME ["/data"]
 EXPOSE 8000

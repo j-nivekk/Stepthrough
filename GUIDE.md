@@ -655,6 +655,10 @@ when it is in: you can carry on reviewing, or analyse again with other settings.
 more than once. To add the videos of a project file to a project you are working in instead, drop the file on
 that project's import page, as you would a video.
 
+A server takes project files up to a size its administrators chose (4 GB unless they chose otherwise). When a
+project's file would be larger, **download** says so first: you can still keep the file, but not bring it back on
+that server.
+
 A file made with an earlier version of Stepthrough always opens in a later one. A file made with a newer version
 than the server is refused with a message, rather than read halfway: update the server first. A damaged or
 incomplete file is noticed and refused, and nothing of it is kept.
@@ -817,7 +821,9 @@ combination). Administrator accounts cannot have it either.
   screenshots together, unless the administrators chose other limits. Both are checked when a video or a project
   file comes in, and the account panel shows them.
 
-A project that a regular account owns as well is not deleted. In the usage, traffic and progress reports, visitor
+An administrator can keep a visitor's project a day longer, for example for a workshop that runs over, and a
+visitor account itself gets a deletion date (14 days on, unless the administrators chose otherwise) when it is
+made without one. A project that a regular account owns as well is not deleted. In the usage, traffic and progress reports, visitor
 accounts are marked as such; choosing a class leaves them out, as they have no class tag.
 
 ### Privacy and consent

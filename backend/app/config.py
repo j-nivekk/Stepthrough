@@ -51,6 +51,8 @@ LOCAL_DEV_ORIGINS = (
     "http://127.0.0.1:4173",
 )
 DEFAULT_MAX_UPLOAD_MB = 2048
+# A project file holds every video of a project, so it may be larger than one upload.
+DEFAULT_MAX_PROJECT_FILE_MB = 4096
 DEFAULT_SERVER_MAX_CONCURRENT_RUNS = 2
 
 
@@ -65,6 +67,8 @@ class ServerConfig:
     # A built frontend (`npm run build` output) to serve from the API's own origin, as the Docker image does.
     frontend_dir: Path | None = None
     auth: AuthMode = "none"
+    # The largest project file (app/project_file.py) brought in at once; never less than max_upload_bytes.
+    max_project_file_bytes: int = DEFAULT_MAX_PROJECT_FILE_MB * 1024 * 1024
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -86,6 +90,7 @@ def build_server_config() -> ServerConfig:
         # A server serves the frontend from its own origin, so it needs no cross-origin access by default.
         cors_origins = LOCAL_DEV_ORIGINS if deployment == "local" else ()
     max_upload_mb = float(os.environ.get("STEPTHROUGH_MAX_UPLOAD_MB") or DEFAULT_MAX_UPLOAD_MB)
+    max_project_file_mb = max(max_upload_mb, float(os.environ.get("STEPTHROUGH_MAX_PROJECT_FILE_MB") or DEFAULT_MAX_PROJECT_FILE_MB))
     return ServerConfig(
         deployment=deployment,  # type: ignore[arg-type]
         cors_origins=cors_origins,
@@ -94,6 +99,7 @@ def build_server_config() -> ServerConfig:
         max_concurrent_runs=_max_concurrent_runs(deployment),
         frontend_dir=_frontend_dir(),
         auth=_auth_mode(deployment),
+        max_project_file_bytes=int(max_project_file_mb * 1024 * 1024),
     )
 
 

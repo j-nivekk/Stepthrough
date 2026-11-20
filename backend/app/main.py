@@ -4,7 +4,9 @@ import asyncio
 from dataclasses import dataclass
 import json
 import logging
+import os
 import shutil
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -28,7 +30,7 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from .account_routes import router as account_router, user_response
@@ -170,7 +172,7 @@ if not logger.handlers:
     logger.addHandler(_handler)
     logger.setLevel(logging.INFO)
 server_config = build_server_config()
-visitors.configure(server_config.max_upload_bytes)
+visitors.configure(server_config.max_upload_bytes, server_config.max_project_file_bytes)
 
 
 @dataclass(frozen=True)
@@ -245,6 +247,8 @@ async def reject_oversized_uploads(request: Request, call_next):
         if video and size > server_config.max_upload_bytes:
             limit_mb = server_config.max_upload_bytes // (1024 * 1024)
             return JSONResponse(status_code=413, content={"detail": f"Recording is larger than the {limit_mb} MB upload limit."})
+        if whole_project and size > visitors.project_file_limit():
+            return JSONResponse(status_code=413, content={"detail": visitors.project_file_too_large()})
         # Visitor accounts have limits of their own (app/visitors.py).
         user = await run_in_threadpool(current_user, request)
         if user is not None and user.is_visitor:
@@ -376,9 +380,19 @@ def _start_account_cleanup() -> None:
     Thread(target=_delete_visitor_projects_often, name="stepthrough-visitor-cleanup", daemon=True).start()
 
 
+def _use_tmpdir() -> None:
+    """Uploads on their way in are kept where TMPDIR says: in the Docker image, on the data volume rather than the
+    container's own disk, as a project file can be gigabytes. The folder is made if it is not there yet."""
+    folder = os.environ.get("TMPDIR")
+    if folder:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        tempfile.tempdir = None  # looked up again, now that it exists
+
+
 @app.on_event("startup")
 def startup() -> None:
     ensure_app_dirs()
+    _use_tmpdir()
     init_db()
     if server_config.auth == "password" and not any_password_set():
         logger.warning(
@@ -1239,6 +1253,37 @@ def projects_file_download(project_id: str, user: CurrentUser) -> StreamingRespo
     )
 
 
+class VisitorExtension(BaseModel):
+    hours: int = Field(default=24, ge=1, le=24 * 30)
+
+
+@app.get("/admin/visitor-projects")
+def admin_visitor_projects(user: CurrentUser) -> list[dict[str, Any]]:
+    """Every visitor's project with its accounts and when it is deleted, for the administrators."""
+    require_admin(user)
+    return visitors.overview()
+
+
+@app.post("/admin/visitor-projects/{project_id}/extend")
+def admin_extend_visitor_project(project_id: str, payload: VisitorExtension, user: CurrentUser) -> dict[str, Any]:
+    """Give a visitor's project more time, such as a day more for a workshop that runs over."""
+    require_admin(user)
+    keep_until = visitors.extend(project_id, payload.hours, datetime.now(timezone.utc))
+    if keep_until is None:
+        raise HTTPException(status_code=404, detail="That is not a visitor's project, or it is gone.")
+    # the visitors' browsers show the new time at once; it is no change to the project itself
+    _announce("projects", project_id=project_id, accounts=set(shared_accounts_for_project(project_id)))
+    return next(item for item in visitors.overview() if item["id"] == project_id)
+
+
+@app.get("/projects/{project_id}/project-file/size")
+def projects_file_size(project_id: str, user: CurrentUser) -> dict[str, int]:
+    """About how large the project's file would be, and the largest project file this server takes in: the app
+    warns before a download that could not be brought back here."""
+    project = _project_for(project_id, user, "viewer")
+    return {"bytes": project_file.estimated_size(project), "limit_bytes": visitors.project_file_limit()}
+
+
 @app.post("/projects/project-file", response_model=ProjectResponse)
 async def projects_from_file(user: CurrentUser, file: UploadFile = File(...), client: SharedClient = None) -> ProjectResponse:
     """A new project from a project file, under the name it has there, with its videos, runs, steps and phases.
@@ -1254,6 +1299,7 @@ async def projects_from_file(user: CurrentUser, file: UploadFile = File(...), cl
                     file.file,
                     project,
                     max_video_bytes=visitors.upload_limit(user),
+                    max_total_bytes=visitors.project_file_limit(),
                     room_bytes=room,
                     too_full=lambda needed: visitors.full_message(user, needed),
                 )
@@ -1287,6 +1333,7 @@ async def projects_file_import(
                 file.file,
                 project,
                 max_video_bytes=visitors.upload_limit(user),
+                max_total_bytes=visitors.project_file_limit(),
                 room_bytes=room,
                 too_full=lambda needed: visitors.full_message(user, needed),
             )

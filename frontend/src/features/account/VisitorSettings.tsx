@@ -1,6 +1,9 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import { extendVisitorProject, listVisitorProjects } from '../../api';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { deletionDate, deletionLine } from '../../lib/visitors';
 import { NumberSetting, OptionalNumberSetting, useServerSettings } from './ServerSettingsPanel';
 
 /**
@@ -69,6 +72,20 @@ export function VisitorSettings() {
 
         <div className="analysis-parameter-group">
           <OptionalNumberSetting
+            empty="no date"
+            label="visitor accounts kept"
+            max={3650}
+            onSave={(value) => save({ visitor_account_days: value })}
+            unit="d"
+            value={settings.visitor_account_days.value}
+          />
+          <span className="analysis-parameter-annotation">
+            for an account given the visitor tag without a deletion date of its own. empty: no date.
+          </span>
+        </div>
+
+        <div className="analysis-parameter-group">
+          <OptionalNumberSetting
             empty="no limit"
             label="each visitor keeps at most"
             max={10_000_000}
@@ -82,7 +99,100 @@ export function VisitorSettings() {
         </div>
       </div>
       {message ? <p className={`analysis-guidance-copy ${message.tone === 'error' ? 'users-error' : ''}`}>{message.text}</p> : null}
+      <VisitorProjects />
       {dialog}
+    </div>
+  );
+}
+
+/** From how many visitors' projects on the list gets a search field. */
+const SEARCH_FROM = 6;
+
+/**
+ * The visitors' projects, the one deleted first first, each with a day more to give (a workshop that runs over).
+ * There can be many, so the list is folded to one line (how many, and which goes next) until it is opened; open, it
+ * scrolls within its own box, and from a handful on it can be searched by project or account.
+ */
+function VisitorProjects() {
+  const queryClient = useQueryClient();
+  const projectsQuery = useQuery({ queryKey: ['visitor-projects'], queryFn: listVisitorProjects, refetchInterval: 60_000 });
+  const extend = useMutation({
+    mutationFn: (projectId: string) => extendVisitorProject(projectId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['visitor-projects'] }),
+  });
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const projects = projectsQuery.data ?? [];
+  const needle = search.trim().toLocaleLowerCase();
+  const shown = needle
+    ? projects.filter((project) => `${project.name} ${project.owners}`.toLocaleLowerCase().includes(needle))
+    : projects;
+  const next = projects[0];
+
+  return (
+    <div className="analysis-parameter-box users-visitor-projects">
+      <div className="analysis-parameter-row">
+        <span>
+          {projects.length
+            ? `${projects.length} ${projects.length === 1 ? 'visitor project' : 'visitor projects'}`
+            : 'no visitor projects'}
+        </span>
+        {projects.length ? (
+          <button
+            aria-controls="users-visitor-project-list"
+            aria-expanded={open}
+            className="analysis-task-link subtle"
+            onClick={() => setOpen((current) => !current)}
+            type="button"
+          >
+            {open ? 'hide' : 'show'}
+          </button>
+        ) : null}
+      </div>
+      {next ? (
+        <span className="analysis-parameter-annotation" title={deletionDate(next.deletes_at)}>
+          next: {next.name}, {deletionLine(next.deletes_at)}.
+        </span>
+      ) : null}
+      {open && projects.length ? (
+        <>
+          {projects.length >= SEARCH_FROM ? (
+            <input
+              aria-label="search visitor projects and accounts"
+              className="users-control users-visitor-search"
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="search projects and accounts"
+              spellCheck={false}
+              value={search}
+            />
+          ) : null}
+          <div className="users-visitor-project-list" id="users-visitor-project-list" role="list">
+            {shown.map((project) => (
+              <div className="analysis-parameter-group" key={project.id} role="listitem">
+                <div className="analysis-parameter-row">
+                  <span className="users-visitor-project-name" title={project.name}>
+                    {project.name}
+                  </span>
+                  <button
+                    className="analysis-task-link subtle"
+                    disabled={extend.isPending && extend.variables === project.id}
+                    onClick={() => extend.mutate(project.id)}
+                    title="keep it a day longer"
+                    type="button"
+                  >
+                    +1 day
+                  </button>
+                </div>
+                <span className="analysis-parameter-annotation" title={deletionDate(project.deletes_at)}>
+                  {project.owners || 'no account'}, {deletionLine(project.deletes_at)}
+                </span>
+              </div>
+            ))}
+            {!shown.length ? <span className="analysis-parameter-annotation">none match.</span> : null}
+          </div>
+        </>
+      ) : null}
+      {extend.isError ? <p className="analysis-guidance-copy users-error">{extend.error.message.toLocaleLowerCase()}</p> : null}
     </div>
   );
 }
