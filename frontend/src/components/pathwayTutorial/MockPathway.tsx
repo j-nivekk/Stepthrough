@@ -1,4 +1,4 @@
-import { useId, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useId, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 
 import { ART_HEIGHT as H, ART_WIDTH as W, MockArt } from './MockArt';
 import { MOCK_STEPS, mockStep, type MockPathway as Pathway, type MockScreen } from './tutorialModel';
@@ -28,6 +28,13 @@ export interface MockPathwayProps {
   clickable?: 'screens' | 'steps' | null;
   onScreen?: (screenId: number) => void;
   onStep?: (step: number) => void;
+  /** A step selected, its number outlined, with `tool` (a small toolbox) beside it: the "correct it" lesson. */
+  chosen?: number | null;
+  tool?: ReactNode;
+  /** The box a dragged step would go to, outlined with a moving dashed line. */
+  dropTarget?: number | null;
+  /** Pressing on a step's number: perhaps the start of a drag. */
+  onStepPress?: (step: number, event: PointerEvent<SVGGElement>) => void;
 }
 
 export const DESIGN_WIDTH = 760;
@@ -102,6 +109,10 @@ export function MockPathway({
   clickable = null,
   onScreen,
   onStep,
+  chosen = null,
+  tool = null,
+  dropTarget = null,
+  onStepPress,
 }: MockPathwayProps) {
   const markerId = `pt-arrow-${useId().replace(/:/g, '')}`;
   const chart = view === 'chart';
@@ -220,6 +231,9 @@ export function MockPathway({
   // The explanation opens below the step's number, or above it when the number is near the bottom.
   const bubbleAt = bubble ? pill(bubble.step) : null;
   const bubbleUp = bubbleAt ? bubbleAt.y + 22 + 80 > height : false;
+  // The toolbox of a chosen step opens below its number, or above it near the bottom, as in the app.
+  const toolAt = tool && chosen !== null && chart ? pill(chosen) : null;
+  const toolUp = toolAt ? toolAt.y + 22 + 40 > height : false;
 
   return (
     <div className="pt-mock-wrap">
@@ -333,8 +347,10 @@ export function MockPathway({
         const handler = clickable === 'steps' && onStep ? activate(() => onStep(step.n)) : {};
         return (
           <g
-            className={`pt-move ${clickable === 'steps' ? 'pt-clickable' : chart ? 'pt-peek' : ''}`}
+            className={`pt-move ${clickable === 'steps' ? 'pt-clickable' : chart ? 'pt-peek' : ''} ${onStepPress ? 'pt-grab' : ''}`}
+            data-pill={step.n}
             key={`pill${step.n}`}
+            onPointerDown={onStepPress ? (event) => onStepPress(step.n, event) : undefined}
             onBlur={() => setHovered(null)}
             onFocus={() => setHovered(step.n)}
             onMouseEnter={() => setHovered(step.n)}
@@ -343,7 +359,8 @@ export function MockPathway({
             {...handler}
           >
             {demo === `pill:${step.n}` ? <rect className="pt-demo-halo" height={PILL + 14} rx={(PILL + 14) / 2} width={PILL + 14} x={-7} y={-7} /> : null}
-            <Pill active={step.n === current || bubble?.step === step.n || (chart && step.n === hovered)} n={step.n} />
+            {chosen === step.n ? <rect fill="none" height={PILL + 6} rx={(PILL + 6) / 2} stroke={ORANGE} strokeWidth={1.5} width={PILL + 6} x={-3} y={-3} /> : null}
+            <Pill active={step.n === current || step.n === chosen || bubble?.step === step.n || (chart && step.n === hovered)} n={step.n} />
             {!chart ? (
               <text fill="#444" fontSize={9.5} x={PILL + 4} y={10.8}>
                 {step.label}
@@ -401,22 +418,25 @@ export function MockPathway({
             const mark = marks[screen.id];
             const isCurrent = current !== null && screen.steps.includes(current);
             const shown = demo === `box:${screen.id}`;
-            const colour = shown ? GREEN : selectedIds.has(screen.id) || isCurrent ? ORANGE : mark === 'good' ? '#2f8f5f' : mark === 'bad' ? '#bf2725' : null;
+            const target = dropTarget === screen.id;
+            const colour = shown ? GREEN : target || selectedIds.has(screen.id) || isCurrent ? ORANGE : mark === 'good' ? '#2f8f5f' : mark === 'bad' ? '#bf2725' : null;
             const stack = stackOf(screen);
             const handler = clickable === 'screens' && onScreen ? activate(() => onScreen(screen.id)) : {};
             return (
               <g
                 aria-label={clickable === 'screens' ? `box ${screen.index}: ${screen.title}` : undefined}
                 className={`pt-move ${clickable === 'screens' ? 'pt-clickable pt-box' : ''}`}
+                data-box={screen.id}
                 key={`frame${screen.id}`}
                 style={{ transform: `translate(${boxX(screen) - 5}px, ${rowTop(screen.row) - 5}px)` }}
                 {...handler}
               >
                 <rect
-                  className={shown ? 'pt-demo-box' : undefined}
+                  className={shown ? 'pt-demo-box' : target ? 'pt-drop' : undefined}
                   fill={shown ? 'rgba(72, 175, 124, 0.2)' : 'transparent'}
                   height={H + stack + 10}
                   stroke={colour ?? 'transparent'}
+                  strokeDasharray={target ? '6 4' : undefined}
                   strokeWidth={2.5}
                   width={W + stack + 10}
                 />
@@ -456,6 +476,18 @@ export function MockPathway({
         </g>
       ) : null}
     </svg>
+    {tool && toolAt ? (
+      <div
+        className={`pathway-toolbox pt-toolbox ${toolUp ? 'up' : ''}`}
+        key={`tool${chosen}`}
+        style={{
+          left: `min(${((toolAt.x - 6) / DESIGN_WIDTH) * 100}%, calc(100% - 330px))`,
+          top: `${((toolUp ? toolAt.y - 8 : toolAt.y + PILL + 8) / height) * 100}%`,
+        }}
+      >
+        {tool}
+      </div>
+    ) : null}
     {bubble && bubbleAt ? (
       <div
         className={`pt-bubble ${bubbleUp ? 'up' : ''}`}

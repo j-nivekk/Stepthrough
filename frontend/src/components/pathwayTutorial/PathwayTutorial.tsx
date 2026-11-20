@@ -186,8 +186,13 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   const [selected, setSelected] = useState<number | null>(null);
   // After a choice, the box of the step that changed is selected (boxes are made again on every change).
   const [follow, setFollow] = useState<number | null>(null);
-  const [menuStep, setMenuStep] = useState<number | null>(null);
-  const [menuLeft, setMenuLeft] = useState(false);
+  // Lesson 5 ("correct it"), as in the app: the step whose number was clicked, a step being dragged (and the box it
+  // would go to, or 'new' off the boxes), and the choices before each change, for the undo.
+  const [chosenStep, setChosenStep] = useState<number | null>(null);
+  const [drag, setDrag] = useState<{ n: number; x: number; y: number; moved: boolean; target: number | 'new' | null } | null>(null);
+  const [history, setHistory] = useState<Choices[]>([]);
+  // The choices as they are now, for the undo of a change made later ("show me" makes its changes on a timer).
+  const choicesNow = useRef<Choices>({});
   const [decision, setDecision] = useState<'one' | 'two' | null>(null);
   const [notes, setNotes] = useState<MockNotes>('hidden');
   const [times, setTimes] = useState(false);
@@ -198,6 +203,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   const viewRef = useRef(view);
   viewRef.current = view;
 
+  choicesNow.current = choices;
   const pathway = useMemo(() => buildMockPathway(choices, mode), [choices, mode]);
   const byScreen = useMemo(() => buildMockPathway(choices, 'screens'), [choices]);
   const splitFound = verdicts[1] === 'split' || verdicts[6] === 'split';
@@ -259,7 +265,9 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     setPicked(null);
     setVerdicts({});
     setSelected(null);
-    setMenuStep(null);
+    setChosenStep(null);
+    setDrag(null);
+    setHistory([]);
     if (index === 5) setDecision(null);
     setNotes(index === 6 ? 'under' : 'hidden');
     setTimes(false);
@@ -313,27 +321,60 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     if (result.ok && verdict === 'merged') setMarks((previous) => ({ ...previous, 7: 'good' }));
   }
 
-  /** Open a step's screen menu, towards the left when there is no room on the right. */
-  function openMenu(n: number, button: HTMLElement | null) {
-    const tools = button?.closest('.pt-tools')?.getBoundingClientRect();
-    const at = button?.getBoundingClientRect();
-    setMenuLeft(Boolean(tools && at && at.left + 230 > tools.right));
-    setMenuStep(n);
-  }
-
   function choose(n: number, link: ScreenLink | 'auto') {
+    const before = choicesNow.current;
+    setHistory((previous) => [...previous, before]);
     setChoices((previous) => {
       const next = { ...previous, [n]: { ...previous[n] } };
       if (link === 'auto') delete next[n].link;
       else next[n].link = link;
       return next;
     });
-    setMenuStep(null);
     setFollow(n);
   }
 
+  /** Take the last change back, as ⌘Z does in the app. */
+  function undo() {
+    const last = history[history.length - 1];
+    if (!last) return;
+    setChoices(last);
+    setHistory((previous) => previous.slice(0, -1));
+  }
+
+  // A step number pressed and moved is dragged: onto a box puts it there, off the boxes gives it a screen of its
+  // own. Let go without moving, it is a click, which selects the step (MockPathway's onStep).
+  useEffect(() => {
+    if (!drag) return;
+    const current = drag;
+    function move(event: PointerEvent) {
+      const moved = current.moved || Math.hypot(event.clientX - current.x, event.clientY - current.y) > 5;
+      if (!moved) return;
+      const under = document.elementFromPoint(event.clientX, event.clientY);
+      const box = under?.closest('[data-box]');
+      const own = pathway.screenOf.get(current.n);
+      const id = box ? Number(box.getAttribute('data-box')) : null;
+      const target = id !== null && id !== own ? id : !box && under?.closest('.pt-mock') ? 'new' : null;
+      setDrag({ ...current, moved, x: event.clientX, y: event.clientY, target });
+    }
+    function up() {
+      setDrag(null);
+      if (current.moved && current.target !== null) {
+        choose(current.n, current.target);
+        setChosenStep(current.n);
+      }
+    }
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  });
+
   function setPopup(n: number, popup: boolean) {
     const automatic = mockStep(n).label === 'modal';
+    const before = choicesNow.current;
+    setHistory((previous) => [...previous, before]);
     setChoices((previous) => {
       const next = { ...previous, [n]: { ...previous[n] } };
       if (popup === automatic) delete next[n].popup;
@@ -391,17 +432,15 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
       if (!mergedFound) parts.push(['box:7', () => setChecked(7)], ['pill:8', () => undefined], ['verdict:merged', () => answer(7, 'merged')]);
       play(parts, 1700);
     } else if (lesson === 4) {
-      const chip = (n: number) => document.querySelector<HTMLElement>(`.pt-panel [data-chip="${n}"]`);
+      // step 6 is picked up and dropped on home; step 8 gets a screen of its own from its toolbox
       const parts: Array<[string, () => void]> = [];
       if (pathway.screenOf.get(6) !== pathway.screenOf.get(1)) {
-        const box = pathway.screenOf.get(6) ?? 6;
-        parts.push([`box:${box}`, () => setSelected(box)], ['chip:6', () => openMenu(6, chip(6))], ['menu:1', () => choose(6, 1)]);
+        parts.push(['pill:6', () => setChosenStep(6)], ['box:1', () => choose(6, 1)]);
       }
       if (pathway.screenOf.get(8) === pathway.screenOf.get(7)) {
-        const box = pathway.screenOf.get(8) ?? 7;
-        parts.push([`box:${box}`, () => setSelected(box)], ['chip:8', () => openMenu(8, chip(8))], ['menu:new', () => choose(8, 'new')]);
+        parts.push(['pill:8', () => setChosenStep(8)], ['tool:own', () => choose(8, 'new')]);
       }
-      play(parts, 1300);
+      play(parts, 1500);
     } else if (lesson === 5) {
       play([['decide:one', () => decide('one')]], 0);
     } else if (lesson === 6) {
@@ -419,8 +458,15 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (menuStep !== null) setMenuStep(null);
+      if (drag) setDrag(null);
+      else if (chosenStep !== null) setChosenStep(null);
       else onClose();
+      return;
+    }
+    if (lesson === 4 && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      undo();
       return;
     }
     if (event.key === 'Tab') {
@@ -459,7 +505,47 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   // ── the parts of each lesson ───────────────────────────────────────────────────────────────────
 
   const story = current ? mockStep(current) : null;
-  const selectedScreen = pathway.screens.find((screen) => screen.id === selected) ?? null;
+  // The toolbox of the step whose number was clicked, as in the app: own screen, put it on, pop-up.
+  const ownBox = chosenStep !== null ? pathway.screenOf.get(chosenStep) : undefined;
+  const stepTool =
+    lesson === 4 && chosenStep !== null ? (
+      <>
+        <span className="pathway-tool-label">step {chosenStep}</span>
+        <button className={`pathway-tool${shade('tool:own')}`} onClick={() => choose(chosenStep, 'new')} type="button">
+          own screen
+        </button>
+        <select
+          aria-label="put it on another box"
+          className="pathway-tool-select"
+          onChange={(event) => {
+            if (event.target.value) choose(chosenStep, Number(event.target.value));
+          }}
+          value=""
+        >
+          <option value="">put it on…</option>
+          {pathway.screens
+            .filter((screen) => screen.id !== ownBox)
+            .map((screen) => (
+              <option key={screen.id} value={screen.id}>
+                box {screen.index}, {screen.title}
+              </option>
+            ))}
+        </select>
+        <button
+          aria-pressed={isPopup(mockStep(chosenStep), choices)}
+          className={`pathway-tool ${isPopup(mockStep(chosenStep), choices) ? 'is-on' : ''}`}
+          onClick={() => setPopup(chosenStep, !isPopup(mockStep(chosenStep), choices))}
+          type="button"
+        >
+          pop-up
+        </button>
+        {choices[chosenStep]?.link !== undefined ? (
+          <button className="pathway-tool" onClick={() => choose(chosenStep, 'auto')} type="button">
+            back where it was found
+          </button>
+        ) : null}
+      </>
+    ) : null;
 
   let body: ReactNode = null;
   let tools: ReactNode = null;
@@ -652,84 +738,42 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     body = (
       <>
         <p>
-          in the pathway, click a box to select it, or the number under it to select that one step. a toolbox
-          opens beside what you selected:
+          in the pathway, click the number under a box to select that step. a toolbox opens beside it:
         </p>
         <ul className="pt-points">
           <li>
             <b>own screen</b>: the step gets a box of its own;
           </li>
           <li>
-            <b>put it on</b> another box (or drag its number onto that box);
-          </li>
-          <li>
-            <b>stack onto</b>: the whole box goes onto another (or drag the box).
+            <b>put it on</b> another box.
           </li>
         </ul>
         <p>
-          here, click a box: its steps are listed above the chart, each with these choices. every change can be
-          taken back with ⌘Z, and the same choice is on every step card under <b>steps</b> (under annotate).
+          or drag the number: onto a box to put the step there, or off the boxes for a screen of its own. every
+          change can be taken back with <b>⌘Z</b>. a whole box is dragged the same way, onto another, to stack all its
+          steps there.
         </p>
       </>
     );
+    const own = chosenStep !== null ? pathway.screenOf.get(chosenStep) : undefined;
+    const targetBox = drag?.target !== undefined && drag?.target !== null && drag.target !== 'new' ? pathway.screens.find((screen) => screen.id === drag.target) : undefined;
+    const status = drag?.moved
+      ? drag.target === 'new'
+        ? `let go to give step ${drag.n} a screen of its own`
+        : targetBox
+          ? `let go to put step ${drag.n} on box ${targetBox.index}, ${targetBox.title}`
+          : 'let go outside the chart, or press Escape, to leave it'
+      : chosenStep !== null
+        ? `step ${chosenStep}: drag it onto a box, or use the toolbox`
+        : 'click a step number to select that step, or drag it onto a box';
     tools = (
-      <div className="pt-strip">
-        {selectedScreen ? (
-          <>
-            <span className="pt-strip-name">
-              {selectedScreen.index} · {selectedScreen.title}
-            </span>
-            <label className="pt-strip-check">
-              <input checked={isPopup(mockStep(selectedScreen.id), choices)} onChange={(event) => setPopup(selectedScreen.id, event.target.checked)} type="checkbox" />
-              pop-up
-            </label>
-            <span className="pathway-control-label">steps</span>
-            {selectedScreen.steps.map((n) => {
-              const link = choices[n]?.link;
-              const label = link === 'new' ? 'own screen' : typeof link === 'number' ? `on box ${link}` : 'where it was found';
-              return (
-                <span className="pt-strip-step" key={n}>
-                  <b>{n}</b>
-                  <button
-                    aria-expanded={menuStep === n}
-                    className={`inline-link-button${shade(`chip:${n}`)}`}
-                    data-chip={n}
-                    onClick={(event) => (menuStep === n ? setMenuStep(null) : openMenu(n, event.currentTarget))}
-                    type="button"
-                  >
-                    {label} ▾
-                  </button>
-                  {menuStep === n ? (
-                    <span className={`pt-menu ${menuLeft ? 'to-left' : ''}`} role="menu">
-                      <button onClick={() => choose(n, 'auto')} role="menuitem" type="button">
-                        back where it was found
-                      </button>
-                      <button className={shade('menu:new').trim() || undefined} onClick={() => choose(n, 'new')} role="menuitem" type="button">
-                        own screen
-                      </button>
-                      <span className="pt-menu-heading">put it on</span>
-                      {pathway.screens
-                        .filter((screen) => screen.id !== pathway.screenOf.get(n))
-                        .map((screen) => (
-                          <button className={`pt-menu-screen${shade(`menu:${screen.id}`)}`} key={screen.id} onClick={() => choose(n, screen.id)} role="menuitem" type="button">
-                            <svg aria-hidden="true" height={30} viewBox={`0 0 ${ART_WIDTH} ${ART_HEIGHT}`} width={15}>
-                              <MockArt art={mockStep(screen.id).art} />
-                            </svg>
-                            <b>{screen.id}</b> {screen.title}
-                          </button>
-                        ))}
-                    </span>
-                  ) : null}
-                </span>
-              );
-            })}
-            <button className="analysis-task-link subtle pt-strip-done" onClick={() => setSelected(null)} type="button">
-              done
-            </button>
-          </>
-        ) : (
-          <span className="candidate-view-note">click a box in the chart to change it</span>
-        )}
+      <div className="pt-status">
+        <span>{status}</span>
+        {history.length ? (
+          <button className={`analysis-task-link subtle${shade('undo')}`} onClick={undo} type="button">
+            undo ⌘Z
+          </button>
+        ) : null}
       </div>
     );
     if (done.has(4))
@@ -922,20 +966,22 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
             <MockPathway
               bubble={lesson === 2 ? bubble : null}
               caption={lesson === 6 && caption}
-              clickable={lesson === 2 ? 'steps' : lesson === 3 || lesson === 4 ? 'screens' : null}
+              chosen={lesson === 4 ? chosenStep : null}
+              clickable={lesson === 2 || lesson === 4 ? 'steps' : lesson === 3 ? 'screens' : null}
               current={lesson === 1 ? current : null}
               demo={demo}
               marks={lesson === 3 && mode === 'screens' ? marks : {}}
               notes={lesson === 6 ? notes : 'hidden'}
-              onScreen={
-                lesson === 3
-                  ? look
-                  : (id) => {
-                      setMenuStep(null);
-                      setSelected((shown) => (shown === id ? null : id));
+              dropTarget={lesson === 4 && drag?.moved && typeof drag.target === 'number' ? drag.target : null}
+              onScreen={lesson === 3 ? look : undefined}
+              onStep={lesson === 4 ? (n) => setChosenStep((shown) => (shown === n ? null : n)) : inspect}
+              onStepPress={
+                lesson === 4
+                  ? (n, event) => {
+                      if (event.button === 0) setDrag({ n, x: event.clientX, y: event.clientY, moved: false, target: null });
                     }
+                  : undefined
               }
-              onStep={inspect}
               pathway={pathway}
               selected={
                 lesson === 4
@@ -948,8 +994,14 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
               }
               spotlight={lesson === 1 ? current : lesson === 2 ? bubble?.step ?? null : demo?.startsWith('pill:') ? Number(demo.slice(5)) : null}
               times={lesson === 6 && times}
+              tool={drag?.moved ? null : stepTool}
               view={view}
             />
+            {drag?.moved ? (
+              <span aria-hidden="true" className="pathway-ghost" style={{ left: drag.x + 14, top: drag.y + 14 }}>
+                step {drag.n}
+              </span>
+            ) : null}
             {below ? <div className="pt-below">{below}</div> : null}
           </section>
         </div>
