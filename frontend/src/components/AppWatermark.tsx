@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { APP_COMMIT, APP_VERSION, BUILD_LABEL, DOI, REPOSITORY_URL, VERSION_LABEL } from '../lib/buildInfo';
 import { HowItWorksDemo } from './howItWorks/HowItWorksDemo';
 import { PathwayTutorial } from './pathwayTutorial/PathwayTutorial';
+import { WHATS_NEW_VERSION, WhatsNewTour } from './WhatsNewTour';
 import { track } from '../lib/usage';
 
 const APP_IDENTITY = `stepthrough, ${VERSION_LABEL}`;
@@ -24,6 +25,7 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
   const [ownPanel, setOwnPanel] = useState<CornerPanel | null>(null);
   const [showDemo, setShowDemo] = useState(false);
   const [showPathways, setShowPathways] = useState(false);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const panel = onOpenPanel ? openPanel ?? null : ownPanel;
   const setPanel = onOpenPanel ?? setOwnPanel;
@@ -103,6 +105,16 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
           >
             how to work with pathways
           </button>
+          <button
+            className="analysis-task-link subtle app-watermark-demo-link"
+            onClick={() => {
+              setPanel(null);
+              setShowWhatsNew(true);
+            }}
+            type="button"
+          >
+            what's new in {WHATS_NEW_VERSION}
+          </button>
           <dl className="app-watermark-facts">
             <dt>version</dt>
             <dd>
@@ -132,6 +144,7 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
       ) : null}
       {showDemo ? <HowItWorksDemo onClose={() => setShowDemo(false)} /> : null}
       {showPathways ? <PathwayTutorial onClose={() => setShowPathways(false)} /> : null}
+      {showWhatsNew ? <WhatsNewTour onClose={() => setShowWhatsNew(false)} /> : null}
     </div>
   );
 }

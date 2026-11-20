@@ -465,6 +465,10 @@ five minutes (**start the tutorial**); after that it is under **about** at the b
 pathways**. On a practice recording you fold steps into screens, follow the journey, find what the automatic
 grouping got wrong, correct it, and prepare the figure. Nothing in it changes your own runs.
 
+Used pathways before version 1.4? Correcting them works differently now (see below), and a short tour shows what
+changed the first time you open a pathway: each stop lights up one control and says what it does. **skip** ends
+it, and it stays under **about** as **what's new in 1.4**.
+
 How to read it:
 
 - The black numbers are step numbers, the same as in the step list and in `steps.csv`. A screen shows the
