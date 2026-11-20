@@ -184,11 +184,12 @@ def report(window: Window, tag: str | None = None) -> dict[str, Any]:
             target["bytes_in"] += bytes_in
             target["bytes_out"] += bytes_out
             target["requests"] += requests
-        info = names.get(account_id or "", {"name": "a deleted account", "shared": False, "admin": False})
+        info = names.get(account_id or "", {"name": "a deleted account", "shared": False, "visitor": False, "admin": False})
         entry = accounts.setdefault(account_id or "", {
             "id": account_id,
             "name": info["name"] if account_id else "not logged in",
             "shared": bool(account_id) and info["shared"],
+            "visitor": bool(account_id) and info.get("visitor", False),
             "admin": bool(account_id) and info.get("admin", False),
             "bytes_in": 0, "bytes_out": 0, "requests": 0,
             "categories": {kind: 0 for kind in CATEGORIES},

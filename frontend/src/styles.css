@@ -2924,11 +2924,15 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   min-width: 0;
 }
 
-.analysis-video-row.selected .analysis-video-row-button {
-  width: auto;
+/* The selected video looks as a selected run does: the whole row in a light orange, its name in orange. */
+.analysis-video-row.selected {
   margin-inline: -8px;
-  padding-inline: 8px;
-  background: rgba(205, 109, 30, 0.52);
+  padding: 3px 8px 4px;
+  background: rgba(205, 109, 30, 0.12);
+}
+
+.analysis-video-row.selected .analysis-video-name-text {
+  color: #cd6d1e;
 }
 
 .analysis-video-name {
@@ -3163,9 +3167,28 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 }
 
 .analysis-task-row:hover .analysis-task-hover-link,
-.analysis-task-row:focus-within .analysis-task-hover-link {
+.analysis-task-row:focus-within .analysis-task-hover-link,
+.analysis-task-row.menu-open .analysis-task-hover-link {
   opacity: 1;
   pointer-events: auto;
+}
+
+.analysis-task-row.menu-open:not(.selected):not(.running) {
+  margin-inline: -8px;
+  padding-inline: 8px;
+  background: rgba(0, 0, 0, 0.045);
+}
+
+.analysis-task-more {
+  padding: 0 3px;
+  border-radius: 3px;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+}
+
+.analysis-task-more.is-open {
+  color: #000;
+  background: rgba(0, 0, 0, 0.07);
 }
 
 .analysis-task-row.selected {
@@ -6536,11 +6559,40 @@ button:disabled {
   cursor: pointer;
 }
 
-.pathway-menu-item:hover,
-.pathway-menu-item:focus-visible,
+.pathway-menu-item:not(:disabled):hover,
+.pathway-menu-item:not(:disabled):focus-visible,
 .pathway-menu-item[aria-expanded='true'] {
   background: rgba(0, 0, 0, 0.08);
   outline: none;
+}
+
+.pathway-menu-item.is-danger {
+  color: #bf2725;
+}
+
+.pathway-menu-item.is-danger:not(:disabled):hover,
+.pathway-menu-item.is-danger:not(:disabled):focus-visible {
+  background: rgba(191, 39, 37, 0.1);
+}
+
+.pathway-menu-item:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.pathway-menu.is-compact {
+  min-width: 112px;
+  padding: 3px;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.12);
+  font-size: 11px;
+}
+
+.pathway-menu.is-compact .pathway-menu-item {
+  gap: 12px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 .pathway-menu-hint {
@@ -7645,7 +7697,8 @@ button:disabled {
     pointer-events: auto;
   }
 
-  .analysis-video-hover-link {
+  .analysis-video-hover-link,
+  .analysis-task-hover-link {
     opacity: 1;
     pointer-events: auto;
   }
@@ -8468,7 +8521,21 @@ button:disabled {
 }
 
 .users-server-number .users-control {
-  width: 72px;
+  width: 88px;
+}
+
+/* The settings for visitor accounts, in a box of their own under adding people. */
+.users-visitor-settings {
+  display: grid;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+/* Rows of a list of people that would be skipped, shown before it is imported. */
+.users-list-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .users-server-number .users-keep-select {
@@ -8476,8 +8543,9 @@ button:disabled {
   padding-right: 28px;
 }
 
+/* One width for every unit (s, h, MB, d, or none), so the fields beside them line up. */
 .users-server-unit {
-  min-width: 1ch;
+  min-width: 24px;
   color: var(--muted);
 }
 
@@ -9364,4 +9432,179 @@ button:disabled {
   .whats-new-note {
     animation: none;
   }
+}
+
+/* A visitor's project: when it is deleted, and the download that keeps it (components/VisitorNotice.tsx). In the
+   bottom left corner, across from the watermark, in a muted red that sets it apart from the grey panels; darker when
+   the time is near. */
+.visitor-notice {
+  position: fixed;
+  left: 24px;
+  bottom: 24px;
+  z-index: 21;
+  width: min(250px, calc(100vw - 48px));
+  padding: 10px 10px 10px 12px;
+  display: grid;
+  gap: 8px;
+  color: #fff;
+  background: #a85a52;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.14);
+  font-size: 12px;
+  line-height: 1.45;
+  animation: pathway-menu-in 140ms ease-out;
+}
+
+.visitor-notice.is-near {
+  background: #8e3d36;
+}
+
+.visitor-notice-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.visitor-notice-shrink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* The minus and the plus: two strokes in the text's colour. */
+.visitor-notice-sign {
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.visitor-notice-shrink:hover,
+.visitor-notice-shrink:focus-visible {
+  color: #fff;
+}
+
+.visitor-notice-text {
+  margin: 0;
+}
+
+.visitor-notice-download {
+  justify-self: start;
+  height: 26px;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+}
+
+.visitor-notice-download:hover,
+.visitor-notice-download:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.visitor-notice.is-small {
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 12px;
+  border: 0;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.visitor-notice.is-small .visitor-notice-sign {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.visitor-notice.is-small:hover .visitor-notice-sign,
+.visitor-notice.is-small:focus-visible .visitor-notice-sign {
+  color: #fff;
+}
+
+/* The deletion time on the list of projects, under a visitor's project. */
+.entry-project-row .entry-project-deletion {
+  display: block;
+  color: #a85a52;
+  font-size: 12px;
+}
+
+.entry-project-row .entry-project-deletion.is-near {
+  color: #8e3d36;
+}
+
+/* The project list's left column: "or select an existing project..." and "or import a project...", which opens a
+   dropzone for a project file, with its upload under it. */
+.entry-side {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  width: 282px;
+}
+
+.entry-side .entry-helper-copy {
+  margin-top: 0;
+}
+
+.entry-side > .entry-helper-copy:first-child {
+  margin-top: 8px;
+}
+
+.entry-helper-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 20px;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+
+.entry-helper-link:hover,
+.entry-helper-link:focus-visible,
+.entry-helper-link[aria-expanded='true'] {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.entry-project-dropzone {
+  min-height: 0;
+  padding: 16px 18px;
+  text-align: center;
+}
+
+.entry-project-upload {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  min-width: 0;
+}
+
+.entry-project-upload .import-row-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-project-upload-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.entry-project-upload-progress .import-progress {
+  flex: 1 1 auto;
+  width: auto;
 }

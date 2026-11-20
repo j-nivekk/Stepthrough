@@ -3,9 +3,10 @@
 
 import type { CandidateFrame, LiveBusy, LiveEvent, LivePresence, RunDetail, SessionUser } from '../types';
 
-/** Whether many people may be signed in to this account at once (the `shared` tag; never an administrator). */
+/** Whether many people may be signed in to this account at once: the `shared` tag, or `visitor` (a shared account
+ *  with limits); never an administrator. */
 export function isSharedAccount(user: SessionUser | null | undefined): boolean {
-  return Boolean(user && !user.is_admin && user.tags.includes('shared'));
+  return Boolean(user && !user.is_admin && (user.tags.includes('shared') || user.tags.includes('visitor')));
 }
 
 export type QueryKeyPrefix = readonly unknown[];

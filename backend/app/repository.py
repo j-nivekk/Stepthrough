@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Sequence
 from typing import Any
 from uuid import uuid4
 
-from .database import ADMIN_TAG, LOCAL_USER_ID, SHARED_TAG, connect
+from .database import ADMIN_TAG, LOCAL_USER_ID, VISITOR_TAG, acts_as_shared, connect
 from .models import RunSettings
 from .utils import slugify, utc_now
 
@@ -164,7 +165,7 @@ def shared_accounts_for_project(project_id: str) -> list[str]:
     accounts = []
     for row in rows:
         tags = json.loads(row["tags"] or "[]")
-        if SHARED_TAG in tags and ADMIN_TAG not in tags:
+        if acts_as_shared(tags):
             accounts.append(row["id"])
     return accounts
 
@@ -299,6 +300,43 @@ def projects_owned_only_by(user_id: str) -> list[dict[str, Any]]:
             ORDER BY p.created_at
             """,
             (user_id, user_id),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def visitor_projects() -> list[dict[str, Any]]:
+    """Projects only visitor accounts own (app/visitors.py): at least one owner, and every owner a visitor account
+    (not an administrator, and not a tag)."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT p.id, p.name, p.slug, p.created_at FROM projects p
+            WHERE EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.role = 'owner')
+              AND NOT EXISTS (
+                SELECT 1 FROM project_members m
+                WHERE m.project_id = p.id AND m.role = 'owner' AND NOT EXISTS (
+                    SELECT 1 FROM users u
+                    WHERE u.id = m.member
+                      AND ? IN (SELECT value FROM json_each(u.tags))
+                      AND ? NOT IN (SELECT value FROM json_each(u.tags))
+                )
+              )
+            ORDER BY p.created_at
+            """,
+            (VISITOR_TAG, ADMIN_TAG),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def projects_owned_by(user_id: str) -> list[dict[str, Any]]:
+    """Projects this user is an owner of, with others or not."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT p.id, p.name, p.slug FROM projects p
+            JOIN project_members m ON m.project_id = p.id AND m.member = ? AND m.role = 'owner'
+            """,
+            (user_id,),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -729,6 +767,141 @@ def replace_run_phases(run_id: str, boundaries: Sequence[tuple[int, str]]) -> No
         )
 
 
+MAX_RUN_NAME_LENGTH = 120
+_COPY_SUFFIX_RE = re.compile(r"\s+copy(?:\s+\d+)?$", re.IGNORECASE)
+
+
+def duplicate_run_name(
+    source_name: str | None,
+    source_run_number: int | None,
+    existing_names: Iterable[str | None],
+) -> str:
+    """Default name for a copy of a run: ``<title> copy``, then ``<title> copy 2``, ``3``, ...
+
+    Applies to both named runs (``baseline`` -> ``baseline copy``) and unnamed runs (``run #2`` -> ``run #2 copy``).
+    A trailing ``copy`` / ``copy N`` suffix on the source name is stripped so duplicating a copy yields
+    ``baseline copy 2`` instead of ``baseline copy copy``.
+    """
+    raw = (source_name or "").strip()
+    title = raw or f"run #{source_run_number or 1}"
+    stripped = _COPY_SUFFIX_RE.sub("", title).strip()
+    base = stripped or title
+    taken = {name.strip().casefold() for name in existing_names if name and name.strip()}
+    suffix = " copy"
+    number = 2
+    while True:
+        trimmed = base[: MAX_RUN_NAME_LENGTH - len(suffix)].rstrip() or base[: MAX_RUN_NAME_LENGTH - len(suffix)]
+        candidate = f"{trimmed}{suffix}"
+        if candidate.casefold() not in taken:
+            return candidate
+        suffix = f" copy {number}"
+        number += 1
+
+
+def duplicate_run_record(
+    *,
+    source_run: dict[str, Any],
+    new_run_id: str,
+    candidates: list[dict[str, Any]],
+    phases: Sequence[tuple[int, str]],
+    message: str,
+) -> dict[str, Any]:
+    """Insert a duplicated completed run with its copied steps and phases in one transaction. The copy is made now,
+    but keeps when its analysis started and finished, so it says how long that took. Every column of a step is
+    copied, also one added later."""
+    recording_id = source_run["recording_id"]
+    now = utc_now()
+    with connect() as conn:
+        existing_names = [
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM detection_runs WHERE recording_id = ?",
+                (recording_id,),
+            ).fetchall()
+        ]
+        new_name = duplicate_run_name(source_run.get("name"), source_run.get("run_number"), existing_names)
+        payload = {
+            "id": new_run_id,
+            "recording_id": recording_id,
+            "status": "completed",
+            "phase": "completed",
+            "analysis_engine": source_run["analysis_engine"],
+            "analysis_preset": source_run["analysis_preset"],
+            "analysis_advanced": source_run.get("analysis_advanced"),
+            "analysis_stable": source_run.get("analysis_stable"),
+            "analysis_config": source_run.get("analysis_config"),
+            "detector_mode": source_run["detector_mode"],
+            "tolerance": source_run["tolerance"],
+            "min_scene_gap_ms": source_run["min_scene_gap_ms"],
+            "sample_fps": source_run.get("sample_fps"),
+            "allow_high_fps_sampling": source_run.get("allow_high_fps_sampling", 0),
+            "extract_offset_ms": source_run["extract_offset_ms"],
+            "progress": 1.0,
+            "message": message,
+            "candidate_count": len(candidates),
+            "created_at": now,
+            "started_at": source_run.get("started_at") or now,
+            "completed_at": source_run.get("completed_at") or now,
+            "updated_at": now,
+            "name": new_name,
+        }
+        conn.execute(
+            """
+            INSERT INTO detection_runs (
+                id, recording_id, status, phase, analysis_engine, analysis_preset, analysis_advanced, analysis_stable,
+                analysis_config,
+                detector_mode, tolerance, min_scene_gap_ms, sample_fps, allow_high_fps_sampling,
+                extract_offset_ms, progress, message, candidate_count, created_at, started_at, completed_at,
+                updated_at, run_number, name
+            ) VALUES (
+                :id, :recording_id, :status, :phase, :analysis_engine, :analysis_preset, :analysis_advanced, :analysis_stable,
+                :analysis_config,
+                :detector_mode, :tolerance, :min_scene_gap_ms, :sample_fps, :allow_high_fps_sampling,
+                :extract_offset_ms, :progress, :message, :candidate_count, :created_at, :started_at, :completed_at,
+                :updated_at,
+                (SELECT COALESCE(MAX(run_number), 0) + 1 FROM detection_runs WHERE recording_id = :recording_id),
+                :name
+            )
+            """,
+            payload,
+        )
+        if candidates:
+            rows = [
+                {
+                    **candidate,
+                    "run_id": new_run_id,
+                    "recording_id": recording_id,
+                    "candidate_origin": candidate.get("candidate_origin", "detected"),
+                    "screen_link": candidate.get("screen_link"),
+                    "screen_kind": candidate.get("screen_kind"),
+                    "pathway_row": candidate.get("pathway_row"),
+                    "score_breakdown": (
+                        candidate.get("score_breakdown")
+                        if isinstance(candidate.get("score_breakdown"), str)
+                        else json.dumps(candidate.get("score_breakdown"))
+                        if candidate.get("score_breakdown") is not None
+                        else None
+                    ),
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                for candidate in candidates
+            ]
+            # the table's own columns, so a column added to it later is copied too
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(candidate_frames)").fetchall()}
+            keys = [key for key in rows[0] if key in columns]
+            conn.executemany(
+                f"INSERT INTO candidate_frames ({', '.join(keys)}) VALUES ({', '.join(f':{key}' for key in keys)})",
+                rows,
+            )
+        if phases:
+            conn.executemany(
+                "INSERT INTO run_phases (run_id, start_ms, name) VALUES (?, ?, ?)",
+                [(new_run_id, start, name) for start, name in phases],
+            )
+    return get_run(new_run_id)
+
+
 def rename_run(run_id: str, name: str | None) -> dict[str, Any] | None:
     """Give a run a name, or with ``None`` take it away; its number stays as it is."""
     with connect() as conn:
@@ -948,7 +1121,8 @@ def list_usage_accounts() -> dict[str, dict[str, Any]]:
         tags = json.loads(row["tags"] or "[]")
         accounts[row["id"]] = {
             "name": row["name"],
-            "shared": SHARED_TAG in tags and ADMIN_TAG not in tags,
+            "shared": acts_as_shared(tags) and VISITOR_TAG not in tags,
+            "visitor": VISITOR_TAG in tags and ADMIN_TAG not in tags,
             "admin": ADMIN_TAG in tags,
             "tags": tags,
         }

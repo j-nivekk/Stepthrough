@@ -195,7 +195,30 @@ export function importRecording(projectId: string, file: File, filename?: string
     formData.set('filename', filename);
   }
   formData.set('file', file);
-  return new Promise<RecordingSummary>((resolve, reject) => {
+  return sendUpload<RecordingSummary>('/recordings/import', formData, options);
+}
+
+/** Bring the videos of a project file, with their runs, steps and phases, into a project (app/project_file.py). */
+export function importProjectFile(projectId: string, file: File, options: UploadOptions = {}): Promise<RecordingSummary[]> {
+  const formData = new FormData();
+  formData.set('file', file);
+  return sendUpload<RecordingSummary[]>(`/projects/${projectId}/project-file`, formData, options);
+}
+
+/** A new project from a project file, under the name it has there, with its videos, runs, steps and phases. */
+export function importProjectFromFile(file: File, options: UploadOptions = {}): Promise<Project> {
+  const formData = new FormData();
+  formData.set('file', file);
+  return sendUpload<Project>('/projects/project-file', formData, options);
+}
+
+/** Where a project's file downloads from: made as it downloads, videos included. */
+export function projectFileUrl(projectId: string): string {
+  return apiUrl(`/projects/${projectId}/project-file`).toString();
+}
+
+function sendUpload<T>(path: string, formData: FormData, options: UploadOptions): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const abort = () => xhr.abort();
     if (options.signal?.aborted) {
@@ -204,7 +227,7 @@ export function importRecording(projectId: string, file: File, filename?: string
     }
     options.signal?.addEventListener('abort', abort, { once: true });
     const done = () => options.signal?.removeEventListener('abort', abort);
-    xhr.open('POST', apiUrl('/recordings/import').toString());
+    xhr.open('POST', apiUrl(path).toString());
     // as `credentials: 'include'` in request(): the session cookie also goes to a backend on another port
     xhr.withCredentials = true;
     xhr.responseType = 'text';
@@ -228,7 +251,7 @@ export function importRecording(projectId: string, file: File, filename?: string
         // not JSON: keep the text
       }
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(payload as RecordingSummary);
+        resolve(payload as T);
         return;
       }
       const detail = typeof payload === 'string' ? payload : (payload as { detail?: unknown } | null)?.detail;
@@ -304,6 +327,11 @@ export function carryOverReview(
 /** Name a run, or with '' take its name away; `previousName` is the name this browser showed ('' for none). */
 export function updateRun(runId: string, name: string, previousName: string): Promise<RunSummary> {
   return request<RunSummary>(`/runs/${runId}`, jsonBody('PATCH', { name, previous_name: previousName }));
+}
+
+/** Duplicate a completed run with its settings, steps, screenshots, review decisions and phases. */
+export function duplicateRun(runId: string): Promise<RunSummary> {
+  return request<RunSummary>(`/runs/${runId}/duplicate`, { method: 'POST' });
 }
 
 export function createManualRun(recordingId: string): Promise<RunSummary> {

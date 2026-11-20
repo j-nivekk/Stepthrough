@@ -164,7 +164,7 @@ export function ImportScreen({
             }}
           >
             <input
-              accept="video/*"
+              accept="video/*,.zip"
               disabled={isUploadBlocked}
               multiple
               onChange={(event) => {
@@ -180,7 +180,10 @@ export function ImportScreen({
             <span className="import-dropzone-note">they upload straight away, one after the other.</span>
           </label>
           {selectionFeedback ? <p className="import-feedback-copy">{selectionFeedback}</p> : null}
-          <p className="import-format-copy">supports .mp4, .mov, .m4v, .webm, and .mkv uploads</p>
+          <p className="import-format-copy">
+            supports .mp4, .mov, .m4v, .webm, .mkv, and project files (.stepthrough.zip), whose videos join this project
+            with their runs.
+          </p>
 
           <div className="import-queue">
             {rows.map((row) => (

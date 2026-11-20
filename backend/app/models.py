@@ -68,6 +68,13 @@ class ProjectUpdate(BaseModel):
     previous_name: str | None = Field(default=None, max_length=120)
 
 
+class VisitorLimits(BaseModel):
+    keep_hours: int
+    upload_limit_bytes: int
+    storage_limit_bytes: int | None = None
+    storage_used_bytes: int | None = None
+
+
 class UserResponse(BaseModel):
     id: str
     name: str
@@ -76,6 +83,8 @@ class UserResponse(BaseModel):
     is_admin: bool = False
     # The date (YYYY-MM-DD) from which this account and the projects only it owns are deleted.
     delete_after: str | None = None
+    # For a visitor account: its limits (app/visitors.py).
+    visitor: VisitorLimits | None = None
 
 
 AuthModeName = Literal["none", "password"]
@@ -202,6 +211,8 @@ class ProjectResponse(BaseModel):
     # recorded, or in the app without logins).
     modified_at: str
     modified_by_name: str | None = None
+    # When it is deleted, for a project only visitor accounts own (app/visitors.py).
+    deletes_at: str | None = None
 
 
 class HybridAdvancedSettings(BaseModel):

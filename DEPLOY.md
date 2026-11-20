@@ -103,6 +103,15 @@ Administrators look after accounts in the admin panel: open the menu with your n
   earlier links stop working.
 - **Deletion dates.** From an account's deletion date, the account and the projects only it owns are deleted.
   People see a notice in the month before. Accounts without a date are kept until an administrator deletes them.
+- **Shared and visitor accounts.** The `shared` tag makes an account for a group that works under one login. The
+  `visitor` tag makes a shared account for people from elsewhere, with limits: each of its projects is deleted a
+  set time after it was made (72 hours by default), its uploads and what it keeps are capped, and every page of
+  its projects says when they go and offers the project file to keep the work. An account has one of the two
+  tags, never both, and administrators have neither: the panel, a list and the command line all refuse it. Under
+  **add people**, administrators set for everyone at once how long visitors' projects are kept, in hours from when
+  each was made (a shorter time asks first; projects older than it go within a few minutes), the largest video a
+  visitor may upload (empty: the server's own limit, `STEPTHROUGH_MAX_UPLOAD_MB`), and how much each visitor
+  account may keep at once (empty: no limit).
 - **Switching off** an account logs it out at once and keeps its projects.
 - **Guessing.** After too many wrong passwords, further attempts wait 15 minutes; see the log for who and from
   where: `docker compose logs stepthrough | grep -E "Wrong|Refused"`.

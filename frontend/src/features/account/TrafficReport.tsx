@@ -36,9 +36,9 @@ function downloads(report: Report) {
         downloadText(
           `stepthrough-traffic-accounts-${stamp}.csv`,
           toCsv([
-            ['account', 'shared', 'administrator', 'bytes downloaded', 'bytes uploaded', 'requests', ...KINDS.map((kind) => `bytes: ${KIND_NAMES[kind]}`)],
+            ['account', 'shared', 'visitor', 'administrator', 'bytes downloaded', 'bytes uploaded', 'requests', ...KINDS.map((kind) => `bytes: ${KIND_NAMES[kind]}`)],
             ...report.accounts.map((row) => [
-              row.name, row.shared, row.admin, row.bytes_out, row.bytes_in, row.requests, ...KINDS.map((kind) => row.categories[kind] ?? 0),
+              row.name, row.shared, Boolean(row.visitor), row.admin, row.bytes_out, row.bytes_in, row.requests, ...KINDS.map((kind) => row.categories[kind] ?? 0),
             ]),
           ]),
         ),
@@ -202,6 +202,7 @@ export function TrafficReport({ filter, onFilterChange, tags }: ReportProps) {
                   <td>
                     {row.name}
                     {row.shared ? <span className="usage-tag">shared</span> : null}
+                    {row.visitor ? <span className="usage-tag">visitor</span> : null}
                     {row.admin ? <span className="usage-tag">admin</span> : null}
                   </td>
                   <td>{formatBytes(row.bytes_out)}</td>

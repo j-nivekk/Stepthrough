@@ -2,8 +2,18 @@ import { useMemo, useState } from 'react';
 import { EditableName } from '../../components/EditableName';
 import { StageNavigator } from '../../components/StageNavigator';
 import { formatProjectSummary } from '../../lib/formatters';
+import { deletionDate, deletionIsNear, deletionLine } from '../../lib/visitors';
 import type { Project } from '../../types';
 import type { ProjectEntryTarget, WorkflowStage } from '../../lib/workflow';
+
+/** A project file on its way in from this page, to become a project of its own (App keeps it). */
+export interface ProjectFileUpload {
+  name: string;
+  status: 'uploading' | 'error';
+  /** Share sent, 0 to 1. */
+  progress: number | null;
+  error: string | null;
+}
 
 export interface EntryScreenProps {
   /** About the logged-in account, such as its coming deletion. */
@@ -14,6 +24,13 @@ export interface EntryScreenProps {
   isCreating: boolean;
   onCreate: (event: React.FormEvent<HTMLFormElement>) => void;
   onDeleteProject: (projectId: string, projectName: string) => void;
+  /** The whole project as one file, videos included, to keep it or bring it back later with import. */
+  onDownloadProject: (projectId: string) => void;
+  /** Bring a project back from its file, as a project of its own. */
+  onImportProjectFile: (file: File) => void;
+  onCancelProjectFileUpload: () => void;
+  onDismissProjectFileUpload: () => void;
+  projectFileUpload: ProjectFileUpload | null;
   onNavigateStage: (stage: WorkflowStage) => void;
   onOpenProject: (projectId: string, targetStage: ProjectEntryTarget) => void;
   onProjectNameChange: (value: string) => void;
@@ -47,6 +64,11 @@ export function EntryScreen({
   isCreating,
   onCreate,
   onDeleteProject,
+  onDownloadProject,
+  onImportProjectFile,
+  onCancelProjectFileUpload,
+  onDismissProjectFileUpload,
+  projectFileUpload,
   onNavigateStage,
   onOpenProject,
   onProjectNameChange,
@@ -67,6 +89,12 @@ export function EntryScreen({
   selectedProjectId,
 }: EntryScreenProps) {
   const [ocrWarningsExpanded, setOcrWarningsExpanded] = useState(false);
+  // "or import a project": a dropzone for a project file, open while it is wanted or a file is on its way
+  const [importOpen, setImportOpen] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const showImport = importOpen || Boolean(projectFileUpload);
+  const uploading = projectFileUpload?.status === 'uploading';
+  const percent = Math.round((projectFileUpload?.progress ?? 0) * 100);
   const visibleProjects = useMemo(() => {
     const searchValue = projectSearch.trim().toLowerCase();
     const filteredProjects = projects.filter((project) => project.name.toLowerCase().includes(searchValue));
@@ -157,7 +185,85 @@ export function EntryScreen({
             </button>
           </form>
 
-          <p className="entry-helper-copy">or select an existing project...</p>
+          <div className="entry-side">
+            <p className="entry-helper-copy">or select an existing project...</p>
+            <button
+              aria-expanded={showImport}
+              className="entry-helper-copy entry-helper-link"
+              onClick={() => setImportOpen((open) => !open)}
+              type="button"
+            >
+              or import a project...
+            </button>
+            {showImport ? (
+              <label
+                className={`import-dropzone entry-project-dropzone ${uploading ? 'disabled' : ''} ${dragging ? 'dragging' : ''}`}
+                onDragEnter={(event) => {
+                  event.preventDefault();
+                  setDragging(true);
+                }}
+                onDragLeave={(event) => {
+                  event.preventDefault();
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setDragging(true);
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  setDragging(false);
+                  const [file] = Array.from(event.dataTransfer.files);
+                  if (file && !uploading) onImportProjectFile(file);
+                }}
+              >
+                <input
+                  accept=".zip,application/zip"
+                  aria-label="choose a project file"
+                  disabled={uploading}
+                  onChange={(event) => {
+                    const [file] = Array.from(event.target.files ?? []);
+                    if (file) onImportProjectFile(file);
+                    event.target.value = '';
+                  }}
+                  type="file"
+                />
+                <span>drop a project file here,</span>
+                <span>or click to choose it.</span>
+                <span className="import-dropzone-note">.stepthrough.zip</span>
+              </label>
+            ) : null}
+            {projectFileUpload ? (
+              <div className={`entry-project-upload ${projectFileUpload.status}`}>
+                <span className="import-row-title">{projectFileUpload.name}</span>
+                {uploading ? (
+                  <div className="entry-project-upload-progress">
+                    <span
+                      aria-label={`uploading, ${percent} percent`}
+                      aria-valuemax={100}
+                      aria-valuemin={0}
+                      aria-valuenow={percent}
+                      className="import-progress"
+                      role="progressbar"
+                    >
+                      <span className="import-progress-fill" style={{ width: `${percent}%` }} />
+                      <span className="import-progress-label">{percent >= 100 ? 'unpacking…' : `uploading ${percent}%`}</span>
+                    </span>
+                    <button className="analysis-task-link subtle" onClick={onCancelProjectFileUpload} type="button">
+                      cancel
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <p className="import-row-note error">{projectFileUpload.error}</p>
+                    <button className="analysis-task-link subtle" onClick={onDismissProjectFileUpload} type="button">
+                      dismiss
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
 
           <div className="entry-project-browser">
             <div className="entry-project-tools">
@@ -210,6 +316,14 @@ export function EntryScreen({
                       >
                         <small>{formatProjectSummary(project)}</small>
                       </button>
+                      {project.deletes_at ? (
+                        <small
+                          className={`entry-project-deletion ${deletionIsNear(project.deletes_at) ? 'is-near' : ''}`}
+                          title={deletionDate(project.deletes_at)}
+                        >
+                          {deletionLine(project.deletes_at)}
+                        </small>
+                      ) : null}
                     </div>
                     <div className="entry-project-actions">
                       <button
@@ -226,6 +340,16 @@ export function EntryScreen({
                           type="button"
                         >
                           analysis
+                        </button>
+                      ) : null}
+                      {project.recording_count > 0 ? (
+                        <button
+                          className="analysis-task-link subtle entry-project-action-pill"
+                          onClick={() => onDownloadProject(project.id)}
+                          title="the whole project as one file, videos included"
+                          type="button"
+                        >
+                          download
                         </button>
                       ) : null}
                       <button

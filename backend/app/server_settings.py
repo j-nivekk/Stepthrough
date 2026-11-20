@@ -10,6 +10,11 @@ database once an administrator changes it, so it outlasts restarts. Changes take
   within this many seconds (after a short pause), so that they do not all ask at once.
 - ``usage_keep_days``: how many days usage and traffic are kept (``app/usage.py``, ``app/traffic.py``); 0 records
   nothing, null keeps them for ever.
+- ``visitor_keep_hours``: how long the projects of visitor accounts are kept, counted from when each was made
+  (``app/visitors.py``).
+- ``visitor_upload_mb``: the largest video a visitor account may upload; null: the server's own limit.
+- ``visitor_storage_mb``: how much a visitor account may keep at once, videos and screenshots together; null: no
+  limit.
 """
 
 from __future__ import annotations
@@ -27,8 +32,11 @@ from .repository import get_server_settings, set_server_settings
 
 DEFAULT_LIVE_SPREAD_SECONDS = 1.5
 DEFAULT_USAGE_KEEP_DAYS = 14
+DEFAULT_VISITOR_KEEP_HOURS = 72
+DEFAULT_VISITOR_UPLOAD_MB = 500
+DEFAULT_VISITOR_STORAGE_MB = 2000
 # Settings that may be null on purpose (sent as null, unlike one left out, which stays as it is).
-NULLABLE = {"usage_keep_days"}
+NULLABLE = {"usage_keep_days", "visitor_upload_mb", "visitor_storage_mb"}
 
 _changed: dict[str, Any] = {}
 _configured_analyses: int | None = None
@@ -40,6 +48,9 @@ def defaults() -> dict[str, Any]:
         "compression": True,
         "live_spread_seconds": DEFAULT_LIVE_SPREAD_SECONDS,
         "usage_keep_days": DEFAULT_USAGE_KEEP_DAYS,
+        "visitor_keep_hours": DEFAULT_VISITOR_KEEP_HOURS,
+        "visitor_upload_mb": DEFAULT_VISITOR_UPLOAD_MB,
+        "visitor_storage_mb": DEFAULT_VISITOR_STORAGE_MB,
     }
 
 
@@ -78,6 +89,9 @@ class ServerSettingsUpdate(BaseModel):
     compression: bool | None = None
     live_spread_seconds: float | None = Field(default=None, ge=0, le=10)
     usage_keep_days: int | None = Field(default=None, ge=0, le=MAX_DAYS)  # null: for ever
+    visitor_keep_hours: int | None = Field(default=None, ge=1, le=24 * 365)
+    visitor_upload_mb: int | None = Field(default=None, ge=1, le=1_000_000)  # null: the server's limit
+    visitor_storage_mb: int | None = Field(default=None, ge=1, le=10_000_000)  # null: no limit
 
 
 def _describe() -> dict[str, dict[str, Any]]:

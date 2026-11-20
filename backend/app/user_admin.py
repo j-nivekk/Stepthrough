@@ -22,7 +22,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from .accounts import MAX_PASSWORD_LENGTH, UserLink, new_user_link, password_problem, set_password
-from .database import ADMIN_TAG, LOCAL_USER_ID, SHARED_TAG
+from .database import ADMIN_TAG, LOCAL_USER_ID, SHARED_TAG, VISITOR_TAG
 from .repository import (
     create_user,
     delete_expired_sessions_and_links,
@@ -91,6 +91,10 @@ def account_tags(raw: Iterable[str]) -> list[str]:
     tags = clean_tags(raw)
     if ADMIN_TAG in tags and SHARED_TAG in tags:
         raise AccountError("Administrator accounts cannot have the shared tag.")
+    if ADMIN_TAG in tags and VISITOR_TAG in tags:
+        raise AccountError("Administrator accounts cannot have the visitor tag.")
+    if SHARED_TAG in tags and VISITOR_TAG in tags:
+        raise AccountError("An account is shared or a visitor, not both: a visitor account is shared already.")
     return tags
 
 

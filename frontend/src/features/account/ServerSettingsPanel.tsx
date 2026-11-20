@@ -115,7 +115,7 @@ function KeepSetting({ onSave, value }: { onSave: (value: number | null) => void
 }
 
 /** A number field that saves when it is left or Enter is pressed, and shows the saved value otherwise. */
-function NumberSetting({
+export function NumberSetting({
   label,
   max,
   min,
@@ -155,7 +155,11 @@ function NumberSetting({
           onBlur={commit}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') event.currentTarget.blur();
+            // the Enter must end here: otherwise it also presses the button a question that follows focuses
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
           }}
           step={step}
           type="number"
@@ -167,12 +171,72 @@ function NumberSetting({
   );
 }
 
+/** A number that may also be left empty, for no limit: saved when the field is left or Enter is pressed. */
+export function OptionalNumberSetting({
+  empty,
+  label,
+  max,
+  onSave,
+  unit,
+  value,
+}: {
+  /** What an empty field means, as its placeholder. */
+  empty: string;
+  label: string;
+  max: number;
+  onSave: (value: number | null) => void;
+  unit: string;
+  value: number | null;
+}) {
+  const [draft, setDraft] = useState(value === null ? '' : String(value));
+  useEffect(() => setDraft(value === null ? '' : String(value)), [value]);
+
+  function commit() {
+    if (draft.trim() === '') {
+      if (value !== null) onSave(null);
+      return;
+    }
+    const next = Number(draft);
+    if (!Number.isInteger(next) || next < 1 || next > max) {
+      setDraft(value === null ? '' : String(value));
+      return;
+    }
+    if (next !== value) onSave(next);
+  }
+
+  return (
+    <label className="analysis-parameter-row">
+      <span>{label}</span>
+      <span className="users-server-number">
+        <input
+          className="users-control"
+          max={max}
+          min={1}
+          onBlur={commit}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              event.currentTarget.blur();
+            }
+          }}
+          placeholder={empty}
+          step={1}
+          type="number"
+          value={draft}
+        />
+        <span className="users-server-unit">{unit}</span>
+      </span>
+    </label>
+  );
+}
+
 function fromConfiguration(setting: { value: unknown; default: unknown }, shown: string): string {
   return setting.value === setting.default ? 'as the server is configured.' : `the server is configured for ${shown}.`;
 }
 
-/** What an administrator can change while the server runs (backend/app/server_settings.py); takes effect at once. */
-export function ServerSettingsPanel() {
+/** The server's settings and a way to change them, with a line saying how the last change went. */
+export function useServerSettings() {
   const queryClient = useQueryClient();
   const settingsQuery = useQuery({ queryKey: ['server-settings'], queryFn: getServerSettings });
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
@@ -184,12 +248,19 @@ export function ServerSettingsPanel() {
     },
     onError: (error: Error) => setMessage({ tone: 'error', text: error.message.toLocaleLowerCase() }),
   });
-  const settings = settingsQuery.data;
 
   function save(changes: ServerSettingsChanges) {
     setMessage(null);
     mutation.mutate(changes);
   }
+
+  return { settingsQuery, settings: settingsQuery.data, save, message, pending: mutation.isPending };
+}
+
+/** What an administrator can change while the server runs (backend/app/server_settings.py); takes effect at once.
+ *  The settings for visitor accounts are with the people (VisitorSettings). */
+export function ServerSettingsPanel() {
+  const { settingsQuery, settings, save, message, pending } = useServerSettings();
 
   return (
     <section className="analysis-column users-server-column">
@@ -223,7 +294,7 @@ export function ServerSettingsPanel() {
                   <button
                     aria-pressed={settings.compression.value === option}
                     className={`analysis-mode-button ${settings.compression.value === option ? 'active' : ''}`}
-                    disabled={mutation.isPending}
+                    disabled={pending}
                     key={String(option)}
                     onClick={() => settings.compression.value !== option && save({ compression: option })}
                     type="button"
@@ -263,6 +334,7 @@ export function ServerSettingsPanel() {
               this time, so that they do not all ask at once. {fromConfiguration(settings.live_spread_seconds, `${settings.live_spread_seconds.default} s`)}
             </span>
           </div>
+
         </div>
       )}
       {message && (

@@ -76,6 +76,8 @@ export interface Project {
   /** When someone last changed something in it, and who; no name for older changes or the app without logins. */
   modified_at: string;
   modified_by_name?: string | null;
+  /** When it is deleted, for a project only visitor accounts own (backend/app/visitors.py). */
+  deletes_at?: string | null;
 }
 
 export interface RecordingSummary {
@@ -301,6 +303,7 @@ export interface UsageAccountRow {
   id: string;
   name: string;
   shared: boolean;
+  visitor?: boolean;
   browsers: number;
   open_minutes: number;
   working_minutes: number;
@@ -315,6 +318,8 @@ export interface UsageAccountRow {
   annotations: number;
   steps_added: number;
   carried_over: number;
+  /** Runs duplicated (copies of a finished run). */
+  duplicates?: number;
   merges: number;
   exports: number;
   figures: number;
@@ -406,6 +411,7 @@ export interface TrafficReport extends ReportWindow {
     id: string | null;
     name: string;
     shared: boolean;
+    visitor?: boolean;
     admin: boolean;
     bytes_in: number;
     bytes_out: number;
@@ -424,6 +430,12 @@ export interface ServerSettings {
   live_spread_seconds: { value: number; default: number };
   /** Days usage and traffic are kept; 0 records nothing, null keeps them for ever. */
   usage_keep_days: { value: number | null; default: number };
+  /** How long visitor accounts' projects are kept, from when each was made. */
+  visitor_keep_hours: { value: number; default: number };
+  /** The largest video a visitor account may upload; null: the server's own limit. */
+  visitor_upload_mb: { value: number | null; default: number };
+  /** How much a visitor account may keep at once; null: no limit. */
+  visitor_storage_mb: { value: number | null; default: number };
 }
 
 export type ServerSettingsChanges = Partial<{ [K in keyof ServerSettings]: ServerSettings[K]['value'] }>;
@@ -597,6 +609,16 @@ export interface SessionUser {
   is_admin: boolean;
   /** The date (YYYY-MM-DD) from which this account and the projects only it owns are deleted. */
   delete_after: string | null;
+  /** For a visitor account: its limits (backend/app/visitors.py). */
+  visitor?: VisitorLimits | null;
+}
+
+export interface VisitorLimits {
+  /** How long its projects are kept, counted from when each was made. */
+  keep_hours: number;
+  upload_limit_bytes: number;
+  storage_limit_bytes: number | null;
+  storage_used_bytes: number | null;
 }
 
 /** How the server recognises people. `user` is null when logins are on and nobody is logged in. */
@@ -681,6 +703,7 @@ export interface ProgressAccount {
   id: string;
   name: string;
   shared: boolean;
+  visitor?: boolean;
   tags: string[];
   created_at: string;
   last_seen_at: string | null;

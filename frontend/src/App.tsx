@@ -12,6 +12,7 @@ import {
   deleteProject,
   deleteRecording,
   deleteRun,
+  duplicateRun,
   exportRun,
   getAnalysisMetadata,
   getProject,
@@ -19,7 +20,10 @@ import {
   getRun,
   getSavedRunSettings,
   health,
+  importProjectFile,
+  importProjectFromFile,
   importRecording,
+  projectFileUrl,
   isAbortError,
   listProjects,
   logOut,
@@ -36,6 +40,7 @@ import {
 } from './api';
 import { AppSettings } from './components/AppSettings';
 import { AppWatermark, type CornerPanel } from './components/AppWatermark';
+import { VisitorNotice } from './components/VisitorNotice';
 import { useConfirm } from './components/ConfirmDialog';
 import { AccountPanel } from './features/account/AccountPanel';
 import { UsersScreen } from './features/account/UsersScreen';
@@ -44,20 +49,23 @@ import { ViewportWarning } from './components/ViewportWarning';
 import { AnalysisScreen } from './features/analysis/AnalysisScreen';
 import { useLive } from './features/live/LiveProvider';
 import { ImportScreen } from './features/import/ImportScreen';
-import { EntryScreen } from './features/projects/EntryScreen';
+import { EntryScreen, type ProjectFileUpload } from './features/projects/EntryScreen';
 import {
   activeRunStatuses,
   getAnalysisTaskStatusRank,
   type AnalysisTaskItem,
   type SimilarLink,
 } from './lib/analysis';
-import { downloadExportBundle, jumpToAnchor, sleep } from './lib/utils';
+import { downloadExportBundle, jumpToAnchor, sleep, triggerDownload } from './lib/utils';
 import { formatCalendarDate } from './lib/formatters';
+import { isSharedAccount } from './lib/live';
+import { isVisitor, uploadProblem } from './lib/visitors';
 import {
   collectImportQueueItems,
   getUploadedImportItems,
   importsInFlight,
-  markImportUploaded,
+  isProjectFile,
+  markProjectFileUploaded,
   nextImportUpload,
   syncImportQueueWithRecordings,
   type ImportQueueItem,
@@ -143,6 +151,14 @@ function App({ session, onSessionChange }: AppProps) {
     selectedRecordingIdRef.current = selectedRecordingId;
   }, [selectedProjectId, selectedRecordingId]);
   const [importSelectionFeedback, setImportSelectionFeedback] = useState('');
+  // A project file on its way in from the list of projects, to become a project of its own. It is kept here, not
+  // on the list, so that opening another project meanwhile does not lose it.
+  const [projectFileUpload, setProjectFileUpload] = useState<ProjectFileUpload | null>(null);
+  const projectFileController = useRef<AbortController | null>(null);
+  const workflowStageRef = useRef(workflowStage);
+  useEffect(() => {
+    workflowStageRef.current = workflowStage;
+  }, [workflowStage]);
   const [previewRecordingId, setPreviewRecordingId] = useState<string | null>(null);
   const [liveMessage, setLiveMessage] = useState('');
   const [analysisActionMessage, setAnalysisActionMessage] = useState('');
@@ -165,7 +181,9 @@ function App({ session, onSessionChange }: AppProps) {
   // With password logins, who is logged in shows next to settings; the desktop app has one built-in user.
   const accountUser = session?.mode === 'password' ? sessionUser : null;
   const isAdmin = sessionUser?.is_admin ?? true;
-  const isShared = Boolean(accountUser && !accountUser.is_admin && accountUser.tags.includes('shared'));
+  const isShared = isSharedAccount(accountUser);
+  // What the account is told about itself (a visitor's room left, say), again after a change to what it keeps.
+  const refreshSession = () => void queryClient.invalidateQueries({ queryKey: ['session'] });
   const [viewportSize, setViewportSize] = useState(() => ({
     height: typeof window === 'undefined' ? 900 : window.innerHeight,
     width: typeof window === 'undefined' ? 1440 : window.innerWidth,
@@ -796,6 +814,7 @@ function App({ session, onSessionChange }: AppProps) {
       }
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.removeQueries({ queryKey: ['project', variables.projectId] });
+      if (isVisitor(accountUser)) refreshSession();
     },
     onError: (error: Error) => setAppError(error.message),
   });
@@ -810,9 +829,9 @@ function App({ session, onSessionChange }: AppProps) {
       const announce = (progress: number) =>
         setPresence(presenceKey, { kind: 'uploading', project_id: projectId, name: filename || file.name, progress });
       announce(0);
-      return importRecording(projectId, file, filename, {
+      const options = {
         signal: controller.signal,
-        onProgress: (fraction) => {
+        onProgress: (fraction: number) => {
           // one update per whole percent is plenty
           const percent = Math.floor(fraction * 100);
           if (percent === shown) return;
@@ -822,13 +841,20 @@ function App({ session, onSessionChange }: AppProps) {
             current.map((item) => (item.localId === localId && item.status === 'uploading' ? { ...item, progress: fraction } : item)),
           );
         },
-      }).finally(() => {
+      };
+      // A project file brings its videos with their runs, steps and phases; a video comes on its own.
+      const sent = isProjectFile(file.name)
+        ? importProjectFile(projectId, file, options)
+        : importRecording(projectId, file, filename, options).then((recording) => [recording]);
+      return sent.finally(() => {
         uploadControllers.current.delete(localId);
         setPresence(presenceKey, null);
       });
     },
-    onSuccess: (recording, variables) => {
-      setImportQueue((current) => markImportUploaded(current, variables.localId, recording));
+    onSuccess: (recordings, variables) => {
+      setImportQueue((current) => markProjectFileUploaded(current, variables.localId, recordings));
+      const [recording] = recordings;
+      if (!recording) return;
       // The first video of a project becomes the selection; later ones do not take it from what is being worked on.
       if (recording.project_id === selectedProjectIdRef.current && !selectedRecordingIdRef.current) {
         setSelectedRecordingId(recording.id);
@@ -836,7 +862,9 @@ function App({ session, onSessionChange }: AppProps) {
       }
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['project', recording.project_id] });
-      queryClient.invalidateQueries({ queryKey: ['recording', recording.id] });
+      for (const each of recordings) queryClient.invalidateQueries({ queryKey: ['recording', each.id] });
+      // what a visitor account keeps has grown
+      if (isVisitor(accountUser)) refreshSession();
     },
     onError: (error: Error, variables) => {
       if (isAbortError(error)) {
@@ -860,8 +888,9 @@ function App({ session, onSessionChange }: AppProps) {
     },
   });
 
-  // Closing or reloading the page would drop the videos still on their way: the browser asks first.
-  const uploadsUnderWay = importQueue.some((item) => item.status === 'queued' || item.status === 'uploading');
+  // Closing or reloading the page would drop the videos (or the project file) still on their way: the browser asks first.
+  const uploadsUnderWay =
+    importQueue.some((item) => item.status === 'queued' || item.status === 'uploading') || projectFileUpload?.status === 'uploading';
   useEffect(() => {
     if (!uploadsUnderWay) {
       return;
@@ -878,6 +907,14 @@ function App({ session, onSessionChange }: AppProps) {
   useEffect(() => {
     const next = nextImportUpload(importQueue);
     if (!next?.file || !next.projectId) {
+      return;
+    }
+    // A visitor account is told at once about a file that would be refused, rather than after sending it.
+    const problem = uploadProblem(accountUser, next.file, isProjectFile(next.file.name) ? 'project' : 'video');
+    if (problem) {
+      setImportQueue((current) =>
+        current.map((item) => (item.localId === next.localId ? { ...item, status: 'error', progress: null, error: problem } : item)),
+      );
       return;
     }
     setImportQueue((current) =>
@@ -918,9 +955,24 @@ function App({ session, onSessionChange }: AppProps) {
     },
   });
 
+  const duplicateRunMutation = useMutation({
+    mutationFn: (runId: string) => duplicateRun(runId),
+    onSuccess: async (run) => {
+      rememberNewRun(run);
+      setSelectedRecordingId(run.recording_id);
+      setSelectedRunId(run.id);
+      if (isVisitor(accountUser)) refreshSession();
+      void queryClient.invalidateQueries({ queryKey: ['projects'] });
+      if (selectedProjectId) void queryClient.invalidateQueries({ queryKey: ['project', selectedProjectId] });
+      await refreshRunQueries(run.id, run.recording_id);
+    },
+    onError: (error: Error) => setAppError(error.message),
+  });
+
   const deleteRecordingMutation = useMutation({
     mutationFn: ({ recordingId }: { localId?: string; recordingId: string }) => deleteRecording(recordingId),
     onSuccess: (_result, variables) => {
+      if (isVisitor(accountUser)) refreshSession();
       setImportQueue((current) =>
         current.filter((item) => item.localId !== variables.localId && item.recordingId !== variables.recordingId),
       );
@@ -1067,6 +1119,47 @@ function App({ session, onSessionChange }: AppProps) {
     setPreviewRecordingId(null);
     setWorkflowStage(targetStage);
     clearAnalysisMessages();
+  }
+
+  /** Bring a project back from its file, as a project of its own; once it is in, it opens, unless another project
+   *  was opened meanwhile. */
+  function handleImportProjectFile(file: File) {
+    if (projectFileUpload?.status === 'uploading') return;
+    const failed = (error: string) => setProjectFileUpload({ name: file.name, status: 'error', progress: null, error });
+    if (!isProjectFile(file.name)) {
+      failed('not a project file: choose a .stepthrough.zip.');
+      return;
+    }
+    const problem = uploadProblem(accountUser, file, 'project');
+    if (problem) {
+      failed(problem);
+      return;
+    }
+    clearAnalysisMessages();
+    const controller = new AbortController();
+    projectFileController.current = controller;
+    setProjectFileUpload({ name: file.name, status: 'uploading', progress: 0, error: null });
+    importProjectFromFile(file, {
+      signal: controller.signal,
+      onProgress: (fraction) =>
+        setProjectFileUpload((current) => (current?.status === 'uploading' ? { ...current, progress: fraction } : current)),
+    })
+      .then((project) => {
+        setProjectFileUpload(null);
+        void queryClient.invalidateQueries({ queryKey: ['projects'] });
+        if (isVisitor(accountUser)) refreshSession();
+        if (workflowStageRef.current === 'projects') openProject(project.id, project.recording_count > 0 ? 'analysis' : 'import');
+      })
+      .catch((error: unknown) => {
+        if (isAbortError(error)) {
+          setProjectFileUpload(null);
+          return;
+        }
+        failed(error instanceof Error ? error.message.toLocaleLowerCase() : 'the project file could not be imported.');
+      })
+      .finally(() => {
+        if (projectFileController.current === controller) projectFileController.current = null;
+      });
   }
 
   function handleCreateProject(event: React.FormEvent<HTMLFormElement>) {
@@ -1217,6 +1310,11 @@ function App({ session, onSessionChange }: AppProps) {
     deleteProjectMutation.mutate({ projectId });
   }
 
+  /** The whole project as one file, videos included (backend/app/project_file.py): the browser's own download. */
+  function downloadProjectFile(projectId: string) {
+    triggerDownload(projectFileUrl(projectId));
+  }
+
   async function handleRenameProject(projectId: string, name: string, previousName: string) {
     clearAnalysisMessages();
     await updateProjectMutation.mutateAsync({ name, previousName, projectId });
@@ -1231,6 +1329,15 @@ function App({ session, onSessionChange }: AppProps) {
     clearAnalysisMessages();
     // a refusal (renamed in another browser meanwhile) is shown next to the name, where the rename was typed
     await updateRunMutation.mutateAsync({ name, previousName, runId });
+  }
+
+  async function handleDuplicateRun(runId: string) {
+    clearAnalysisMessages();
+    try {
+      await duplicateRunMutation.mutateAsync(runId);
+    } catch {
+      // the mutation's onError has shown why
+    }
   }
 
   async function handleRenameImportItem(localId: string, filename: string, previousFilename: string) {
@@ -1707,6 +1814,9 @@ function App({ session, onSessionChange }: AppProps) {
         />
       )}
       {appPrefs.showPerfMonitor && <PerformanceMonitor />}
+      {workflowStage !== 'projects' && !showUsers && activeProject?.deletes_at ? (
+        <VisitorNotice deletesAt={activeProject.deletes_at} onDownload={() => downloadProjectFile(activeProject.id)} />
+      ) : null}
       {viewportWarning}
       {confirmDialog}
     </>
@@ -1736,6 +1846,11 @@ function App({ session, onSessionChange }: AppProps) {
           onDismissOcrWarnings={dismissOcrWarnings}
           onCreate={handleCreateProject}
           onDeleteProject={confirmDeleteProject}
+          onDownloadProject={downloadProjectFile}
+          onImportProjectFile={handleImportProjectFile}
+          onCancelProjectFileUpload={() => projectFileController.current?.abort()}
+          onDismissProjectFileUpload={() => setProjectFileUpload(null)}
+          projectFileUpload={projectFileUpload}
           onNavigateStage={setProjectStage}
           onOpenProject={openProject}
           onProjectNameChange={setProjectName}
@@ -1801,6 +1916,7 @@ function App({ session, onSessionChange }: AppProps) {
         createManualCandidatePending={createManualCandidateMutation.isPending}
         createManualRunPending={createManualRunMutation.isPending}
         createRunPending={createRunMutation.isPending}
+        duplicateRunPending={duplicateRunMutation.isPending}
         exportRunPending={exportRunMutation.isPending}
         healthMessage={healthWarning ? healthQuery.data?.message ?? 'Video tools are not ready.' : null}
         healthWarning={Boolean(healthWarning)}
@@ -1815,6 +1931,7 @@ function App({ session, onSessionChange }: AppProps) {
         onCancelUpload={handleDeleteImportItem}
         uploads={projectImportsInFlight}
         onDeleteSelectedRuns={handleDeleteSelectedRuns}
+        onDuplicateRun={handleDuplicateRun}
         onExportRun={handleExportRun}
         onExportTaskRuns={handleExportTaskRuns}
         onJumpToSelection={handleJumpToAnalysisSelection}

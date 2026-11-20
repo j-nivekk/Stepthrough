@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { deleteUser, newUserLink, updateUser } from '../../api';
 import { downloadText, linksCsv } from '../../lib/accountLinks';
+import { tagProblem } from '../../lib/visitors';
 import type { AdminUser, UserLink } from '../../types';
 
 type BatchAction = 'add-tag' | 'remove-tag' | 'delete-after' | 'links' | 'delete';
@@ -101,6 +102,9 @@ export function UserBatchBar({ currentUserId, selected, onFinished, onOpen }: Us
           const has = user.tags.includes(cleanTag);
           if (action === 'add-tag' ? has : !has) return false;
           const tags = action === 'add-tag' ? [...user.tags, cleanTag] : user.tags.filter((item) => item !== cleanTag);
+          // shared and visitor never go together, nor either on an administrator: such people stay as they are
+          const problem = action === 'add-tag' ? tagProblem(tags) : null;
+          if (problem) throw new Error(problem);
           await updateUser(user.id, { tags });
         });
         return describe(outcome, action === 'add-tag' ? `added ${cleanTag} to` : `removed ${cleanTag} from`);
@@ -140,6 +144,11 @@ export function UserBatchBar({ currentUserId, selected, onFinished, onOpen }: Us
   }
 
   const tagValid = TAG_PATTERN.test(tag.trim());
+  // People the tag cannot go on (shared and visitor never together, neither on an administrator): left as they are.
+  const clashing =
+    action === 'add-tag' && tagValid
+      ? selected.filter((user) => !user.tags.includes(tag.trim()) && tagProblem([...user.tags, tag.trim()]))
+      : [];
   const link = 'analysis-task-link subtle';
   const people = plural(count, 'person', 'people');
 
@@ -199,9 +208,14 @@ export function UserBatchBar({ currentUserId, selected, onFinished, onOpen }: Us
               <span className="analysis-parameter-annotation">
                 {tag.trim() && !tagValid
                   ? 'one tag at a time, with letters, digits, -, _ and . only.'
-                  : action === 'add-tag'
-                    ? 'people who already have it are left as they are. the admin tag makes administrators.'
-                    : 'people without it are left as they are; you keep your own admin tag.'}
+                  : clashing.length
+                    ? `${plural(clashing.length, 'person', 'people')} cannot have it and stay as they are: ${tagProblem([
+                        ...clashing[0].tags,
+                        tag.trim(),
+                      ])}`
+                    : action === 'add-tag'
+                      ? 'people who already have it are left as they are. the admin tag makes administrators.'
+                      : 'people without it are left as they are; you keep your own admin tag.'}
               </span>
             </>
           )}

@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react';
 import { createUser, importUsers } from '../../api';
 import { downloadText, linksCsv } from '../../lib/accountLinks';
+import { listTagProblems, tagProblem } from '../../lib/visitors';
 import type { UserImportResult, UserLink } from '../../types';
 import { LinkBox } from './LinkBox';
+import { VisitorSettings } from './VisitorSettings';
 
 type Source = 'list' | 'person';
 
@@ -32,7 +34,7 @@ export interface AddPeoplePanelProps {
 export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [source, setSource] = useState<Source>('list');
-  const [file, setFile] = useState<{ file: File; rows: number } | null>(null);
+  const [file, setFile] = useState<{ file: File; rows: number; text: string } | null>(null);
   const [name, setName] = useState('');
   const [tags, setTags] = useState('');
   const [deleteAfter, setDeleteAfter] = useState('');
@@ -42,7 +44,8 @@ export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
   const [imported, setImported] = useState<UserImportResult | null>(null);
 
   async function chooseFile(chosen: File | undefined) {
-    setFile(chosen ? { file: chosen, rows: countRows(await chosen.text()) } : null);
+    const text = chosen ? await chosen.text() : '';
+    setFile(chosen ? { file: chosen, rows: countRows(text), text } : null);
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -56,7 +59,6 @@ export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
         setFile(null);
         if (fileInputRef.current) fileInputRef.current.value = '';
       } else if (source === 'person' && name.trim()) {
-        const tagList = tags.split(/[,\s]+/).map((tag) => tag.trim()).filter(Boolean);
         const result = await createUser({ name: name.trim(), tags: tagList, delete_after: deleteAfter || null });
         setAdded({ name: result.user.name, link: result.link });
         setImported(null);
@@ -70,7 +72,12 @@ export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
     }
   }
 
-  const ready = source === 'list' ? Boolean(file) : Boolean(name.trim());
+  // Shared and visitor never go together, nor either on an administrator: the tags for everyone are checked on
+  // their own, and a list row by row (the server skips such rows; this says so before the list is sent).
+  const tagList = tags.split(/[,\s]+/).map((tag) => tag.trim()).filter(Boolean);
+  const tagIssue = tagProblem(tagList);
+  const rowIssues = source === 'list' && file && !tagIssue ? listTagProblems(file.text, tagList) : [];
+  const ready = !tagIssue && (source === 'list' ? Boolean(file) : Boolean(name.trim()));
   const label =
     source === 'list'
       ? pending
@@ -174,9 +181,10 @@ export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
               />
             </label>
             <span className="analysis-parameter-annotation">
-              {source === 'list' ? "for everyone, on top of a row's own tags. " : ''}separate with commas; the admin tag
-              makes an administrator.
+              {source === 'list' ? "for everyone, on top of a row's own tags. " : ''}separate with commas. admin: an
+              administrator. shared: one login for a group. visitor: shared, with projects deleted after a while.
             </span>
+            {tagIssue ? <p className="analysis-guidance-copy users-error">{tagIssue}</p> : null}
           </div>
 
           <div className="analysis-parameter-group">
@@ -208,6 +216,21 @@ export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
             </button>{' '}
             to fill in. a spreadsheet can save it as csv.
           </p>
+        )}
+
+        {rowIssues.length > 0 && (
+          <div className="users-list-issues">
+            <p className="analysis-guidance-copy warning">
+              {plural(rowIssues.length, 'row', 'rows')} would be skipped:
+            </p>
+            {rowIssues.slice(0, 8).map((issue) => (
+              <p className="analysis-guidance-copy users-error" key={issue.row}>
+                row {issue.row}
+                {issue.name ? ` (${issue.name})` : ''}: {issue.problem}
+              </p>
+            ))}
+            {rowIssues.length > 8 ? <p className="analysis-guidance-copy">and {rowIssues.length - 8} more.</p> : null}
+          </div>
         )}
 
         <button className="analysis-pill success analysis-run-button" disabled={!ready || pending} type="submit">
@@ -265,6 +288,8 @@ export function AddPeoplePanel({ onChanged }: AddPeoplePanelProps) {
           </button>
         </div>
       )}
+
+      <VisitorSettings />
     </section>
   );
 }

@@ -153,12 +153,12 @@ function csv(judged: Judged[], stages: ProgressStage[]): string {
     ...judged.flatMap(({ account }) =>
       (account.projects.length ? account.projects : [null]).map((project) =>
         project
-          ? [account.name, account.tags.join(' '), project.name, project.videos, project.video_minutes, project.videos_analysed, project.runs,
+          ? [account.name, [...(account.visitor ? ['visitor'] : []), ...account.tags].join(' '), project.name, project.videos, project.video_minutes, project.videos_analysed, project.runs,
               project.runs_failed, project.settings_changed.map((key) => SETTING_NAMES[key] ?? key).join('; '), project.found, project.added,
               project.accepted, project.rejected, project.pending, project.described, project.corrections,
               ...ALL_STAGES.map((stage) => project.reached[stage] ?? ''), project.last_change ?? '',
               stages.every((stage) => project.reached[stage])]
-          : [account.name, account.tags.join(' '), '', ...Array(13).fill(''), ...ALL_STAGES.map(() => ''), '', false],
+          : [account.name, [...(account.visitor ? ['visitor'] : []), ...account.tags].join(' '), '', ...Array(13).fill(''), ...ALL_STAGES.map(() => ''), '', false],
       ),
     ),
   ]);
@@ -295,6 +295,7 @@ export function ProgressReport({ filter, onFilterChange, tags }: ReportProps) {
           ) : (
             <>
               <span className="progress-account">{entry.account.name}</span>
+              {entry.account.visitor ? <span className="usage-tag">visitor</span> : null}
               {entry.account.tags.map((tag) => (
                 <span className="usage-tag" key={tag}>
                   {tag}
@@ -439,6 +440,7 @@ export function ProgressReport({ filter, onFilterChange, tags }: ReportProps) {
                   <tr key={entry.account.id}>
                     <th scope="row">
                       <span className="progress-account">{entry.account.name}</span>
+                      {entry.account.visitor ? <span className="usage-tag">visitor</span> : null}
                       {entry.account.tags.map((tag) => (
                         <span className="usage-tag" key={tag}>
                           {tag}

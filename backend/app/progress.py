@@ -26,7 +26,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from .database import ADMIN_TAG, SHARED_TAG, connect
+from .database import ADMIN_TAG, SHARED_TAG, VISITOR_TAG, connect
 from .models import StableSettings
 
 STAGES = ("videos", "analysed", "reviewed", "described", "pathway", "exported")
@@ -116,7 +116,8 @@ def report(tag: str | None = None) -> dict[str, Any]:
             "id": user["id"],
             "name": user["name"],
             "shared": SHARED_TAG in tags,
-            "tags": [item for item in tags if item != SHARED_TAG],
+            "visitor": VISITOR_TAG in tags,
+            "tags": [item for item in tags if item not in (SHARED_TAG, VISITOR_TAG)],
             "created_at": user["created_at"],
             "last_seen_at": user["last_seen_at"],
             "projects": sorted(

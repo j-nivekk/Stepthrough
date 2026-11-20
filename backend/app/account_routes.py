@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 
-from . import traffic, usage
+from . import traffic, usage, visitors
 from .accounts import (
     SESSION_COOKIE,
     CurrentUser,
@@ -96,6 +96,7 @@ def user_response(user: User) -> UserResponse:
         tags=list(user.tags),
         is_admin=user.is_admin,
         delete_after=user.delete_after,
+        visitor=visitors.limits(user) or None,
     )
 
 

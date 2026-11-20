@@ -37,7 +37,7 @@ export function clampInteger(value: number, min?: number, max?: number): number 
   return nextValue;
 }
 
-function triggerDownload(url: string): void {
+export function triggerDownload(url: string): void {
   if (typeof document === 'undefined') {
     return;
   }

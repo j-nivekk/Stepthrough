@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
 import { formatElapsedDuration } from '../../../lib/utils';
 import { EditableName } from '../../../components/EditableName';
@@ -36,16 +36,37 @@ interface AnalysisTaskRowSetting {
   valueClassName?: string;
 }
 
+interface TaskMenuState {
+  runId: string;
+  x: number;
+  y: number;
+  alignRight?: boolean;
+  anchorTop?: number;
+}
+
+interface TaskMenuItem {
+  label: string;
+  danger?: boolean;
+  disabled?: boolean;
+  title?: string;
+  /** Afterwards the focus goes back to the run's ⋯ (not for rename, whose field takes it, nor delete, whose
+   *  question does). */
+  refocus?: boolean;
+  run: () => void;
+}
+
 export interface AnalysisTasksPanelProps {
   analysisTaskItems: AnalysisTaskItem[];
   analysisMetadata: AnalysisMetadata | null;
   bulkDeletePending: boolean;
   bulkExportPending: boolean;
   busyRunIds: string[];
+  duplicateRunPending: boolean;
   expandedTaskRunId: string | null;
   groupedTaskItems: AnalysisTaskGroup[];
   onAbortRun: (runId: string) => void;
   onDeleteRun: (runId: string) => void;
+  onDuplicateRun: (runId: string) => Promise<void>;
   /** Name a run ('' takes the name away); `previousName` is the name shown when the rename began ('' for none). */
   onRenameRun: (runId: string, name: string, previousName: string) => Promise<void>;
   onDeleteSelectedTasks: () => void;
@@ -63,6 +84,8 @@ export interface AnalysisTasksPanelProps {
   projectDefaultSettings: RunSettings;
   runNumberById: Map<string, number>;
   selectedRunId: string | null;
+  /** The video selected in the videos column: while one is, the runs of the others are folded away. */
+  selectedRecordingId: string | null;
   selectedRunSummary: RunSummary | null;
   selectedTaskRunIds: string[];
   taskClockMs: number;
@@ -76,10 +99,12 @@ export function AnalysisTasksPanel({
   bulkDeletePending,
   bulkExportPending,
   busyRunIds,
+  duplicateRunPending,
   expandedTaskRunId,
   groupedTaskItems,
   onAbortRun,
   onDeleteRun,
+  onDuplicateRun,
   onRenameRun,
   onDeleteSelectedTasks,
   onEnterTaskSelectMode,
@@ -95,6 +120,7 @@ export function AnalysisTasksPanel({
   projectDefaultSettings,
   runNumberById,
   selectedRunId,
+  selectedRecordingId,
   selectedRunSummary,
   selectedTaskRunIds,
   taskClockMs,
@@ -102,11 +128,21 @@ export function AnalysisTasksPanel({
   taskSelectMode,
 }: AnalysisTasksPanelProps) {
   const [collapsedRecordingIds, setCollapsedRecordingIds] = useState<Set<string>>(loadCollapsedGroups);
-  // which run's name to edit, from its rename link; the nonce starts the edit again on a second click
+  // which run's name to edit, from its context menu; the nonce starts the edit again on a second click
   const [renameRequest, setRenameRequest] = useState<{ id: string; nonce: number } | null>(null);
+  const [menu, setMenu] = useState<TaskMenuState | null>(null);
   const knownActiveRunIds = useRef<Set<string> | null>(null);
 
+  // While a video is selected, the runs of the other videos are folded away for the time being: this is not
+  // saved with the groups folded by hand. A group opened meanwhile stays open until another video is selected.
+  const [openedBesideSelection, setOpenedBesideSelection] = useState<Set<string>>(() => new Set());
+  const foldedForSelection = (recordingId: string) =>
+    Boolean(selectedRecordingId) && recordingId !== selectedRecordingId && !openedBesideSelection.has(recordingId);
+
   function setGroupCollapsed(recordingId: string, collapsed: boolean) {
+    if (!collapsed) {
+      setOpenedBesideSelection((current) => (current.has(recordingId) ? current : new Set(current).add(recordingId)));
+    }
     setCollapsedRecordingIds((current) => {
       if (current.has(recordingId) === collapsed) return current;
       const next = new Set(current);
@@ -116,6 +152,13 @@ export function AnalysisTasksPanel({
       return next;
     });
   }
+
+  // Selecting another video folds the others again, and opens its own runs.
+  useEffect(() => {
+    setOpenedBesideSelection(new Set());
+    if (selectedRecordingId) setGroupCollapsed(selectedRecordingId, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRecordingId]);
 
   // A run that has just been started opens its video's group, so a new run never starts out of sight.
   useEffect(() => {
@@ -136,6 +179,116 @@ export function AnalysisTasksPanel({
     // only a change of selection reopens a group; list refreshes must not undo a collapse
   }, [selectedRunId]);
 
+  const menuItem = menu ? analysisTaskItems.find((candidate) => candidate.run.id === menu.runId) ?? null : null;
+  const menuRun = menuItem
+    ? selectedRunId === menuItem.run.id && selectedRunSummary?.id === menuItem.run.id
+      ? selectedRunSummary
+      : menuItem.run
+    : null;
+
+  // Close the context menu if its run disappears (e.g. deleted in another browser).
+  useEffect(() => {
+    if (menu && !menuRun) setMenu(null);
+  }, [menu, menuRun]);
+
+  // Dismiss the floating run menu on outside pointerdown, scroll, resize, or Escape (matches PathwayCanvas).
+  useEffect(() => {
+    if (!menu) return;
+    const triggerSelector = `[data-task-menu-trigger="${CSS.escape(menu.runId)}"]`;
+    const close = () => setMenu(null);
+    function handlePointerDown(event: globalThis.PointerEvent) {
+      const target = event.target instanceof Element ? event.target : null;
+      if (target?.closest('.analysis-task-menu') || target?.closest(triggerSelector)) return;
+      setMenu(null);
+    }
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setMenu(null);
+      }
+    }
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menu]);
+
+  /** Close the menu; after Escape or an action that leaves the focus nowhere, it goes back to the run's ⋯, so
+   *  that someone using the keyboard keeps their place. */
+  function closeMenu(refocus = false) {
+    const runId = menu?.runId;
+    setMenu(null);
+    if (!refocus || !runId) return;
+    window.requestAnimationFrame(() =>
+      document.querySelector<HTMLElement>(`[data-task-menu-trigger="${CSS.escape(runId)}"]`)?.focus(),
+    );
+  }
+
+  function handleRowContextMenu(event: MouseEvent<HTMLDivElement>, runId: string) {
+    // Keep the browser's native text menu while editing a run's name inline.
+    if (event.target instanceof Element && event.target.closest('input, textarea')) return;
+    event.preventDefault();
+    setMenu({ runId, x: event.clientX, y: event.clientY });
+  }
+
+  function handleRowKeyDown(event: KeyboardEvent<HTMLDivElement>, runId: string) {
+    if (event.target instanceof Element && event.target.closest('input, textarea')) return;
+    if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
+    event.preventDefault();
+    const trigger = event.currentTarget.querySelector<HTMLElement>('[data-task-menu-trigger]');
+    const rect = (trigger ?? event.currentTarget).getBoundingClientRect();
+    setMenu({ runId, x: rect.right, y: rect.bottom + 4, alignRight: true, anchorTop: rect.top - 4 });
+  }
+
+  function handleMoreClick(event: MouseEvent<HTMLButtonElement>, runId: string) {
+    if (menu?.runId === runId) {
+      setMenu(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenu({ runId, x: rect.right, y: rect.bottom + 4, alignRight: true, anchorTop: rect.top - 4 });
+  }
+
+  function buildTaskMenuItems(run: RunSummary): TaskMenuItem[] {
+    const busy = busyRunIds.includes(run.id);
+    const isDone = run.status === 'completed';
+    const isExpanded = expandedTaskRunId === run.id;
+    return [
+      {
+        // the settings the run used and who changed it last, under its row
+        label: isExpanded ? 'hide details' : 'details',
+        refocus: true,
+        run: () => onExpandTaskRun(run.id),
+      },
+      {
+        label: 'rename',
+        disabled: busy,
+        run: () => setRenameRequest((current) => ({ id: run.id, nonce: (current?.nonce ?? 0) + 1 })),
+      },
+      {
+        label: 'duplicate',
+        disabled: !isDone || busy || duplicateRunPending,
+        title: !isDone ? 'only completed runs can be duplicated' : undefined,
+        refocus: true,
+        run: () => {
+          void onDuplicateRun(run.id);
+        },
+      },
+      {
+        label: 'delete',
+        danger: true,
+        disabled: busy,
+        run: () => onDeleteRun(run.id),
+      },
+    ];
+  }
+
   function renderTaskRow(item: AnalysisTaskItem) {
     const isSelected = selectedRunId === item.run.id;
     const run = isSelected && selectedRunSummary?.id === item.run.id ? selectedRunSummary : item.run;
@@ -149,7 +302,6 @@ export function AnalysisTasksPanel({
     const hasCandidates = run.candidate_count > 0;
     const hasExported = Boolean(run.export_bundle_id);
     const runTimestampLabel = formatRunShortTimestamp(run.started_at ?? run.created_at);
-    const actionButtons: Array<{ anchorId?: string; label: string }> = [];
     const stableRun = run.stable ?? null;
     const stableDefaults = projectDefaultSettings.stable ?? null;
     const taskSettings: AnalysisTaskRowSetting[] =
@@ -202,22 +354,26 @@ export function AnalysisTasksPanel({
     const isLive = liveRunStatuses.includes(run.status);
     // the expanded, unselected row already shows the full progress bar
     const showLiveLine = isLive && !(isExpanded && !isSelected);
-    const rowClassName = ['analysis-task-row', isSelected ? 'selected' : null, isLive ? 'running' : null, showLiveLine ? 'live-line' : null]
+    const isMenuOpen = menu?.runId === run.id;
+    const rowClassName = [
+      'analysis-task-row',
+      isSelected ? 'selected' : null,
+      isLive ? 'running' : null,
+      showLiveLine ? 'live-line' : null,
+      isMenuOpen ? 'menu-open' : null,
+    ]
       .filter(Boolean)
       .join(' ');
 
-    if (run.is_abortable) {
-      actionButtons.push({ label: 'end' });
-    } else if (hasCandidates && ['completed', 'failed', 'cancelled'].includes(run.status)) {
-      actionButtons.push({ anchorId: 'analysis-candidate-review', label: 'review outputs' });
-    } else if (!hasCandidates) {
-      actionButtons.push({ anchorId: 'analysis-run-detail', label: 'view task' });
-    }
+    // The title opens the run: at its steps once it has any and has stopped, else at the run itself.
+    const opensReview = hasCandidates && ['completed', 'failed', 'cancelled'].includes(run.status);
 
     return (
       <div
         className={rowClassName}
         key={run.id}
+        onContextMenu={(event) => handleRowContextMenu(event, run.id)}
+        onKeyDown={(event) => handleRowKeyDown(event, run.id)}
         style={showLiveLine ? ({ '--run-progress': formatPercent(run.progress) } as CSSProperties) : undefined}
       >
         <div className="analysis-task-head">
@@ -235,7 +391,7 @@ export function AnalysisTasksPanel({
                 displayButtonClassName={`analysis-task-title ${isError ? 'error' : ''}`}
                 editRequestToken={renameRequest?.id === run.id ? renameRequest.nonce : null}
                 onDisplayClick={() => {
-                  if (isDone && hasCandidates) {
+                  if (opensReview) {
                     onReviewTaskOutputs(item.recording.id, run.id);
                   } else {
                     onSelectRun(item.recording.id, run.id, 'analysis-run-detail');
@@ -261,45 +417,22 @@ export function AnalysisTasksPanel({
               {progressLabel}
             </span>
             {elapsedLabel ? <span className="analysis-task-elapsed">{elapsedLabel}</span> : null}
+            {run.is_abortable ? (
+              <button className="analysis-task-link danger" disabled={busy} onClick={() => onAbortRun(run.id)} type="button">
+                end
+              </button>
+            ) : null}
             <button
-              className={`analysis-task-link ${isExpanded ? 'plain' : ''}`}
-              onClick={() => onExpandTaskRun(run.id)}
+              aria-expanded={isMenuOpen}
+              aria-haspopup="menu"
+              aria-label={`more actions for ${formatRunTitle(run, runNumber)}`}
+              className={`analysis-task-link plain analysis-task-more analysis-task-hover-link ${isMenuOpen ? 'is-open' : ''}`}
+              data-task-menu-trigger={run.id}
+              onClick={(event) => handleMoreClick(event, run.id)}
+              title="more actions (right-click)"
               type="button"
             >
-              details
-            </button>
-            {actionButtons.map((action) =>
-              action.label === 'end' ? (
-                <button className="analysis-task-link danger" disabled={busy} key={action.label} onClick={() => onAbortRun(run.id)} type="button">
-                  {action.label}
-                </button>
-              ) : action.label === 'review outputs' ? (
-                <button
-                  className="analysis-task-link subtle"
-                  key={action.label}
-                  onClick={() => onReviewTaskOutputs(item.recording.id, run.id)}
-                  type="button"
-                >
-                  {action.label}
-                </button>
-              ) : (
-                <button
-                  className="analysis-task-link subtle"
-                  key={action.label}
-                  onClick={() => onSelectRun(item.recording.id, run.id, action.anchorId ?? 'analysis-run-detail')}
-                  type="button"
-                >
-                  {action.label}
-                </button>
-              ),
-            )}
-            <button
-              className="analysis-task-link danger analysis-task-hover-link"
-              disabled={busy}
-              onClick={() => onDeleteRun(run.id)}
-              type="button"
-            >
-              delete
+              ⋯
             </button>
           </div>
         </div>
@@ -311,19 +444,11 @@ export function AnalysisTasksPanel({
                 <div className="analysis-task-bar-fill" style={{ width: isDone ? '100%' : formatPercent(run.progress) }} />
               </div>
             )}
-            <div className="analysis-task-changed">
-              {run.modified_at ? (
+            {run.modified_at ? (
+              <div className="analysis-task-changed">
                 <span title={formatRunShortTimestamp(run.modified_at)}>{formatLastChange(run.modified_at, run.modified_by_name)}</span>
-              ) : null}
-              <button
-                className="analysis-task-link subtle"
-                disabled={busy}
-                onClick={() => setRenameRequest((current) => ({ id: run.id, nonce: (current?.nonce ?? 0) + 1 }))}
-                type="button"
-              >
-                rename
-              </button>
-            </div>
+              </div>
+            ) : null}
             <div className="analysis-task-settings">
               {taskSettings.map((setting) => (
                 <div className={`analysis-task-setting ${setting.key === 'mode' ? 'mode' : ''}`} key={setting.key}>
@@ -345,7 +470,7 @@ export function AnalysisTasksPanel({
   }
 
   function renderTaskGroup(group: AnalysisTaskGroup) {
-    const isCollapsed = collapsedRecordingIds.has(group.recording.id);
+    const isCollapsed = collapsedRecordingIds.has(group.recording.id) || foldedForSelection(group.recording.id);
     const runCountLabel = `${group.runs.length} ${group.runs.length === 1 ? 'run' : 'runs'}`;
     const liveCount = group.runs.filter((item) => liveRunStatuses.includes(item.run.status)).length;
     const queuedCount = group.runs.filter((item) => item.run.status === 'queued').length;
@@ -461,6 +586,107 @@ export function AnalysisTasksPanel({
           <p className="entry-empty-copy">no tasks in this filter yet.</p>
         )}
       </div>
+      {menu && menuRun ? (
+        <TaskContextMenu
+          alignRight={menu.alignRight}
+          anchorTop={menu.anchorTop}
+          items={buildTaskMenuItems(menuRun)}
+          key={menu.runId}
+          onClose={closeMenu}
+          x={menu.x}
+          y={menu.y}
+        />
+      ) : null}
     </section>
+  );
+}
+
+/** Compact run context menu, matching PathwayMenu's visual language at the tasks list's tighter scale. */
+function TaskContextMenu({
+  alignRight = false,
+  anchorTop,
+  items,
+  onClose,
+  x,
+  y,
+}: {
+  alignRight?: boolean;
+  anchorTop?: number;
+  items: TaskMenuItem[];
+  onClose: (refocus?: boolean) => void;
+  x: number;
+  y: number;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number }>({ left: x, top: y });
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const { width, height } = element.getBoundingClientRect();
+    const rawLeft = alignRight ? x - width : x;
+    const flippedLeft = rawLeft + width > window.innerWidth - 8 ? x - width : rawLeft;
+    const left = Math.max(8, Math.min(window.innerWidth - width - 8, flippedLeft));
+    const flippedTop = y + height > window.innerHeight - 8 ? (anchorTop ?? y) - height : y;
+    const top = Math.max(8, Math.min(window.innerHeight - height - 8, flippedTop));
+    setPosition({ left, top });
+  }, [x, y, alignRight, anchorTop]);
+
+  useEffect(() => {
+    ref.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+  }, [x, y]);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    // Keys pressed in the menu are the menu's: the page's own shortcuts (a, r, u and the arrows in the step review,
+    // k, Space for the video) listen on the window and would otherwise act on what is behind it.
+    event.stopPropagation();
+    const buttons = [...(ref.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
+    if (!buttons.length) return;
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const step = event.key === 'ArrowDown' ? 1 : -1;
+      const nextIndex = index < 0 ? (step > 0 ? 0 : buttons.length - 1) : (index + step + buttons.length) % buttons.length;
+      buttons[nextIndex]?.focus();
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      buttons[0]?.focus();
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      buttons[buttons.length - 1]?.focus();
+    } else if (event.key === 'Escape') {
+      onClose(true);
+    }
+  }
+
+  return (
+    <div
+      className="pathway-menu is-compact analysis-task-menu"
+      onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={handleKeyDown}
+      onPointerDown={(event) => event.stopPropagation()}
+      ref={ref}
+      role="menu"
+      style={{ left: position.left, top: position.top }}
+    >
+      {items.map((item) => (
+        <div className="pathway-menu-row" key={item.label}>
+          <button
+            className={`pathway-menu-item ${item.danger ? 'is-danger' : ''}`}
+            disabled={item.disabled}
+            onClick={() => {
+              if (item.disabled) return;
+              onClose(item.refocus);
+              item.run();
+            }}
+            role="menuitem"
+            title={item.title}
+            type="button"
+          >
+            <span>{item.label}</span>
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }

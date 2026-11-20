@@ -232,6 +232,7 @@ LONG_MEASURES = {
     "steps_decided": "steps decided", "step_annotated": "titles and notes", "step_added": "steps added",
     "screen_corrected": "pathway corrections", "screens_merged": "screens merged", "exported": "exports",
     "figure_downloaded": "pathway figures", "comparison_opened": "comparisons", "tutorial_opened": "tutorial opened",
+    "run_duplicated": "runs duplicated",
 }
 
 
@@ -278,11 +279,11 @@ def report(window: Window, tag: str | None = None, long: bool = False) -> dict[s
             continue
         if browser:
             browsers.add(browser)
-        info = names.get(account_id, {"name": "a deleted account", "shared": False})
+        info = names.get(account_id, {"name": "a deleted account", "shared": False, "visitor": False})
         stats = accounts.setdefault(account_id, {
-            "name": info["name"], "shared": info["shared"], "browsers": set(), "open_minutes": 0, "working_minutes": 0,
+            "name": info["name"], "shared": info["shared"], "visitor": info.get("visitor", False), "browsers": set(), "open_minutes": 0, "working_minutes": 0,
             "logins": 0, "projects": 0, "uploads": 0, "upload_minutes": 0.0, "analyses": 0, "analyses_failed": 0,
-            "accepted": 0, "rejected": 0, "annotations": 0, "steps_added": 0, "carried_over": 0, "merges": 0,
+            "accepted": 0, "rejected": 0, "annotations": 0, "steps_added": 0, "carried_over": 0, "duplicates": 0, "merges": 0,
             "exports": 0, "figures": 0, "tutorial_browsers": set(), "tutorial_finished": set(),
             "corrections": 0, "comparisons": 0, "active_days": set(), "stage_minutes": dict.fromkeys(STAGES, 0),
         })
@@ -343,6 +344,8 @@ def report(window: Window, tag: str | None = None, long: bool = False) -> dict[s
             stats["steps_added"] += 1
         elif kind == "review_carried_over":
             stats["carried_over"] += 1
+        elif kind == "run_duplicated":
+            stats["duplicates"] += 1
         elif kind == "screens_merged":
             stats["merges"] += 1
         elif kind == "exported":

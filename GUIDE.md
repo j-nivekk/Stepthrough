@@ -249,7 +249,8 @@ On the start screen, type a name under **create a project** and press **enter**.
 app: a project keeps its recordings, runs and preferred settings together.
 
 To come back to a project later, pick it from the list: a project with videos opens on the analysis page, and an
-empty one on the import page. When you point at a project, you see **import**, **analysis** and **delete**.
+empty one on the import page. When you point at a project, you see **import**, **analysis**, **download** (the
+whole project as one file, see [The project file](#the-project-file)) and **delete**.
 
 ### Step 2: import the recording
 
@@ -280,7 +281,7 @@ first run on a new recording can take longer, because it also waits for the work
 
 ### Step 4: review the steps
 
-When the run is done, click **review outputs**. Below the timeline, each step is shown as a card with its
+When the run is done, click its name under **tasks**. Below the timeline, each step is shown as a card with its
 screenshot, time, label and status.
 
 For each step, ask yourself:
@@ -588,14 +589,20 @@ own too, which you can move or resize in a drawing program.
 ### Tasks
 
 Every run is listed under **tasks** with its number of steps. Runs of the same recording are grouped; click
-the arrow next to a recording's name to fold its runs away or show them again. **details** shows the settings
-a run used and who changed it last and when, **review outputs** opens it, **compare** sets two runs of a
-recording side by side (see [Comparing runs](#comparing-runs)), and **select** lets you delete or export
-several runs at once.
+the arrow next to a recording's name to fold its runs away or show them again. While a video is selected, the
+runs of the other videos are folded away until you open them or select another video. Click a run's name to open it,
+at its steps once it has any; **compare** sets two runs of a recording side by side (see
+[Comparing runs](#comparing-runs)), and **select** lets you delete or export several runs at once.
+
+**⋯** next to a run, or a right click on it, has **details**, **rename**, **duplicate** and **delete**. **details**
+shows under the run the settings it used and who changed it last and when. **duplicate** copies a
+finished run, with its steps, your decisions, titles and notes, screen choices and phases, as a new run of the
+same recording named after it ("first try copy"). Try another way of correcting it there, and keep the original
+as it was; the copy keeps when the analysis ran, but not the export.
 
 Each run of a recording gets a number, run #1, run #2 and so on, which it keeps: deleting a run does not
-renumber the others, and a new run never takes the number of a deleted one. **rename**, under **details**,
-gives a run a name, such as "second try, phone settings". The number stays under the name, and it is the
+renumber the others, and a new run never takes the number of a deleted one. **rename** gives a run a name, such
+as "second try, phone settings". The number stays under the name, and it is the
 number that the comparison and the export use (`number` and `name` under `run` in `steps.json`). To take the
 name away, rename the run back to its number, such as `run #2`. The project list says, for each project, who
 changed something in it last and when; viewing, exporting and saving settings for yourself do not count as
@@ -632,6 +639,28 @@ is on and why it shares that screen with an earlier step (`grouped_by`: `researc
 revisit, a pop-up closing, or a label such as scroll), and what you chose for the step (`screen_choice`,
 `kind_choice`), so your decisions and the automatic ones can be told apart. It has its own `field_notes`.
 The chart itself is not in the zip; save it with **download: svg** or **png**.
+
+### The project file
+
+An export holds the results of one run, to work with elsewhere. To keep a whole project, take it to another
+Stepthrough server, or bring it back after it was deleted, use **download** next to the project in the list of
+projects. It saves the project as one file (`name.stepthrough.zip`) with its videos as they were uploaded, and
+every run with its settings, its name and number, its steps with your decisions, titles and notes, your screen,
+pop-up and row choices, and its phases. Exports of runs and the log of each analysis are not in it, and runs that
+are still analysing are left out. With long videos the file is large; it downloads as it is made.
+
+To bring the work back, choose **or import a project...** on the list of projects and drop the file there (or
+click to choose it). It becomes a project again, under its own name, with every video and run in it, and opens
+when it is in: you can carry on reviewing, or analyse again with other settings. The same file can be brought in
+more than once. To add the videos of a project file to a project you are working in instead, drop the file on
+that project's import page, as you would a video.
+
+A file made with an earlier version of Stepthrough always opens in a later one. A file made with a newer version
+than the server is refused with a message, rather than read halfway: update the server first. A damaged or
+incomplete file is noticed and refused, and nothing of it is kept.
+
+Like the export, the project file holds screenshots of what was on screen, and the videos themselves: keep it as
+you keep the recordings.
 
 ## 9. Making good recordings
 
@@ -770,6 +799,27 @@ catches up when it is back.
 The password of a shared account cannot be changed from the app, because that would log everyone else out.
 An administrator gives the account a new link instead; setting a password with it logs every other browser out.
 
+### Visitor accounts
+
+For people from elsewhere who try Stepthrough for a short while, an administrator can give an account the
+`visitor` tag instead. A visitor account is a shared account with limits: everything above applies to it, and an
+account has either the `shared` or the `visitor` tag, never both (the admin panel and a list of people refuse the
+combination). Administrator accounts cannot have it either.
+
+- **Projects are kept for a while.** Each project of a visitor account is deleted 72 hours after it was made,
+  with every video, run and screenshot in it, unless the administrators chose another time. The time counts from
+  when the project was made, not from the last change. The list of projects says when each one goes, and every
+  page of the project shows it in a notice in the bottom left corner, which can be made small but not closed.
+- **Keep the work with the project file.** The notice offers **download**: the project file
+  described under [Exports](#the-project-file). Importing that file on the list of projects, on the same server or
+  another one, brings the work back; on a visitor account the new project counts its own time.
+- **Limits.** A video may be at most 500 MB, and an account may keep at most 2000 MB at once, videos and
+  screenshots together, unless the administrators chose other limits. Both are checked when a video or a project
+  file comes in, and the account panel shows them.
+
+A project that a regular account owns as well is not deleted. In the usage, traffic and progress reports, visitor
+accounts are marked as such; choosing a class leaves them out, as they have no class tag.
+
 ### Privacy and consent
 
 Screen recordings often show names, messages, notifications and account details. Ask for consent before you
@@ -783,8 +833,9 @@ exports from there (but not copies you downloaded).
 On a shared Stepthrough server, your recordings are stored on that server. Your projects are visible only to you
 and to the server's administrators. Your account may have a deletion date: from then on, the account and your
 projects are deleted from the server, and you see a notice in the month before, so download your exports in
-time. Ask the people who run the server how long recordings are kept, and do not upload recordings that show
-other people without their consent.
+time. On a visitor account, each project is deleted a few days after it was made (see
+[Visitor accounts](#visitor-accounts)). Ask the people who run the server how long recordings are kept, and do not
+upload recordings that show other people without their consent.
 
 A server also keeps a record of how Stepthrough is used, for the people who teach with it: when people are in the
 app and on which page, what they do (such as uploading, analysing, deciding on steps, correcting the pathway and

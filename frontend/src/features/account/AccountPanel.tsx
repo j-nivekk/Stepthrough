@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { changePassword } from '../../api';
 import { formatCalendarDate } from '../../lib/formatters';
 import { isSharedAccount } from '../../lib/live';
+import { formatHours, formatSize } from '../../lib/visitors';
 import type { SessionUser } from '../../types';
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -98,6 +99,19 @@ export function AccountPanel({ isLoggingOut, open, user, onClose, onLogOut, onOp
           </p>
         </div>
       )}
+
+      {user.visitor && !user.is_admin ? (
+        <div className="app-settings-section">
+          <p className="app-settings-section-label">visitor account</p>
+          <p className="app-settings-hint">
+            projects are deleted {formatHours(user.visitor.keep_hours)} after they are made. videos up to{' '}
+            {formatSize(user.visitor.upload_limit_bytes)}
+            {user.visitor.storage_limit_bytes !== null && user.visitor.storage_used_bytes !== null
+              ? `; ${formatSize(user.visitor.storage_used_bytes)} of ${formatSize(user.visitor.storage_limit_bytes)} used.`
+              : '.'}
+          </p>
+        </div>
+      ) : null}
 
       {isSharedAccount(user) ? (
         <div className="app-settings-section">

@@ -7,6 +7,7 @@ import logging
 import shutil
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Thread
 from typing import Annotated, Any, Callable, Literal
@@ -25,7 +26,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -38,6 +39,7 @@ from .accounts import (
     ProjectRole,
     User,
     auth_mode,
+    current_user,
     is_cross_site,
     project_role,
     require_admin,
@@ -88,6 +90,7 @@ from .repository import (
     delete_project_record,
     delete_recording_record,
     delete_run_record,
+    duplicate_run_record,
     fail_interrupted_runs,
     find_projects_by_folder,
     get_candidate,
@@ -142,7 +145,7 @@ from .services.video import (
 from .compression import CompressMiddleware
 from .export_cleanup import clear_old_exports
 from .live import CLIENT_HEADER, LiveHub, TaskWrites, clean_targets
-from . import server_settings, traffic, usage, usage_routes
+from . import project_file, server_settings, traffic, usage, usage_routes, visitors
 from .storage import (
     absolute_data_path,
     asset_url,
@@ -167,6 +170,7 @@ if not logger.handlers:
     logger.addHandler(_handler)
     logger.setLevel(logging.INFO)
 server_config = build_server_config()
+visitors.configure(server_config.max_upload_bytes)
 
 
 @dataclass(frozen=True)
@@ -231,12 +235,25 @@ async def reject_cross_site_changes(request: Request, call_next):
 
 @app.middleware("http")
 async def reject_oversized_uploads(request: Request, call_next):
-    # Refuse before the multipart body is spooled to disk; save_upload_file re-checks chunked uploads.
+    # Refuse before the multipart body is spooled to disk; save_upload_file and the project file's import check again.
     content_length = request.headers.get("content-length")
-    if request.url.path == "/recordings/import" and content_length and content_length.isdigit():
-        if int(content_length) > server_config.max_upload_bytes:
+    path = request.url.path
+    video = path == "/recordings/import"
+    whole_project = request.method == "POST" and path.startswith("/projects/") and path.endswith("/project-file")
+    if (video or whole_project) and content_length and content_length.isdigit():
+        size = int(content_length)
+        if video and size > server_config.max_upload_bytes:
             limit_mb = server_config.max_upload_bytes // (1024 * 1024)
             return JSONResponse(status_code=413, content={"detail": f"Recording is larger than the {limit_mb} MB upload limit."})
+        # Visitor accounts have limits of their own (app/visitors.py).
+        user = await run_in_threadpool(current_user, request)
+        if user is not None and user.is_visitor:
+            limit = visitors.upload_limit(user)
+            if video and size > limit:
+                return JSONResponse(status_code=413, content={"detail": f"Recording is larger than the {limit // (1024 * 1024)} MB upload limit of this account."})
+            room = await run_in_threadpool(visitors.room_left, user)
+            if room is not None and size > room:
+                return JSONResponse(status_code=413, content={"detail": visitors.full_message(user, size)})
     return await call_next(request)
 
 
@@ -332,8 +349,31 @@ def shutdown() -> None:
     traffic.flush()
 
 
+def delete_due_visitor_projects(now: datetime | None = None) -> list[str]:
+    """Delete the visitors' projects whose time is up (app/visitors.py); one still analysing waits until it is done.
+    Returns their names."""
+    deleted = []
+    for project in visitors.due(now or datetime.now(timezone.utc)):
+        if project_has_active_runs(project["id"]):
+            continue
+        _delete_project(project, set(shared_accounts_for_project(project["id"])))
+        logger.info("Deleted the visitor project %s: its keeping time is over.", project["name"])
+        deleted.append(project["name"])
+    return deleted
+
+
+def _delete_visitor_projects_often() -> None:
+    while True:
+        try:
+            delete_due_visitor_projects()
+        except Exception:  # pragma: no cover - keep trying
+            logger.exception("Could not delete visitor projects.")
+        time.sleep(300)
+
+
 def _start_account_cleanup() -> None:
     Thread(target=_delete_expired_accounts_hourly, name="stepthrough-account-cleanup", daemon=True).start()
+    Thread(target=_delete_visitor_projects_often, name="stepthrough-visitor-cleanup", daemon=True).start()
 
 
 @app.on_event("startup")
@@ -441,9 +481,15 @@ def _modifier_name(row: dict) -> str | None:
     return None if row.get("modified_by") == LOCAL_USER_ID else row.get("modified_by_name")
 
 
-def _serialize_project(row: dict) -> ProjectResponse:
+def _serialize_project(row: dict, deadlines: dict[str, str] | None = None) -> ProjectResponse:
+    deadlines = visitors.deadlines() if deadlines is None else deadlines
     return ProjectResponse(
-        **{**row, "modified_at": row.get("modified_at") or row["last_activity_at"], "modified_by_name": _modifier_name(row)}
+        **{
+            **row,
+            "modified_at": row.get("modified_at") or row["last_activity_at"],
+            "modified_by_name": _modifier_name(row),
+            "deletes_at": deadlines.get(row["id"]),
+        }
     )
 
 
@@ -1129,7 +1175,8 @@ def my_run_settings_forget_for_project(project_id: str, user: CurrentUser, clien
 @app.get("/projects", response_model=list[ProjectResponse])
 def projects_index(user: CurrentUser) -> list[ProjectResponse]:
     # Administrators may open every project, but their list shows only the ones they belong to.
-    return [_serialize_project(project) for project in list_projects(user.memberships)]
+    deadlines = visitors.deadlines()
+    return [_serialize_project(project, deadlines) for project in list_projects(user.memberships)]
 
 
 @app.post("/projects", response_model=ProjectResponse)
@@ -1167,14 +1214,92 @@ def projects_delete(project_id: str, user: CurrentUser, client: SharedClient = N
     project = _project_for(project_id, user, "owner")
     if project_has_active_runs(project_id):
         raise HTTPException(status_code=409, detail="Abort active runs before deleting this project")
-    accounts = _audience(project_id, user)  # before its members go with it
-    project_path = project_dir(project["slug"], project["id"])
-    for recording in list_recordings(project_id):
-        stop_working_copy(recording["id"])
-    delete_project_record(project_id)
-    shutil.rmtree(project_path, ignore_errors=True)
-    _announce("project_deleted", project_id=project_id, client=client, accounts=accounts)
+    _delete_project(project, _audience(project_id, user), client)
     return Response(status_code=204)
+
+
+def _delete_project(project: dict, accounts: set[str], client: str | None = None) -> None:
+    """A project with everything in it, files included; ``accounts`` are told (found before its members go)."""
+    for recording in list_recordings(project["id"]):
+        stop_working_copy(recording["id"])
+    delete_project_record(project["id"])
+    shutil.rmtree(project_dir(project["slug"], project["id"]), ignore_errors=True)
+    _announce("project_deleted", project_id=project["id"], client=client, accounts=accounts)
+
+
+@app.get("/projects/{project_id}/project-file")
+def projects_file_download(project_id: str, user: CurrentUser) -> StreamingResponse:
+    """The whole project as one file, videos included (app/project_file.py), made as it downloads."""
+    project = _project_for(project_id, user, "viewer")
+    usage.record("project_file_downloaded", user)
+    return StreamingResponse(
+        project_file.stream(project),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{project_file.file_name(project)}"', "Cache-Control": "no-store"},
+    )
+
+
+@app.post("/projects/project-file", response_model=ProjectResponse)
+async def projects_from_file(user: CurrentUser, file: UploadFile = File(...), client: SharedClient = None) -> ProjectResponse:
+    """A new project from a project file, under the name it has there, with its videos, runs, steps and phases.
+    When the file is refused, no empty project is left behind."""
+    _require_tools()
+    try:
+        name = await run_in_threadpool(project_file.project_name, file.file)
+        project = create_project(name, owner_id=user.id)
+        try:
+            room = await run_in_threadpool(visitors.room_left, user)
+            recording_ids = await run_in_threadpool(
+                lambda: project_file.import_into(
+                    file.file,
+                    project,
+                    max_video_bytes=visitors.upload_limit(user),
+                    room_bytes=room,
+                    too_full=lambda needed: visitors.full_message(user, needed),
+                )
+            )
+        except BaseException:
+            _delete_project(project, set())
+            raise
+    except project_file.ProjectFileError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
+    finally:
+        await file.close()
+    for recording_id in recording_ids:
+        _start_background_ingest(recording_id)
+    _announce("projects", project_id=project["id"], user=user, client=client)
+    usage.record("project_created", user)
+    usage.record("project_file_imported", user, recordings=len(recording_ids))
+    return _serialize_project(get_project(project["id"]))
+
+
+@app.post("/projects/{project_id}/project-file", response_model=list[RecordingImportResponse])
+async def projects_file_import(
+    project_id: str, user: CurrentUser, file: UploadFile = File(...), client: SharedClient = None
+) -> list[RecordingImportResponse]:
+    """Bring the videos of a project file, with their runs, steps and phases, into this project."""
+    _require_tools()
+    project = _project_for(project_id, user, "owner")
+    try:
+        room = await run_in_threadpool(visitors.room_left, user)
+        recording_ids = await run_in_threadpool(
+            lambda: project_file.import_into(
+                file.file,
+                project,
+                max_video_bytes=visitors.upload_limit(user),
+                room_bytes=room,
+                too_full=lambda needed: visitors.full_message(user, needed),
+            )
+        )
+    except project_file.ProjectFileError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
+    finally:
+        await file.close()
+    for recording_id in recording_ids:
+        _start_background_ingest(recording_id)
+    _announce("project", project_id=project_id, user=user, client=client)
+    usage.record("project_file_imported", user, recordings=len(recording_ids))
+    return [_serialize_recording(get_recording(recording_id)) for recording_id in recording_ids]
 
 
 @app.post("/recordings/import", response_model=RecordingImportResponse)
@@ -1193,8 +1318,11 @@ async def recordings_import(
     recording_slug = recording_slug_from_filename(sanitized_name)
     destination = recording_source_path(project["slug"], project_id, recording_slug, recording_id, sanitized_name)
     recording = None
+    room = await run_in_threadpool(visitors.room_left, user)
     try:
-        await save_upload_file(file, destination, max_bytes=server_config.max_upload_bytes)
+        await save_upload_file(file, destination, max_bytes=visitors.upload_limit(user))
+        if room is not None and destination.stat().st_size > room:
+            raise HTTPException(status_code=413, detail=visitors.full_message(user, destination.stat().st_size))
         metadata = await run_in_threadpool(probe_video, destination)
         recording = create_recording(
             recording_id=recording_id,
@@ -1208,7 +1336,8 @@ async def recordings_import(
             fps=metadata.fps,
         )
     except UploadTooLargeError as exc:
-        raise HTTPException(status_code=413, detail=str(exc)) from exc
+        detail = str(exc) if not user.is_visitor else f"{str(exc)[:-1]} of this account."
+        raise HTTPException(status_code=413, detail=detail) from exc
     except VideoToolError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
@@ -1300,6 +1429,90 @@ def runs_update(run_id: str, payload: RunUpdate, user: CurrentUser, client: Shar
     rename_run(run_id, payload.name.strip() or None)
     _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
     return _serialize_run_summary(get_run(run_id))
+
+
+@app.post("/runs/{run_id}/duplicate", response_model=DetectionRunSummary)
+def runs_duplicate(run_id: str, user: CurrentUser, client: SharedClient = None) -> DetectionRunSummary:
+    """Duplicate a completed run with its settings, steps, screenshots, review decisions and phases."""
+    project, recording, _run = _run_for(run_id, user, "owner")
+    new_run_id = uuid4().hex
+    new_run_path, new_frames_path = _run_artifact_paths(project, recording, new_run_id)
+    with _one_at_a_time(run_id), _busy(user, client, project["id"], run_id, "duplicating this task"):
+        run = get_run(run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if run["status"] != "completed":
+            raise HTTPException(status_code=409, detail="Only completed runs can be duplicated")
+
+        candidates = list_candidates(run_id)
+        phases = list_run_phases(run_id)
+
+        frame_sources: list[tuple[dict[str, Any], Path | None]] = []
+        needed_bytes = 0
+        for candidate in candidates:
+            rel_path = candidate.get("image_path") or ""
+            source_file = absolute_data_path(rel_path) if rel_path else None
+            if source_file is not None and source_file.is_file():
+                needed_bytes += source_file.stat().st_size
+                frame_sources.append((candidate, source_file))
+            else:
+                frame_sources.append((candidate, None))
+
+        room = visitors.room_left(user)
+        if room is not None and needed_bytes > room:
+            raise HTTPException(status_code=413, detail=visitors.full_message(user, needed_bytes))
+
+        try:
+            id_map = {candidate["id"]: uuid4().hex for candidate in candidates}
+            copied_candidates: list[dict[str, Any]] = []
+            taken_filenames: set[str] = set()
+            if any(source_file is not None for _, source_file in frame_sources):
+                new_frames_path.mkdir(parents=True, exist_ok=True)
+            for candidate, source_file in frame_sources:
+                image_path = ""
+                if source_file is not None:
+                    filename = source_file.name
+                    if filename in taken_filenames:
+                        filename = f"{source_file.stem}-{id_map[candidate['id']][:8]}{source_file.suffix}"
+                    taken_filenames.add(filename)
+                    destination = new_frames_path / filename
+                    shutil.copy2(source_file, destination)
+                    image_path = relative_data_path(destination)
+                screen_link = candidate.get("screen_link")
+                copied_candidates.append(
+                    {
+                        **candidate,
+                        "id": id_map[candidate["id"]],
+                        "run_id": new_run_id,
+                        "recording_id": recording["id"],
+                        "image_path": image_path,
+                        "similar_to_candidate_id": id_map.get(candidate.get("similar_to_candidate_id")),
+                        "screen_link": screen_link if screen_link in (None, "new") else id_map.get(screen_link),
+                    }
+                )
+
+            source_label = (run.get("name") or "").strip() or f"run #{run.get('run_number') or 1}"
+            duplicated = duplicate_run_record(
+                source_run=run,
+                new_run_id=new_run_id,
+                candidates=copied_candidates,
+                phases=phases,
+                message=f"Duplicated from {source_label}",
+            )
+        except BaseException:
+            shutil.rmtree(new_run_path, ignore_errors=True)
+            raise
+
+    _emit_run_event(
+        new_run_id,
+        phase="completed",
+        level="info",
+        message=f"Duplicated from {source_label}",
+        progress=1.0,
+    )
+    _announce("recording", project_id=project["id"], recording_id=recording["id"], run_id=new_run_id, user=user, client=client)
+    usage.record("run_duplicated", user, steps=len(candidates))
+    return _serialize_run_summary(get_run(duplicated["id"]))
 
 
 @app.get("/runs/{run_id}/pathway", response_model=PathwayResponse)

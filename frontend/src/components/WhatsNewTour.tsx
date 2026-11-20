@@ -39,8 +39,7 @@ const STOPS: Stop[] = [
     title: 'view',
     text: (
       <>
-        the switch that was called <b>boxes</b>. <b>screens</b> keeps a page as one box while it is scrolled or typed in;{' '}
-        <b>steps</b> gives every step a box of its own.
+        was <b>boxes</b>. <b>screens</b>: one box per page. <b>steps</b>: one box per step.
       </>
     ),
     find: () => one('[aria-label="view of the pathway"]'),
@@ -49,8 +48,7 @@ const STOPS: Stop[] = [
     title: 'click a box',
     text: (
       <>
-        it is selected, and a toolbox opens beside it: its <b>title</b>, <b>pop-up</b>, <b>stack onto</b> another box,
-        and its <b>phase</b>. shift-click to select several boxes.
+        opens its toolbox: <b>title</b>, <b>pop-up</b>, <b>stack onto</b> and <b>phase</b>. shift-click for several.
       </>
     ),
     find: () => boxes().slice(1, 2).concat(boxes().length === 1 ? boxes() : []),
@@ -59,8 +57,7 @@ const STOPS: Stop[] = [
     title: 'click a step number',
     text: (
       <>
-        the number under a box selects that one step. its toolbox gives it a screen of its <b>own</b>, or <b>puts it on</b>{' '}
-        another box. a number such as 4–5 stands for several steps: pick one in the toolbox.
+        selects one step: give it its <b>own</b> screen, or <b>put it on</b> another box. for 4–5, pick one in its toolbox.
       </>
     ),
     find: () => {
@@ -73,8 +70,8 @@ const STOPS: Stop[] = [
     title: 'drag',
     text: (
       <>
-        drag a box onto another to <b>stack</b> them. drag a step number onto a box to put that step there, or off the
-        boxes for a screen of its own. a dashed outline shows where it would go.
+        a box onto a box <b>stacks</b> them. a step number onto a box moves the step; off the boxes, it gets its own
+        screen.
       </>
     ),
     find: () => boxes().slice(0, 2),
@@ -83,9 +80,8 @@ const STOPS: Stop[] = [
     title: 'right-click, and undo',
     text: (
       <>
-        right-click a box or a number for every action, <b>row</b> and <b>unstack</b> included. this line says what is
-        selected and what a drop would do, and offers <b>undo</b> (⌘Z, or Ctrl+Z). your undo takes back only your own
-        changes, also in a shared account.
+        right-click for every action. this line shows what is selected; <b>undo</b> (⌘Z or Ctrl+Z) takes back only
+        your own changes.
       </>
     ),
     find: () => one('.pathway-status'),
@@ -94,9 +90,8 @@ const STOPS: Stop[] = [
     title: 'phases',
     text: (
       <>
-        name parts of the walkthrough, such as sign up: open them here, or select boxes and choose <b>phase…</b>. they
-        are drawn as brackets over the boxes, and the step list has a header above each. this tour stays under{' '}
-        <b>about</b>, at the bottom right.
+        name parts of the walkthrough, such as sign up: here, or <b>phase…</b> on selected boxes. this tour stays
+        under <b>about</b>.
       </>
     ),
     find: () => one('[data-phases-toggle]'),
@@ -245,7 +240,7 @@ export function WhatsNewTour({ onClose }: { onClose: () => void }) {
         </span>
         <p className="whats-new-title">{stop.title}</p>
         <p className="whats-new-text">{stop.text}</p>
-        {!spot ? <p className="whats-new-hint">open a pathway to see this in place.</p> : null}
+        {!spot ? <p className="whats-new-hint">open a pathway to see it in place.</p> : null}
         <div className="whats-new-actions">
           <button className="analysis-task-link subtle" onClick={close} type="button">
             skip

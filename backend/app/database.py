@@ -233,6 +233,14 @@ LOCAL_USER_ID = "local"
 LOCAL_USER_NAME = "local"
 ADMIN_TAG = "admin"
 SHARED_TAG = "shared"
+# A visitor account works as a shared one, with limits on top (app/visitors.py). It never carries the shared tag as
+# well, and neither tag goes on an administrator (user_admin.account_tags).
+VISITOR_TAG = "visitor"
+
+
+def acts_as_shared(tags: list[str] | tuple[str, ...]) -> bool:
+    """Whether an account with these tags is used by many people at once: a shared account, or a visitor one."""
+    return ADMIN_TAG not in tags and (SHARED_TAG in tags or VISITOR_TAG in tags)
 
 # Runs write progress from their own threads while requests read and write too. A writer waits this long for
 # another to finish instead of failing at once with "database is locked" (sqlite3's default is 5 s).
@@ -418,4 +426,15 @@ def init_db() -> None:
             """,
             (SHARED_TAG, SHARED_TAG, ADMIN_TAG),
         )
+        # A visitor account is a shared account already, and an administrator neither.
+        for tag, beside in ((SHARED_TAG, VISITOR_TAG), (VISITOR_TAG, ADMIN_TAG)):
+            conn.execute(
+                """
+                UPDATE users
+                SET tags = (SELECT json_group_array(value) FROM json_each(users.tags) WHERE value != ?)
+                WHERE ? IN (SELECT value FROM json_each(users.tags))
+                  AND ? IN (SELECT value FROM json_each(users.tags))
+                """,
+                (tag, tag, beside),
+            )
         _adopt_projects_without_members(conn)

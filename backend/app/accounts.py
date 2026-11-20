@@ -34,7 +34,7 @@ from starlette.requests import HTTPConnection
 
 from . import traffic, usage
 from .config import AuthMode, public_url
-from .database import ADMIN_TAG, LOCAL_USER_ID, SHARED_TAG
+from .database import ADMIN_TAG, LOCAL_USER_ID, VISITOR_TAG, acts_as_shared
 from .repository import (
     create_session,
     delete_session,
@@ -101,7 +101,12 @@ class User:
 
     @property
     def is_shared(self) -> bool:
-        return SHARED_TAG in self.tags and not self.is_admin
+        """Used by many people at once: a shared account, or a visitor one (which is shared, with limits)."""
+        return acts_as_shared(self.tags)
+
+    @property
+    def is_visitor(self) -> bool:
+        return VISITOR_TAG in self.tags and not self.is_admin
 
     @property
     def is_builtin(self) -> bool:

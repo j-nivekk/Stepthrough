@@ -73,7 +73,7 @@ export function UsersScreen({ currentUserId, onBack }: UsersScreenProps) {
 
   // The classes to look at one by one: the tags of accounts that are not administrators.
   const tags = useMemo(
-    () => [...new Set(users.filter((user) => !user.is_admin).flatMap((user) => user.tags))].filter((tag) => tag !== 'shared').sort(),
+    () => [...new Set(users.filter((user) => !user.is_admin).flatMap((user) => user.tags))].filter((tag) => tag !== 'shared' && tag !== 'visitor').sort(),
     [users],
   );
   const reportProps = { filter, onFilterChange: setFilter, tags };

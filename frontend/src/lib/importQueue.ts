@@ -149,6 +149,21 @@ export function markImportUploaded(current: ImportQueueItem[], localId: string, 
     );
 }
 
+/** Whether a chosen file is a project file (a whole project, made with download) rather than a video. */
+export function isProjectFile(name: string): boolean {
+  return /\.zip$/i.test(name.trim());
+}
+
+/** The row of a project file that came in: its first video takes the row, the others get rows of their own. */
+export function markProjectFileUploaded(current: ImportQueueItem[], localId: string, recordings: RecordingSummary[]): ImportQueueItem[] {
+  if (!recordings.length) return current.filter((item) => item.localId !== localId);
+  let next = markImportUploaded(current, localId, recordings[0]);
+  for (const recording of recordings.slice(1)) {
+    next = [...next.filter((item) => item.recordingId !== recording.id), createImportQueueItemFromRecording(recording)];
+  }
+  return next;
+}
+
 /** The next video to send, or null while one is on its way (videos go one at a time) or none is waiting. */
 export function nextImportUpload(queue: ImportQueueItem[]): ImportQueueItem | null {
   if (queue.some((item) => item.status === 'uploading')) {

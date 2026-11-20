@@ -3,7 +3,9 @@ import test from 'node:test';
 import {
   collectImportQueueItems,
   importsInFlight,
+  isProjectFile,
   markImportUploaded,
+  markProjectFileUploaded,
   nextImportUpload,
   syncImportQueueWithRecordings,
 } from '../src/lib/importQueue';
@@ -45,4 +47,16 @@ test('a reload of one project leaves the uploads of another alone', () => {
   const queue = [{ ...other, status: 'uploading' as const }, ...syncImportQueueWithRecordings([], [recording('r1', 'p1')], 'p1')];
   const synced = syncImportQueueWithRecordings(queue, [], 'p1');
   assert.deepEqual(synced.map((item) => item.localId), [other.localId]);
+});
+
+test('a project file comes in as rows for each of its videos', () => {
+  assert.equal(isProjectFile('sign-up.stepthrough.zip'), true);
+  assert.equal(isProjectFile('walkthrough.MP4'), false);
+  const [item] = collectImportQueueItems([], [file('sign-up.stepthrough.zip')], 'p1').queueItems;
+  // a reload listed the second video before the request returned
+  const queue = syncImportQueueWithRecordings([{ ...item, status: 'uploading' as const }], [recording('r2', 'p1')], 'p1');
+  const done = markProjectFileUploaded(queue, item.localId, [recording('r1', 'p1'), recording('r2', 'p1')]);
+  assert.deepEqual(done.map((row) => [row.recordingId, row.status]), [['r1', 'uploaded'], ['r2', 'uploaded']]);
+  assert.equal(done[0].localId, item.localId);
+  assert.deepEqual(markProjectFileUploaded([item], item.localId, []), []);
 });

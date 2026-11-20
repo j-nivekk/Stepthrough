@@ -88,14 +88,14 @@ function downloads(report: Report, filter: ReportFilter) {
         downloadText(
           `stepthrough-usage-accounts-${stamp}.csv`,
           toCsv([
-            ['account', 'shared', 'browsers', 'minutes in the app', 'minutes making changes', 'days with changes', 'logins',
+            ['account', 'shared', 'visitor', 'browsers', 'minutes in the app', 'minutes making changes', 'days with changes', 'logins',
               'projects', 'uploads', 'minutes uploaded', 'analyses', 'analyses failed', 'accepted', 'rejected', 'titles and notes',
-              'steps added', 'reviews carried over', 'screens merged', 'pathway corrections', 'comparisons', 'exports', 'figures',
+              'steps added', 'reviews carried over', 'runs duplicated', 'screens merged', 'pathway corrections', 'comparisons', 'exports', 'figures',
               'tutorial browsers', 'tutorial finished', ...STAGES.map((stage) => `minutes: ${STAGE_NAMES[stage]}`)],
             ...report.accounts.map((row) => [
-              row.name, row.shared, row.browsers, row.open_minutes, row.working_minutes, row.active_days, row.logins, row.projects,
+              row.name, row.shared, Boolean(row.visitor), row.browsers, row.open_minutes, row.working_minutes, row.active_days, row.logins, row.projects,
               row.uploads, row.upload_minutes, row.analyses, row.analyses_failed, row.accepted, row.rejected, row.annotations,
-              row.steps_added, row.carried_over, row.merges, row.corrections, row.comparisons, row.exports, row.figures,
+              row.steps_added, row.carried_over, row.duplicates ?? 0, row.merges, row.corrections, row.comparisons, row.exports, row.figures,
               row.tutorial_browsers, row.tutorial_finished, ...STAGES.map((stage) => row.stage_minutes[stage]),
             ]),
           ]),
@@ -381,6 +381,7 @@ export function UsageReport({ filter, onFilterChange, tags }: ReportProps) {
                   <td>
                     {row.name}
                     {row.shared ? <span className="usage-tag">shared</span> : null}
+                    {row.visitor ? <span className="usage-tag">visitor</span> : null}
                   </td>
                   <td>{row.browsers}</td>
                   <td>{hours(row.open_minutes)}</td>

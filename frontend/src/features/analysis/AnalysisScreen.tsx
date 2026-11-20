@@ -101,6 +101,7 @@ export interface AnalysisScreenProps {
   createManualCandidatePending: boolean;
   createManualRunPending: boolean;
   createRunPending: boolean;
+  duplicateRunPending: boolean;
   exportRunPending: boolean;
   healthMessage: string | null;
   healthWarning: boolean;
@@ -121,6 +122,7 @@ export interface AnalysisScreenProps {
   uploads: ImportQueueItem[];
   onCancelUpload: (localId: string) => void;
   onDeleteSelectedRuns: (runIds: string[]) => Promise<string[] | null>;
+  onDuplicateRun: (runId: string) => Promise<void>;
   onExportRun: (runId: string, mode: ExportMode, downloadName?: string) => Promise<void>;
   onExportTaskRuns: (runIds: string[]) => Promise<void>;
   onJumpToSelection: () => void;
@@ -238,6 +240,7 @@ export function AnalysisScreen({
   createManualCandidatePending,
   createManualRunPending,
   createRunPending,
+  duplicateRunPending,
   exportRunPending,
   healthMessage,
   healthWarning,
@@ -252,6 +255,7 @@ export function AnalysisScreen({
   uploads,
   onCancelUpload,
   onDeleteSelectedRuns,
+  onDuplicateRun,
   onExportRun,
   onExportTaskRuns,
   onJumpToSelection,
@@ -1468,10 +1472,13 @@ export function AnalysisScreen({
             analysisMetadata={analysisMetadata}
             bulkDeletePending={bulkDeletePending}
             bulkExportPending={bulkExportPending}
+            duplicateRunPending={duplicateRunPending}
             expandedTaskRunId={expandedTaskRunId}
+            selectedRecordingId={selectedRecordingId}
             groupedTaskItems={groupedTaskItems}
             onAbortRun={onAbortRun}
             onDeleteRun={handleDeleteRun}
+            onDuplicateRun={onDuplicateRun}
             onRenameRun={onRenameRun}
             onDeleteSelectedTasks={() => {
               void handleDeleteSelectedTasks();

@@ -94,6 +94,7 @@ def write_requests(w: World) -> list[tuple[str, str, dict]]:
         ('POST', f'/recordings/{w.recording_id}/runs', {'json': {}}),
         ('POST', f'/runs/{w.run_id}/cancel', {}),
         ('PATCH', f'/runs/{w.run_id}', {'json': {'name': 'Renamed'}}),
+        ('POST', f'/runs/{w.run_id}/duplicate', {}),
         ('PATCH', f'/candidates/{w.candidate_id}', {'json': {'status': 'accepted'}}),
         ('PATCH', f'/candidates/{w.candidate_id}', {'json': {'screen_link': 'new', 'screen_kind': 'popup'}}),
         ('POST', f'/runs/{w.run_id}/pathway/merge', {'json': {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { deleteUser, newUserLink, transferProjects, updateUser } from '../../api';
 import { formatCalendarDate, formatRelativeTime } from '../../lib/formatters';
+import { tagProblem } from '../../lib/visitors';
 import type { AdminUser, UserLink } from '../../types';
 import { LinkBox } from './LinkBox';
 
@@ -83,8 +84,12 @@ export function UserRow({ currentUserId, nowMs, user, onChanged, selectMode, sel
     setMode('edit');
   }
 
+  // shared and visitor never go together, nor either on an administrator (the server refuses it too)
+  const tagIssue = mode === 'edit' ? tagProblem(splitTags(tags)) : null;
+
   async function saveEdits(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (tagIssue) return;
     const saved = await act(async () => {
       await updateUser(user.id, {
         display_name: displayName.trim() || null,
@@ -217,6 +222,7 @@ export function UserRow({ currentUserId, nowMs, user, onChanged, selectMode, sel
               value={tags}
             />
           </label>
+          {tagIssue ? <p className="analysis-guidance-copy users-error">{tagIssue}</p> : null}
           <label className="analysis-parameter-row">
             <span>deleted on</span>
             <input className="users-control" onChange={(e) => setDeleteAfter(e.target.value)} type="date" value={deleteAfter} />
@@ -234,7 +240,7 @@ export function UserRow({ currentUserId, nowMs, user, onChanged, selectMode, sel
             <button className={action} onClick={() => setMode('idle')} type="button">
               cancel
             </button>
-            <button className="analysis-pill success" disabled={pending} type="submit">
+            <button className="analysis-pill success" disabled={pending || Boolean(tagIssue)} type="submit">
               {pending ? 'saving…' : 'save'}
             </button>
           </div>
