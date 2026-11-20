@@ -9282,6 +9282,35 @@ button:disabled {
   }
 }
 
+/* A phase of the walkthrough, above its first step in the step review (components/PhaseChoice.tsx): across the
+   whole grid of cards, or as a row of its own in the list. A dashed line where the steps go on outside every phase. */
+.step-phase-header {
+  grid-column: 1 / -1;
+  padding: 10px 2px 6px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.16);
+  font-size: 13px;
+}
+
+.step-phase-header > span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.step-phase-header-note {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+
+.step-phase-header.is-none {
+  border-bottom-style: dashed;
+}
+
+.step-phase-header.in-list {
+  padding-top: 12px;
+}
+
 /* The phase of an accepted step, in the step review (components/PhaseChoice.tsx). */
 .phase-choice {
   display: inline-flex;

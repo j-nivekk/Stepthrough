@@ -84,6 +84,7 @@ import { useElementWidth } from './useElementWidth';
 import { useHoverClips } from './useHoverClips';
 import { usePlaybackHighlight } from './usePlaybackHighlight';
 import { track } from '../../lib/usage';
+import { withPhaseHeaders } from '../../components/PhaseChoice';
 
 
 export interface AnalysisScreenProps {
@@ -2288,7 +2289,7 @@ export function AnalysisScreen({
                         <span className="sr-only">decision</span>
                       </span>
                     </div>
-                    {filteredCandidates.map((candidate) => {
+                    {withPhaseHeaders(filteredCandidates, selectedRun.phases, (candidate) => {
                       const similarityLink = candidateSimilarityLinks.get(candidate.id);
                       return (
                         <CandidateRow
@@ -2310,7 +2311,7 @@ export function AnalysisScreen({
                           hover={stepHover(candidate)}
                         />
                       );
-                    })}
+                    }, { list: true, allSteps: selectedRun.candidates, durationMs: selectedRecordingSummary?.duration_ms })}
                   </div>
                 ) : filteredCandidates.length ? (
                   <div
@@ -2322,7 +2323,7 @@ export function AnalysisScreen({
                         : ({ '--candidate-card-width': `${stepCardWidth}px` } as CSSProperties)
                     }
                   >
-                    {filteredCandidates.map((candidate) => {
+                    {withPhaseHeaders(filteredCandidates, selectedRun.phases, (candidate) => {
                       const similarityLink = candidateSimilarityLinks.get(candidate.id);
                       return (
                         <CandidateCard
@@ -2347,7 +2348,7 @@ export function AnalysisScreen({
                           phases={{ runId: selectedRun.summary.id, boundaries: selectedRun.phases }}
                         />
                       );
-                    })}
+                    }, { list: false, allSteps: selectedRun.candidates, durationMs: selectedRecordingSummary?.duration_ms })}
                   </div>
                 ) : (
                   <p className="entry-empty-copy candidate-empty-copy">

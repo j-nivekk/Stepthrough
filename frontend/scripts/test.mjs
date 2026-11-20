@@ -11,6 +11,8 @@ try {
   await build({
     entryPoints: names.map((name) => join('tests', name)),
     outdir: output, bundle: true, platform: 'node', format: 'cjs', outExtension: { '.js': '.cjs' },
+    // components are built as the app builds them (tsconfig: react-jsx)
+    jsx: 'automatic',
     logLevel: 'warning',
     // modules that read Vite's build settings (api.ts) see none, as in a build without a .env
     define: { 'import.meta.env': '{}' },

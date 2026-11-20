@@ -543,7 +543,8 @@ opens beside it with the phases named so far: **add a phase** asks for a name an
 and clicking a phase (in that panel, or its bracket in the chart) lets you change or remove it. Phase changes are
 taken back with **⌘Z** like the others, unless someone else has changed the phases since. In the step list, every accepted step has a **phase** choice
 too (under **annotate** on a card, or in the **label, screen** column of the list): one of the phases named so
-far, a new one, or none. A step can be in one phase at most: a phase that takes steps from another says so before
+far, a new one, or none. A header above the first step of each phase gives its name, its stretch of the recording and
+how many accepted steps it holds; a dashed one marks where the steps go on outside every phase. A step can be in one phase at most: a phase that takes steps from another says so before
 you add it. The figure draws each phase as a bracket over the screens it reaches first, with its name, how many
 steps it took on how many screens, and, with **times** on, how long. A phase that goes on in another row is left
 open where it breaks and says "continued" where it picks up. The export gives every step its `phase`, in

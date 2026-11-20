@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 import { setRunPhase } from '../api';
+import { formatPathwayTime } from '../lib/pathwayFigure';
 import type { CandidateFrame } from '../types';
 
 type Boundary = { start_ms: number; name: string };
@@ -107,5 +108,62 @@ export function PhaseChoice({
       </select>
       {error ? <span className="editable-name-error">{error}</span> : null}
     </span>
+  );
+}
+
+/**
+ * The steps of the step review, with a header where a phase of the walkthrough starts (and where one ends, when the
+ * steps after it are in none). Phases are stretches of the recording, so a header goes wherever the phase changes
+ * between two steps shown, also when some steps are filtered out. Without phases, the steps are shown as they are.
+ */
+export function withPhaseHeaders<T extends { id: string; timestamp_ms: number }>(
+  steps: T[],
+  boundaries: Boundary[] | undefined,
+  render: (step: T) => ReactNode,
+  options: { list: boolean; allSteps: Array<{ timestamp_ms: number; status: string }>; durationMs: number | null | undefined },
+): ReactNode[] {
+  const named = (boundaries ?? []).filter((boundary) => boundary.name);
+  if (!named.length) return steps.map(render);
+  const ordered = [...(boundaries ?? [])].sort((a, b) => a.start_ms - b.start_ms);
+  const nodes: ReactNode[] = [];
+  let previous = '';
+  for (const step of steps) {
+    const name = phaseAt(ordered, step.timestamp_ms);
+    if (name !== previous && (name || previous)) {
+      // the stretch the step is in: from the last start at or before it to the next start (or the end)
+      const index = ordered.reduce((found, boundary, at) => (boundary.start_ms <= step.timestamp_ms ? at : found), -1);
+      const start = index >= 0 ? ordered[index].start_ms : 0;
+      const end = ordered[index + 1]?.start_ms ?? options.durationMs ?? null;
+      const accepted = options.allSteps.filter(
+        (item) => item.status === 'accepted' && item.timestamp_ms >= start && (end === null || item.timestamp_ms < end),
+      ).length;
+      nodes.push(
+        <PhaseHeader accepted={accepted} end={end} key={`phase-${step.id}`} list={options.list} name={name} start={start} />,
+      );
+    }
+    previous = name;
+    nodes.push(render(step));
+  }
+  return nodes;
+}
+
+/** A phase's header in the step review: its name, its stretch of the recording and how many steps it holds. */
+function PhaseHeader({ name, start, end, accepted, list }: { name: string; start: number; end: number | null; accepted: number; list: boolean }) {
+  const when = `${formatPathwayTime(start)}${end !== null ? ` to ${formatPathwayTime(end)}` : ' onwards'}`;
+  return (
+    <div className={`step-phase-header ${list ? 'in-list' : ''} ${name ? '' : 'is-none'}`} role={list ? 'row' : undefined}>
+      <span role={list ? 'cell' : undefined}>
+        {name ? (
+          <>
+            <b>{name}</b>
+            <span className="step-phase-header-note">
+              phase of the walkthrough, {when}, {accepted === 1 ? '1 accepted step' : `${accepted} accepted steps`}
+            </span>
+          </>
+        ) : (
+          <span className="step-phase-header-note">outside every phase, {when}</span>
+        )}
+      </span>
+    </div>
   );
 }
