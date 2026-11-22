@@ -9,7 +9,8 @@ export interface StepLayout {
    * the cards to the width of the page instead: as many columns as fit at about the default size, stretched to fill.
    */
   size: number | null;
-  /** The strip of accepted steps above the timeline is folded away. */
+  /** The strip of accepted steps above the timeline is folded away: so it starts, until it is opened. Stored as
+   *  `showAccepted`, so that layouts saved before it started folded (with `hideAccepted: false`) start folded too. */
   hideAccepted: boolean;
 }
 
@@ -27,15 +28,15 @@ const STORAGE_KEY = 'stepthrough.step-layout.v2';
 /** Earlier versions always stored a size, so only the grid / list choice carries over: everyone starts fitted. */
 const LEGACY_STORAGE_KEY = 'stepthrough.step-layout.v1';
 
-export const defaultStepLayout: StepLayout = { view: 'grid', size: null, hideAccepted: false };
+export const defaultStepLayout: StepLayout = { view: 'grid', size: null, hideAccepted: true };
 
 export function clampStepSize(value: number): number {
   return Math.min(STEP_SIZE_MAX, Math.max(STEP_SIZE_MIN, Math.round(value)));
 }
 
-function readStored(key: string): Partial<StepLayout> | null {
+function readStored(key: string): (Partial<StepLayout> & { showAccepted?: boolean }) | null {
   const raw = window.localStorage.getItem(key);
-  return raw ? (JSON.parse(raw) as Partial<StepLayout> | null) : null;
+  return raw ? (JSON.parse(raw) as (Partial<StepLayout> & { showAccepted?: boolean }) | null) : null;
 }
 
 export function loadStepLayout(): StepLayout {
@@ -43,7 +44,7 @@ export function loadStepLayout(): StepLayout {
     const stored = readStored(STORAGE_KEY);
     const view = (stored ?? readStored(LEGACY_STORAGE_KEY))?.view === 'list' ? 'list' : 'grid';
     const size = typeof stored?.size === 'number' && Number.isFinite(stored.size) ? clampStepSize(stored.size) : null;
-    return { view, size, hideAccepted: stored?.hideAccepted === true };
+    return { view, size, hideAccepted: stored?.showAccepted !== true };
   } catch {
     return { ...defaultStepLayout };
   }
@@ -51,7 +52,10 @@ export function loadStepLayout(): StepLayout {
 
 export function saveStepLayout(layout: StepLayout): void {
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ view: layout.view, size: layout.size, showAccepted: !layout.hideAccepted }),
+    );
     window.localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
     // storage can be unavailable (private window, blocked site data); the layout still works for this visit

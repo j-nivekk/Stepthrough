@@ -1,8 +1,10 @@
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
+import { getRun } from '../../../api';
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
 import { formatElapsedDuration } from '../../../lib/utils';
 import { EditableName } from '../../../components/EditableName';
-import { formatLastChange, formatPercent, formatRunNumber, formatRunShortTimestamp, formatRunTitle } from '../../../lib/formatters';
+import { formatLastChange, formatPercent, formatPhase, formatRunNumber, formatRunShortTimestamp, formatRunTitle } from '../../../lib/formatters';
 import { formatRecordingTypeLabel, getEffectiveStableValues } from '../../../lib/stableSettings';
 import type { AnalysisMetadata, RunSettings, RunSummary } from '../../../types';
 
@@ -131,6 +133,8 @@ export function AnalysisTasksPanel({
   // which run's name to edit, from its context menu; the nonce starts the edit again on a second click
   const [renameRequest, setRenameRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [menu, setMenu] = useState<TaskMenuState | null>(null);
+  // the run whose log is open in its details
+  const [logsRunId, setLogsRunId] = useState<string | null>(null);
   const knownActiveRunIds = useRef<Set<string> | null>(null);
 
   // While a video is selected, the runs of the other videos are folded away for the time being: this is not
@@ -444,11 +448,22 @@ export function AnalysisTasksPanel({
                 <div className="analysis-task-bar-fill" style={{ width: isDone ? '100%' : formatPercent(run.progress) }} />
               </div>
             )}
-            {run.modified_at ? (
-              <div className="analysis-task-changed">
+            <div className="analysis-task-changed">
+              {run.modified_at ? (
                 <span title={formatRunShortTimestamp(run.modified_at)}>{formatLastChange(run.modified_at, run.modified_by_name)}</span>
-              </div>
-            ) : null}
+              ) : (
+                <span />
+              )}
+              <button
+                aria-expanded={logsRunId === run.id}
+                className="analysis-task-link subtle"
+                onClick={() => setLogsRunId((current) => (current === run.id ? null : run.id))}
+                type="button"
+              >
+                {logsRunId === run.id ? 'hide logs' : 'logs'}
+              </button>
+            </div>
+            {logsRunId === run.id ? <RunLogs live={isLive} runId={run.id} /> : null}
             <div className="analysis-task-settings">
               {taskSettings.map((setting) => (
                 <div className={`analysis-task-setting ${setting.key === 'mode' ? 'mode' : ''}`} key={setting.key}>
@@ -687,6 +702,38 @@ function TaskContextMenu({
           </button>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** What the analysis of a run did, step by step, in its details: read with the run (the same request the page makes
+ *  for the selected run), and again every two seconds while it works. */
+function RunLogs({ runId, live }: { runId: string; live: boolean }) {
+  const query = useQuery({
+    queryKey: ['run', runId],
+    queryFn: ({ signal }) => getRun(runId, signal),
+    refetchInterval: live ? 2000 : false,
+  });
+  const events = query.data?.events;
+  return (
+    <div className="analysis-task-logs" role="log">
+      {!events ? (
+        <p className="analysis-log-line">{query.isError ? 'the log could not be loaded.' : 'loading…'}</p>
+      ) : events.length ? (
+        events.map((event) => (
+          <p className={`analysis-log-line ${event.level}`} key={event.id}>
+            <span className="analysis-log-line-meta">
+              {new Date(event.created_at).toLocaleTimeString().toLocaleLowerCase()}, {formatPhase(event.phase)}
+            </span>
+            <span>{event.message}</span>
+            {typeof event.progress === 'number' ? (
+              <span className="analysis-log-line-progress">{formatPercent(event.progress)}</span>
+            ) : null}
+          </p>
+        ))
+      ) : (
+        <p className="analysis-log-line">progress messages will appear here once the run starts.</p>
+      )}
     </div>
   );
 }

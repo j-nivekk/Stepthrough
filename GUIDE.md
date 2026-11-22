@@ -401,15 +401,17 @@ settings for a short explanation of each one.
 
 ### Saving and sharing settings
 
-- **save… → save for this project** keeps the current settings as your default for this project.
-- **save… → save as universal defaults** uses them for every project you have not saved settings for.
+**presets**, above the settings, opens a menu:
+
+- **save for this project** keeps the current settings as your default for this project, and **save as universal
+  defaults** uses them for every project you have not saved settings for.
 - Saved settings belong to your account, not to the browser: on a shared server they are there on any computer
   you log in from, and other people in a shared project keep their own.
-- **preset text** shows the settings as a short piece of text that you can copy, for example into a methods
-  section or to share with others. **load** reads such a text back in.
-- The **reset** button (★) goes back to the project's or the universal defaults. **restore factory settings…**
-  in the same menu forgets the settings you saved, for this project and as universal defaults, and goes back to
+- **reset to project defaults** and **reset to universal defaults** go back to those. **restore factory
+  settings…** forgets the settings you saved, for this project and as universal defaults, and goes back to
   Stepthrough's own.
+- **show preset text…** shows the settings as a short piece of text that you can copy, for example into a methods
+  section or to share with others. **load preset text…** reads such a text back in.
 
 ## 7. Reviewing steps
 
@@ -427,15 +429,16 @@ While the video plays, the card of the step on screen is outlined, so you can se
 | to | do this |
 | --- | --- |
 | accept, reject, or set back to pending | ✓ ✕ ↺ on the card, or `a` `r` `u` for the selected step |
-| go to the previous or next step | `←` `→`, or **prev** and **next** |
+| go to the previous or next step | `←` `→`, or click the step |
 | see the clip that led to a step | rest the pointer on its screenshot for a moment |
 | play the video from a step | **play from here** on the screenshot, or `p` for the selected step |
 | add a title and notes | **annotate** on a card, or type directly in the list view |
 | show only some steps | **all**, **pending**, **accepted** or **rejected** above the steps |
-| fold away the strip of accepted steps | click **accepted steps** above it; click again to show it |
+| show the strip of accepted steps | it starts folded away: click **accepted steps** above the timeline to show it, and again to fold it |
 | hide steps with a certain label | click the label in the legend above the timeline; click again to show them |
 | change the layout | **grid** or **list**; the slider sets the size of the images, and **fit** goes back to images sized to fill the width of the window |
-| accept or reject many steps at once | tick the boxes on pending steps, then press **accept selected** or **reject selected** |
+| select several steps | tick their boxes; shift-click a box to select every step from the one ticked last. **select: all**, **none** and **invert** above the steps act on the steps shown, as does the box above the list; `x` (and `shift+x`) does the same for the step in focus |
+| accept, reject or reset many steps at once | select them, then **accept**, **reject** or **reset** next to how many are selected. Steps that are so already are left as they are, and the selection stays, so a mistaken choice can be put right at once |
 | go to an earlier visit of the same screen | **similar to candidate N** on a revisit |
 | say which screen a step shows in the pathway | **screen** under **annotate** on a card, or in the **label, screen** column of the list |
 
@@ -608,12 +611,14 @@ name away, rename the run back to its number, such as `run #2`. The project list
 changed something in it last and when; viewing, exporting and saving settings for yourself do not count as
 changes.
 
-A run you opened shows its name, its number and when it finished at the top. **view logs**, at the right, lists what the
-analysis did, step by step, which helps when a run failed or took longer than expected.
+A run you opened shows its video and when it finished at the top. **logs**, in a run's **details** under **tasks**,
+lists what the analysis did, step by step, which helps when a run failed or took longer than expected.
 
 ## 8. Exports
 
-**export accepted** exports the steps you accepted; **export all** exports every step. Under **tasks**,
+**export**, at the right above the steps, opens a menu: **export accepted** exports the steps you accepted;
+**export all** exports every step. A name typed at the top of that menu names the zip file; left empty, the server
+names it. Under **tasks**,
 **select** lets you export several runs at once. An export is made from the task as it is at that moment, so
 Stepthrough keeps only the latest of each task: export again whenever you need it. Each export is a zip file with:
 

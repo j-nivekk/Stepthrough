@@ -9,7 +9,6 @@ export interface AnalysisVideosPanelProps {
   onCancelUpload: (localId: string) => void;
   onDeleteRecording: (recordingId: string, filename: string) => void;
   onFilesDropped: (files: FileList | File[]) => void;
-  onJumpToSelection: () => void;
   onPreviewRecording: (recordingId: string) => void;
   onRenameRecording: (recordingId: string, filename: string, previousFilename: string) => Promise<void>;
   onRequestRename: (recordingId: string) => void;
@@ -28,7 +27,6 @@ export function AnalysisVideosPanel({
   onCancelUpload,
   onDeleteRecording,
   onFilesDropped,
-  onJumpToSelection,
   onPreviewRecording,
   onRenameRecording,
   onRequestRename,
@@ -71,9 +69,6 @@ export function AnalysisVideosPanel({
     >
       <div className="analysis-column-head">
         <p>videos</p>
-        <button className="analysis-task-link subtle" onClick={onJumpToSelection} type="button">
-          jump to selection
-        </button>
       </div>
       <div className="analysis-divider" />
       <div className="analysis-videos">

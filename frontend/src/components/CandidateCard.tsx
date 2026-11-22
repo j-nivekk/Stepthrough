@@ -167,6 +167,41 @@ interface CandidateDecisionButtonProps {
   onClick: () => void;
 }
 
+/** The ✓, ✕ and ↺ of a decision: on each step, and on the buttons that decide several steps at once. */
+export function DecisionIcon({ intent }: { intent: CandidateStatus }) {
+  return (
+    <svg aria-hidden="true" className="candidate-decision-icon" viewBox="0 0 16 16">
+      {intent === 'accepted' ? (
+        <path
+          d="M3.5 8.5 6.4 11.4 12.5 4.8"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.9"
+        />
+      ) : intent === 'rejected' ? (
+        <path
+          d="M4.3 4.3 11.7 11.7M11.7 4.3 4.3 11.7"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeWidth="1.9"
+        />
+      ) : (
+        <path
+          d="M11.6 6.2A4.4 4.4 0 1 0 12 8m0-3.8V7.6H8.6"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.7"
+        />
+      )}
+    </svg>
+  );
+}
+
 function CandidateDecisionButton({
   intent,
   isActive,
@@ -182,35 +217,7 @@ function CandidateDecisionButton({
       title={label}
       type="button"
     >
-      <svg aria-hidden="true" className="candidate-decision-icon" viewBox="0 0 16 16">
-        {intent === 'accepted' ? (
-          <path
-            d="M3.5 8.5 6.4 11.4 12.5 4.8"
-            fill="none"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="1.9"
-          />
-        ) : intent === 'rejected' ? (
-          <path
-            d="M4.3 4.3 11.7 11.7M11.7 4.3 4.3 11.7"
-            fill="none"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeWidth="1.9"
-          />
-        ) : (
-          <path
-            d="M11.6 6.2A4.4 4.4 0 1 0 12 8m0-3.8V7.6H8.6"
-            fill="none"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="1.7"
-          />
-        )}
-      </svg>
+      <DecisionIcon intent={intent} />
     </button>
   );
 }
@@ -255,7 +262,8 @@ export interface CandidateCardProps {
   onActivate: () => void;
   onJumpToSimilar?: (() => void) | undefined;
   onSetStatus: (status: CandidateStatus) => void;
-  onToggleSelection: () => void;
+  /** Its box was clicked; with shift, every step from the last one clicked to this one goes along. */
+  onToggleSelection: (shift: boolean) => void;
   onToggleAnnotation: () => void;
   recordingHeight?: number | null;
   recordingWidth?: number | null;
@@ -329,9 +337,12 @@ export function CandidateCard({
               onPointerDown={(event) => event.stopPropagation()}
             >
               <input
-                aria-label={`Select candidate ${candidate.detector_index}`}
+                aria-label={`select step ${candidate.detector_index}`}
                 checked={isSelected}
-                onChange={onToggleSelection}
+                onChange={() => undefined}
+                onClick={(event) => onToggleSelection(event.shiftKey)}
+                // shift-click selects a range of steps, not the text between them
+                onMouseDown={(event) => event.shiftKey && event.preventDefault()}
                 type="checkbox"
               />
             </label>
@@ -536,7 +547,7 @@ export interface CandidateRowProps {
   onActivate: () => void;
   onJumpToSimilar?: (() => void) | undefined;
   onSetStatus: (status: CandidateStatus) => void;
-  onToggleSelection: () => void;
+  onToggleSelection: (shift: boolean) => void;
   onUpdate: CandidateCardProps['onUpdate'];
   similarLink?: SimilarLink | undefined;
   steps: CandidateFrame[];
@@ -583,10 +594,14 @@ export function CandidateRow({
       <div className="candidate-row-select" role="cell">
         {isSelectable ? (
           <input
-            aria-label={`Select candidate ${candidate.detector_index}`}
+            aria-label={`select step ${candidate.detector_index}`}
             checked={isSelected}
-            onChange={onToggleSelection}
-            onClick={stop}
+            onChange={() => undefined}
+            onClick={(event) => {
+              stop(event);
+              onToggleSelection(event.shiftKey);
+            }}
+            onMouseDown={(event) => event.shiftKey && event.preventDefault()}
             type="checkbox"
           />
         ) : null}

@@ -168,10 +168,6 @@ a {
   background: var(--bg);
 }
 
-.analysis-screen ~ .app-watermark-shell .app-watermark-popover {
-  right: 8px;
-}
-
 .app-watermark-text {
   opacity: 0.2;
   color: #000;
@@ -196,55 +192,53 @@ a {
   color: rgba(0, 0, 0, 0.78);
 }
 
-.app-watermark-popover {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 10px);
-  width: 300px;
-  padding: 10px 12px;
-  background: #d9d9d9;
-  color: #000;
-  display: grid;
-  gap: 6px;
-}
-
-.app-watermark-popover p {
+/* "about", in the grey panel of account and settings (.app-settings-panel): its text, its guides and links. */
+.app-about-text {
   margin: 0;
   font-size: 12px;
-  line-height: 1.3;
+  line-height: 1.4;
+  color: var(--text);
 }
 
-.app-watermark-demo-link {
-  justify-self: start;
-  font-size: 12px;
-}
-
-.app-watermark-facts {
-  margin: 4px 0 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 10px;
-  row-gap: 3px;
-  font-size: 12px;
-  line-height: 1.3;
-}
-
-.app-watermark-facts dt {
-  color: rgba(0, 0, 0, 0.55);
-}
-
-.app-watermark-facts dd {
-  margin: 0;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.app-watermark-facts .analysis-task-link {
-  font-size: 12px;
-}
-
-.app-watermark-commit {
+.app-about-commit {
   font-variant-numeric: tabular-nums;
+}
+
+.app-about-link {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 0, 0, 0.3);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.app-about-link:hover,
+.app-about-link:focus-visible {
+  text-decoration-color: currentColor;
+}
+
+.app-about-links {
+  display: flex;
+  gap: 16px;
+}
+
+.app-about-arrow {
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* ── asking before acting (ConfirmDialog) ─────────────────────────────── */
@@ -2924,11 +2918,12 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   min-width: 0;
 }
 
-/* The selected video looks as a selected run does: the whole row in a light orange, its name in orange. */
+/* The selected video looks as a selected run does: the whole row in solid orange, everything in it white. */
 .analysis-video-row.selected {
   margin-inline: -8px;
   padding: 3px 8px 4px;
-  background: rgba(205, 109, 30, 0.12);
+  color: #fff;
+  background: #b05a14;
 }
 
 
@@ -3189,33 +3184,30 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   background: rgba(0, 0, 0, 0.07);
 }
 
+/* The selected run, and the selected video: the whole row in solid orange, a shade deeper than the app's orange so
+   that white reads well on it (4.9:1), and everything in it white: name, numbers, links, details. Fields being
+   typed in keep their own colours. */
 .analysis-task-row.selected {
   margin-inline: -8px;
   padding: 6px 8px 8px;
-  background: rgba(205, 109, 30, 0.12);
-}
-
-/* The selected run's name, and the selected video's: white on a solid orange, a shade deeper than the app's
-   orange so that the white reads well (4.9:1). */
-.analysis-task-row.selected .analysis-task-name-text,
-.analysis-video-row.selected .analysis-video-name-text {
-  margin-left: -5px;
-  padding: 1px 5px;
-  border-radius: 3px;
   color: #fff;
   background: #b05a14;
 }
 
-/* A run's name may wrap: the fill follows each line. A video's stays on one line and ends in an ellipsis. */
-.analysis-task-row.selected .analysis-task-name-text {
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
+.analysis-task-row.selected :is(span, p, a, button, small, label),
+.analysis-video-row.selected :is(span, p, a, button, small, label) {
+  color: #fff;
 }
 
-.analysis-video-row.selected .analysis-video-name-text {
-  display: inline-block;
-  max-width: calc(100% + 5px);
-  vertical-align: top;
+.analysis-task-row.selected :is(.analysis-task-link, .analysis-task-title),
+.analysis-video-row.selected .analysis-task-link {
+  text-decoration-color: rgba(255, 255, 255, 0.6);
+}
+
+.analysis-video-row.selected .analysis-video-context-badge,
+.analysis-task-row.selected .analysis-task-more.is-open,
+.analysis-task-row.selected .live-pill {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* A run that is working right now: a green tint (green means go) that flashes when the run starts
@@ -3232,7 +3224,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 }
 
 .analysis-task-row.running.selected {
-  background-color: rgba(205, 109, 30, 0.12);
+  background-color: #b05a14;
   animation: analysis-task-run-edge 2.6s ease-in-out infinite;
 }
 
@@ -3345,6 +3337,27 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 }
 
 /* Who last changed a run and when, and its rename link, at the top of its details. */
+/* A run's log, in its details: a light box of its own, so it reads on the orange of a selected run too. */
+.analysis-task-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  background: #f4f4f4;
+}
+
+.analysis-task-row .analysis-task-logs :is(p, span) {
+  color: rgba(0, 0, 0, 0.72);
+}
+
+.analysis-task-row .analysis-task-logs :is(.analysis-log-line-meta, .analysis-log-line-progress) {
+  color: rgba(0, 0, 0, 0.52);
+}
+
 .analysis-task-changed {
   display: flex;
   justify-content: space-between;
@@ -3572,6 +3585,15 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 }
 
 .analysis-toolbar-option-list,
+/* The export menu, with the file's name at the top (left empty, the server names it). */
+.candidate-export-popover .candidate-export-name-field {
+  width: 200px;
+}
+
+.candidate-export-popover .candidate-export-name-preview {
+  max-width: 250px;
+}
+
 .candidate-export-option-list {
   display: flex;
   flex-direction: column;
@@ -5355,8 +5377,11 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+/* The selection bar on the left, export always at the right edge: the actions take the rest of the line (or a line
+   of their own, when they wrap below the filters). */
 .candidate-review-actions {
   display: flex;
+  flex: 1 1 auto;
   align-items: flex-start;
   justify-content: flex-end;
   gap: 10px;
@@ -5366,10 +5391,77 @@ button:disabled {
 
 .candidate-bulk-actions {
   display: flex;
+  margin-right: auto;
   align-items: center;
-  gap: 10px;
+  gap: 10px 16px;
   flex-wrap: wrap;
   min-height: 30px;
+}
+
+/* Accept, reject and reset for the selected steps, in the colours of each step's own ✓ ✕ ↺, shaped as the app's
+   other buttons (.analysis-pill): a rectangle with rounded corners. Icon and word in a deeper shade of the colour on
+   a light tint, so that they read well (4.8:1 or more). */
+.candidate-bulk-decision {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.candidate-bulk-decision-dot {
+  display: inline-flex;
+}
+
+.candidate-bulk-decision-dot .candidate-decision-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.candidate-bulk-decision.accepted {
+  color: #2a6e4b;
+  background: rgba(72, 175, 124, 0.18);
+}
+
+.candidate-bulk-decision.rejected {
+  color: #9b1f1d;
+  background: rgba(191, 39, 37, 0.13);
+}
+
+.candidate-bulk-decision.pending {
+  color: #3d3d3d;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.candidate-bulk-decision:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+.candidate-bulk-decision:focus-visible {
+  outline: 2px solid rgba(72, 175, 124, 0.32);
+  outline-offset: 2px;
+}
+
+.candidate-bulk-decision:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The two groups of the selection bar: which steps, and what to do with them; a thin rule between them. */
+.candidate-bulk-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.candidate-bulk-group + .candidate-bulk-group {
+  padding-left: 16px;
+  border-left: 1px solid rgba(0, 0, 0, 0.15);
 }
 
 .candidate-bulk-count,
@@ -5400,12 +5492,6 @@ button:disabled {
   gap: 16px;
   flex-wrap: wrap;
   min-height: 30px;
-}
-
-.candidate-review-stepper {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .candidate-export-name-wrap {
@@ -6560,6 +6646,26 @@ button:disabled {
   position: relative;
 }
 
+/* A rule between groups of a menu, such as the presets'. */
+.pathway-menu-divider {
+  height: 1px;
+  margin: 3px 6px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+/* The presets menu opens under its link in the parameters column, not where the pointer is. */
+.pathway-menu.analysis-presets-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 0;
+  width: max-content;
+}
+
+.analysis-presets-menu .pathway-menu-item {
+  white-space: nowrap;
+}
+
 .pathway-menu-item {
   display: flex;
   justify-content: space-between;
@@ -7466,7 +7572,7 @@ button:disabled {
 .candidate-review-key-hint {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px 10px;
   color: rgba(0, 0, 0, 0.45);
   font-size: 11px;
   line-height: 1.2;
@@ -9480,10 +9586,12 @@ button:disabled {
    the time is near. */
 .visitor-notice {
   position: fixed;
-  left: 24px;
-  bottom: 24px;
+  /* on the line of the watermark's buttons (about, settings, account), as far from the left as they are from the
+     right */
+  left: 40px;
+  bottom: 40px;
   z-index: 21;
-  width: min(250px, calc(100vw - 48px));
+  width: min(250px, calc(100vw - 80px));
   padding: 10px 10px 10px 12px;
   display: grid;
   gap: 8px;

@@ -1426,18 +1426,6 @@ function App({ session, onSessionChange }: AppProps) {
     window.setTimeout(() => jumpToAnchor(anchorId), 0);
   }
 
-  function handleJumpToAnalysisSelection() {
-    if (selectedRun) {
-      jumpToAnchor('analysis-run-detail');
-      return;
-    }
-    if (previewRecordingId) {
-      jumpToAnchor('analysis-video-preview');
-      return;
-    }
-    jumpToAnchor('analysis-parameters');
-  }
-
   function handleSelectTaskRun(recordingId: string, runId: string, anchorId = 'analysis-run-detail') {
     setSelectedRecordingId(recordingId);
     setSelectedRunId(runId);
@@ -1602,10 +1590,9 @@ function App({ session, onSessionChange }: AppProps) {
 
     const successCount = uniqueCandidateIds.length - failedCandidateIds.length;
     if (successCount > 0) {
+      const steps = `${successCount} ${successCount === 1 ? 'step' : 'steps'}`;
       setAnalysisActionMessage(
-        `${status === 'accepted' ? 'accepted' : status === 'rejected' ? 'rejected' : 'updated'} ${successCount} ${
-          successCount === 1 ? 'candidate' : 'candidates'
-        }.`,
+        status === 'accepted' ? `accepted ${steps}.` : status === 'rejected' ? `rejected ${steps}.` : `reset ${steps} to undecided.`,
       );
     }
     if (failedCandidateIds.length > 0) {
@@ -1962,7 +1949,6 @@ function App({ session, onSessionChange }: AppProps) {
         onDuplicateRun={handleDuplicateRun}
         onExportRun={handleExportRun}
         onExportTaskRuns={handleExportTaskRuns}
-        onJumpToSelection={handleJumpToAnalysisSelection}
         onNavigateStage={setProjectStage}
         onPreviewRecording={handlePreviewRecording}
         onOpenPreview={setPreviewRecordingId}

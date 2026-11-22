@@ -45,8 +45,17 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
       setPanel(null);
     }
 
+    // Escape closes it, as it does the account and settings panels.
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setPanel(null);
+    }
+
     window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [showAbout, setPanel]);
 
   return (
@@ -82,69 +91,89 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
         about
       </button>
       {showAbout ? (
-        <div className="app-watermark-popover">
-          <p>stepthrough turns screen recordings into reviewable walkthrough steps for app and interface research.</p>
-          <button
-            className="analysis-task-link subtle app-watermark-demo-link"
-            onClick={() => {
-              setPanel(null);
-              setShowDemo(true);
-            }}
-            type="button"
-          >
-            how it works
-          </button>
-          <button
-            className="analysis-task-link subtle app-watermark-demo-link"
-            onClick={() => {
-              setPanel(null);
-              setShowPathways(true);
-              track({ kind: 'tutorial_opened', from: 'about' });
-            }}
-            type="button"
-          >
-            how to work with pathways
-          </button>
-          <button
-            className="analysis-task-link subtle app-watermark-demo-link"
-            onClick={() => {
-              setPanel(null);
-              setShowWhatsNew(true);
-            }}
-            type="button"
-          >
-            what's new in {WHATS_NEW_VERSION}
-          </button>
-          <dl className="app-watermark-facts">
-            <dt>version</dt>
-            <dd>
+        // The same grey panel as account and settings: a header to close it by, then its sections.
+        <div aria-label="about stepthrough" className="app-settings-panel" role="dialog">
+          <div className="app-settings-header">
+            <span>about</span>
+            <button aria-label="close about" className="app-settings-close" onClick={() => setPanel(null)} type="button">
+              ×
+            </button>
+          </div>
+          <div className="app-settings-section">
+            <p className="app-about-text">
+              stepthrough turns screen recordings into reviewable walkthrough steps for app and interface research.
+            </p>
+          </div>
+          <div className="app-settings-section">
+            <p className="app-settings-section-label">guides</p>
+            <button
+              className="app-about-link"
+              onClick={() => {
+                setPanel(null);
+                setShowDemo(true);
+              }}
+              type="button"
+            >
+              how it works
+            </button>
+            <button
+              className="app-about-link"
+              onClick={() => {
+                setPanel(null);
+                setShowPathways(true);
+                track({ kind: 'tutorial_opened', from: 'about' });
+              }}
+              type="button"
+            >
+              how to work with pathways
+            </button>
+            <button
+              className="app-about-link"
+              onClick={() => {
+                setPanel(null);
+                setShowWhatsNew(true);
+              }}
+              type="button"
+            >
+              what's new in {WHATS_NEW_VERSION}
+            </button>
+          </div>
+          <div className="app-settings-section">
+            <p className="app-settings-section-label">version</p>
+            <p className="app-about-text">
               {APP_VERSION}
-              {BUILD_LABEL ? ` · ${BUILD_LABEL}` : ''}
+              {BUILD_LABEL ? `, ${BUILD_LABEL}` : ''}
               {APP_COMMIT ? (
-                <span className="app-watermark-commit" title="the commit this copy was built from">
-                  {' '}
-                  · {APP_COMMIT}
+                <span className="app-about-commit" title="the commit this copy was built from">
+                  , {APP_COMMIT}
                 </span>
               ) : null}
-            </dd>
-            <dt>source</dt>
-            <dd>
-              <a className="analysis-task-link subtle" href={REPOSITORY_URL} rel="noreferrer" target="_blank">
-                {REPOSITORY_URL.replace(/^https:\/\//, '')}
+            </p>
+            <div className="app-about-links">
+              <a className="app-about-link" href={REPOSITORY_URL} rel="noreferrer" target="_blank" title={REPOSITORY_URL}>
+                GitHub
+                <OutArrow />
               </a>
-            </dd>
-            <dt>cite as</dt>
-            <dd>
-              <a className="analysis-task-link subtle" href={`https://doi.org/${DOI}`} rel="noreferrer" target="_blank">
-                doi:{DOI}
+              <a className="app-about-link" href={`https://doi.org/${DOI}`} rel="noreferrer" target="_blank" title={`doi:${DOI}`}>
+                DOI (Zenodo)
+                <OutArrow />
               </a>
-            </dd>
-          </dl>
+            </div>
+          </div>
         </div>
       ) : null}
       {showDemo ? <HowItWorksDemo onClose={() => setShowDemo(false)} /> : null}
       {showPathways ? <PathwayTutorial onClose={() => setShowPathways(false)} /> : null}
       {showWhatsNew ? <WhatsNewTour onClose={() => setShowWhatsNew(false)} /> : null}
     </div>
+  );
+}
+
+/** The up-right arrow after a link that opens another website. */
+function OutArrow() {
+  return (
+    <svg aria-hidden="true" className="app-about-arrow" height="9" viewBox="0 0 9 9" width="9">
+      <path d="M1.5 7.5 7.5 1.5M3 1.5h4.5V6" />
+    </svg>
   );
 }

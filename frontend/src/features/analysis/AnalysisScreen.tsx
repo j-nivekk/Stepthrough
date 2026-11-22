@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch
 import { busyElsewhere, busyRunIds } from '../../lib/live';
 import { useLive } from '../live/LiveProvider';
 import { absoluteApiUrl } from '../../api';
-import { CandidateCard, CandidateRow } from '../../components/CandidateCard';
+import { CandidateCard, CandidateRow, DecisionIcon } from '../../components/CandidateCard';
 import { EditableName } from '../../components/EditableName';
 import {
   activeRunStatuses,
@@ -40,6 +40,7 @@ import {
   normalizeZipFilename,
   clampInteger,
 } from '../../lib/utils';
+import { clickSelection, invertSelection, keepShown, selectionState } from '../../lib/stepSelection';
 import type {
   AnalysisMetadata,
   CandidateChanges,
@@ -125,7 +126,6 @@ export interface AnalysisScreenProps {
   onDuplicateRun: (runId: string) => Promise<void>;
   onExportRun: (runId: string, mode: ExportMode, downloadName?: string) => Promise<void>;
   onExportTaskRuns: (runIds: string[]) => Promise<void>;
-  onJumpToSelection: () => void;
   onNavigateStage: (stage: WorkflowStage) => void;
   onPreviewRecording: (recordingId: string) => void;
   /** Open the preview on a recording without toggling it closed when it is already open. */
@@ -258,7 +258,6 @@ export function AnalysisScreen({
   onDuplicateRun,
   onExportRun,
   onExportTaskRuns,
-  onJumpToSelection,
   onNavigateStage,
   onPreviewRecording,
   onOpenPreview,
@@ -308,6 +307,9 @@ export function AnalysisScreen({
   const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
   const [pendingPlayFromMs, setPendingPlayFromMs] = useState<number | null>(null);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
+  // The step whose box was clicked last: shift with a box selects from it (lib/stepSelection.ts). A ref, as the
+  // keyboard's x reads it from a handler made once.
+  const selectionAnchorRef = useRef<string | null>(null);
   const [bulkCandidatePending, setBulkCandidatePending] = useState(false);
   const [queuedManualMarkItems, setQueuedManualMarkItems] = useState<PendingManualMark[]>([]);
   const [manualCapturePulseToken, setManualCapturePulseToken] = useState(0);
@@ -320,26 +322,6 @@ export function AnalysisScreen({
   const [playbackRate, setPlaybackRate] = useState(1);
   const [previewSizeKey, setPreviewSizeKey] = useState<PreviewSizeKey>('md');
   const [previewBg, setPreviewBg] = useState<'dark' | 'light'>('dark');
-  const [showRunLogs, setShowRunLogs] = useState(false);
-  const logShellRef = useRef<HTMLDivElement | null>(null);
-  // The logs close like the other pop-overs: a click elsewhere or Escape.
-  useEffect(() => {
-    if (!showRunLogs) {
-      return;
-    }
-    function handlePointerDown(event: PointerEvent) {
-      if (!logShellRef.current?.contains(event.target as Node)) setShowRunLogs(false);
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') setShowRunLogs(false);
-    }
-    window.addEventListener('pointerdown', handlePointerDown);
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('pointerdown', handlePointerDown);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [showRunLogs]);
   // Two runs of one recording side by side (RunComparison), opened from the tasks list.
   const [comparison, setComparison] = useState<{ recordingId: string; left: string; right: string } | null>(null);
   const [presetCopyFeedback, setPresetCopyFeedback] = useState('');
@@ -355,9 +337,6 @@ export function AnalysisScreen({
   const [stepAreaRef, stepAreaWidth] = useElementWidth<HTMLDivElement>();
   const parameterColumnRef = useRef<HTMLElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
-  const saveMenuRef = useRef<HTMLDivElement | null>(null);
-  const loadMenuRef = useRef<HTMLDivElement | null>(null);
-  const resetMenuRef = useRef<HTMLDivElement | null>(null);
   const presetMenuRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const activeManualMarkIdRef = useRef<string | null>(null);
@@ -366,10 +345,9 @@ export function AnalysisScreen({
 
   const previewVideoUrl = previewRecording ? absoluteApiUrl(previewRecording.source_url) : null;
   const hintCopy: Record<AnalysisHintKey, string> = {
-    load: 'paste stepthrough preset text to load a saved parameter set into the active analysis controls.',
-    reset: 'reset the current analysis parameters to this project or universal defaults.',
+    presets:
+      'save the current parameters for this project or as universal defaults, reset them to saved defaults, or load and share them as preset text.',
     run: 'start a new analysis task for the selected video using the current parameter set.',
-    save: 'save the current analysis parameters for this project or as universal defaults.',
     stable_advanced:
       'expert settings. the defaults work for screen recordings; change them only when a specific recording needs it.',
     stable_group_typing:
@@ -618,14 +596,13 @@ export function AnalysisScreen({
     }
     return selectedRun.candidates.find((candidate) => candidate.id === activeCandidateId) ?? null;
   }, [activeCandidateId, selectedRun]);
-  const selectablePendingCandidateIds = useMemo(
-    () => new Set(filteredCandidates.filter((candidate) => candidate.status === 'pending').map((candidate) => candidate.id)),
-    [filteredCandidates],
+  // Steps are selected among the ones shown, whatever their decision, to accept, reject or reset them together.
+  const shownCandidateIds = useMemo(() => filteredCandidates.map((candidate) => candidate.id), [filteredCandidates]);
+  const selectedShownCandidateIds = useMemo(
+    () => keepShown(selectedCandidateIds, shownCandidateIds),
+    [selectedCandidateIds, shownCandidateIds],
   );
-  const selectedPendingCandidateIds = useMemo(
-    () => selectedCandidateIds.filter((candidateId) => selectablePendingCandidateIds.has(candidateId)),
-    [selectedCandidateIds, selectablePendingCandidateIds],
-  );
+  const shownSelectionState = selectionState(selectedCandidateIds, shownCandidateIds);
   const canShowTimeline = Boolean(
     isCompletedReview &&
       selectedRecordingSummary &&
@@ -665,10 +642,8 @@ export function AnalysisScreen({
   }, [analysisTaskItems]);
 
   useEffect(() => {
-    setSelectedCandidateIds((current) =>
-      current.filter((candidateId) => selectablePendingCandidateIds.has(candidateId)),
-    );
-  }, [selectablePendingCandidateIds]);
+    setSelectedCandidateIds((current) => keepShown(current, shownCandidateIds));
+  }, [shownCandidateIds]);
 
   useEffect(() => {
     if (!showHints) {
@@ -688,12 +663,9 @@ export function AnalysisScreen({
     setActiveCandidateFilter(canReviewCandidates ? 'all' : 'pending');
     setExpandedAnnotationCandidateId(null);
     setSelectedCandidateIds([]);
+    selectionAnchorRef.current = null;
     setBulkCandidatePending(false);
   }, [canReviewCandidates, selectedRun?.summary.id]);
-
-  useEffect(() => {
-    setShowRunLogs(false);
-  }, [selectedRun?.summary.id]);
 
   useEffect(() => {
     setOpenPopover((current) => (current === 'export' ? null : current));
@@ -712,9 +684,6 @@ export function AnalysisScreen({
     function handlePointerDown(event: MouseEvent) {
       const target = event.target as Node;
       if (
-        saveMenuRef.current?.contains(target) ||
-        loadMenuRef.current?.contains(target) ||
-        resetMenuRef.current?.contains(target) ||
         presetMenuRef.current?.contains(target) ||
         exportMenuRef.current?.contains(target)
       ) {
@@ -850,6 +819,10 @@ export function AnalysisScreen({
       } else if (lowerKey === 'r') {
         event.preventDefault();
         handleCandidateStatusChange(activeCandidate, 'rejected');
+      } else if (lowerKey === 'x') {
+        // select the step in focus (with shift, every step from the one selected last)
+        event.preventDefault();
+        toggleCandidateSelection(activeCandidate.id, event.shiftKey);
       } else if (lowerKey === 'u') {
         event.preventDefault();
         handleCandidateStatusChange(activeCandidate, 'pending');
@@ -1099,28 +1072,28 @@ export function AnalysisScreen({
     }
   }
 
-  function toggleCandidateSelection(candidateId: string) {
-    setSelectedCandidateIds((current) =>
-      current.includes(candidateId) ? current.filter((value) => value !== candidateId) : [...current, candidateId],
-    );
+  /** A step's box: toggles it, or with shift every step from the one clicked last. */
+  function toggleCandidateSelection(candidateId: string, shift = false) {
+    const anchor = selectionAnchorRef.current;
+    selectionAnchorRef.current = candidateId;
+    setSelectedCandidateIds((current) => clickSelection(current, shownCandidateIds, candidateId, anchor, shift));
   }
 
-  async function handleBulkCandidateStatusChange(
-    status: Extract<CandidateStatus, 'accepted' | 'rejected'>,
-  ) {
-    if (!selectedRun || !selectedPendingCandidateIds.length) {
+  /** Accept, reject or reset (to undecided) the selected steps, skipping the ones that are so already. The selection
+   *  stays, so that a mistaken choice can be put right at once. */
+  async function handleBulkCandidateStatusChange(status: Extract<CandidateStatus, 'accepted' | 'rejected' | 'pending'>) {
+    if (!selectedRun) {
+      return;
+    }
+    const byId = new Map(selectedRun.candidates.map((candidate) => [candidate.id, candidate]));
+    const changing = selectedShownCandidateIds.filter((candidateId) => byId.get(candidateId)?.status !== status);
+    if (!changing.length) {
       return;
     }
 
     setBulkCandidatePending(true);
     try {
-      const failedCandidateIds = await onBulkUpdateCandidates(
-        selectedRun.summary.id,
-        selectedRun.summary.recording_id,
-        selectedPendingCandidateIds,
-        status,
-      );
-      setSelectedCandidateIds(failedCandidateIds);
+      await onBulkUpdateCandidates(selectedRun.summary.id, selectedRun.summary.recording_id, changing, status);
     } finally {
       setBulkCandidatePending(false);
     }
@@ -1246,9 +1219,6 @@ export function AnalysisScreen({
 
   function handleCandidateStatusChange(candidate: CandidateFrame, status: CandidateStatus) {
     setActiveCandidateId(candidate.id);
-    if (status !== 'pending') {
-      setSelectedCandidateIds((current) => current.filter((candidateId) => candidateId !== candidate.id));
-    }
     onUpdateCandidate(candidate.id, { status });
     if (status === 'pending') {
       return;
@@ -1409,7 +1379,6 @@ export function AnalysisScreen({
             onDeleteRecording={onDeleteRecording}
             onCancelUpload={onCancelUpload}
             onFilesDropped={onDropFiles}
-            onJumpToSelection={onJumpToSelection}
             onPreviewRecording={onPreviewRecording}
             onRenameRecording={onRenameRecording}
             onRequestRename={handleRequestVideoRename}
@@ -1431,7 +1400,6 @@ export function AnalysisScreen({
             healthWarning={healthWarning}
             hintCardPosition={hintCardPosition}
             hintText={hintText}
-            loadMenuRef={loadMenuRef}
             onApplyImportedPreset={handleApplyImportedPreset}
             onCopyPresetText={() => {
               void handleCopyPresetText();
@@ -1452,9 +1420,7 @@ export function AnalysisScreen({
             presetImportError={presetImportError}
             presetMenuRef={presetMenuRef}
             projectDefaultSettings={projectDefaultSettings}
-            resetMenuRef={resetMenuRef}
             runSettings={runSettings}
-            saveMenuRef={saveMenuRef}
             selectedRecordingId={selectedRecordingId}
             selectedRecordingSummary={selectedRecordingSummary}
             setPresetImportDraftChange={handlePresetImportDraftChange}
@@ -1768,11 +1734,6 @@ export function AnalysisScreen({
                 tasks list (details), so they are not repeated here. */}
             <div className="analysis-detail-header">
               <div className="analysis-detail-copy">
-                <p className="analysis-section-eyebrow">
-                  selected task: {selectedRun.summary.name ? `${selectedRun.summary.name} (` : ''}
-                  {formatRunNumber(selectedRun.summary, runNumberById.get(selectedRun.summary.id))}
-                  {selectedRun.summary.name ? ')' : ''}
-                </p>
                 <div className="run-title-row">
                   <h2>{selectedRecordingSummary?.filename ?? selectedRun.summary.recording_id}</h2>
                   {!isCompletedReview ? (
@@ -1797,38 +1758,6 @@ export function AnalysisScreen({
                     end
                   </button>
                 ) : null}
-                <div className="analysis-log-popover-shell" ref={logShellRef}>
-                  <button
-                    className="analysis-task-link subtle analysis-log-toggle"
-                    id="analysis-run-logs"
-                    onClick={() => setShowRunLogs((current) => !current)}
-                    type="button"
-                  >
-                    {showRunLogs ? 'hide logs' : 'view logs'}
-                  </button>
-                  {showRunLogs ? (
-                    <div className="analysis-log-popover">
-                      <div className="analysis-log-lines">
-                        {selectedRun.events.map((event) => (
-                          <p className={`analysis-log-line ${event.level}`} key={event.id}>
-                            <span className="analysis-log-line-meta">
-                              {new Date(event.created_at).toLocaleTimeString().toLocaleLowerCase()} · {formatPhase(event.phase)}
-                            </span>
-                            <span>{event.message}</span>
-                            {typeof event.progress === 'number' ? (
-                              <span className="analysis-log-line-progress">
-                                {formatPercent(event.progress)}
-                              </span>
-                            ) : null}
-                          </p>
-                        ))}
-                        {!selectedRun.events.length && (
-                          <p className="empty-copy">progress messages will appear here once the run starts.</p>
-                        )}
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
               </div>
             </div>
 
@@ -2079,97 +2008,105 @@ export function AnalysisScreen({
                         </button>
                       ))}
                     </div>
-                    <div className="candidate-review-stepper">
-                      <button
-                        className="analysis-task-link subtle"
-                        disabled={filteredCandidates.length <= 1}
-                        onClick={() => handleStepCandidate(-1)}
-                        type="button"
-                      >
-                        prev
-                      </button>
-                      <button
-                        className="analysis-task-link subtle"
-                        disabled={filteredCandidates.length <= 1}
-                        onClick={() => handleStepCandidate(1)}
-                        type="button"
-                      >
-                        next
-                      </button>
-                    </div>
                     {canReviewCandidates && (
                       <span
-                        aria-label="keyboard shortcuts: a to accept, r to reject, u to reset pending, p to play from the step, arrow keys to step"
+                        aria-label="keyboard shortcuts: a to accept, r to reject, u to reset to undecided, x to select (shift+x for a range), p to play from the step, arrow keys to step"
                         className="candidate-review-key-hint"
                       >
-                        <span className="candidate-key-badge">a</span> accept {' · '}
-                        <span className="candidate-key-badge">r</span> reject {' · '}
-                        <span className="candidate-key-badge">u</span> reset {' · '}
-                        <span className="candidate-key-badge">p</span> play {' · '}
-                        <span className="candidate-key-badge">← →</span> step
+                        <span><span className="candidate-key-badge">a</span> accept</span>
+                        <span><span className="candidate-key-badge">r</span> reject</span>
+                        <span><span className="candidate-key-badge">u</span> reset</span>
+                        <span><span className="candidate-key-badge">x</span> select</span>
+                        <span><span className="candidate-key-badge">p</span> play</span>
+                        <span><span className="candidate-key-badge">← →</span> step</span>
                       </span>
                     )}
                   </div>
 
-                  {selectedPendingCandidateIds.length > 0 || isCompletedReview ? (
+                  {(canReviewCandidates && filteredCandidates.length > 0) || isCompletedReview ? (
                     <div className="candidate-review-actions">
-                      {selectedPendingCandidateIds.length > 0 ? (
+                      {canReviewCandidates && filteredCandidates.length > 0 ? (
+                        // Two groups: which steps (of the ones shown), and what to do with them.
                         <div className="candidate-bulk-actions">
-                          <span className="candidate-bulk-count">
-                            {selectedPendingCandidateIds.length}{' '}
-                            {selectedPendingCandidateIds.length === 1
-                              ? 'candidate selected'
-                              : 'candidates selected'}
-                          </span>
-                          <button
-                            className="analysis-task-link subtle"
-                            disabled={bulkCandidatePending}
-                            onClick={() => void handleBulkCandidateStatusChange('accepted')}
-                            type="button"
-                          >
-                            {bulkCandidatePending ? 'working...' : 'accept selected'}
-                          </button>
-                          <button
-                            className="analysis-task-link subtle"
-                            disabled={bulkCandidatePending}
-                            onClick={() => void handleBulkCandidateStatusChange('rejected')}
-                            type="button"
-                          >
-                            {bulkCandidatePending ? 'working...' : 'reject selected'}
-                          </button>
-                          <button
-                            className="analysis-task-link subtle"
-                            disabled={bulkCandidatePending}
-                            onClick={() => setSelectedCandidateIds([])}
-                            type="button"
-                          >
-                            clear selection
-                          </button>
+                          <div aria-label="select steps" className="candidate-bulk-group" role="group">
+                            <span
+                              className="candidate-bulk-count"
+                              title="shift-click a step's box, or press shift+x, to select every step from the one selected last"
+                            >
+                              select
+                            </span>
+                            <button
+                              className="analysis-task-link subtle"
+                              disabled={shownSelectionState === 'all'}
+                              onClick={() => setSelectedCandidateIds(shownCandidateIds)}
+                              title="every step shown"
+                              type="button"
+                            >
+                              all
+                            </button>
+                            <button
+                              className="analysis-task-link subtle"
+                              disabled={shownSelectionState === 'none'}
+                              onClick={() => setSelectedCandidateIds([])}
+                              type="button"
+                            >
+                              none
+                            </button>
+                            <button
+                              className="analysis-task-link subtle"
+                              onClick={() => setSelectedCandidateIds((current) => invertSelection(current, shownCandidateIds))}
+                              title="the steps shown that are not selected, instead of the ones that are"
+                              type="button"
+                            >
+                              invert
+                            </button>
+                          </div>
+                          {selectedShownCandidateIds.length > 0 ? (
+                            <div aria-label="act on the selected steps" className="candidate-bulk-group" role="group">
+                              <span className="candidate-bulk-count">
+                                {selectedShownCandidateIds.length} of {shownCandidateIds.length} selected
+                              </span>
+                              <button
+                                className="candidate-bulk-decision accepted"
+                                disabled={bulkCandidatePending}
+                                onClick={() => void handleBulkCandidateStatusChange('accepted')}
+                                type="button"
+                              >
+                                <span aria-hidden="true" className="candidate-bulk-decision-dot">
+                                  <DecisionIcon intent="accepted" />
+                                </span>
+                                accept
+                              </button>
+                              <button
+                                className="candidate-bulk-decision rejected"
+                                disabled={bulkCandidatePending}
+                                onClick={() => void handleBulkCandidateStatusChange('rejected')}
+                                type="button"
+                              >
+                                <span aria-hidden="true" className="candidate-bulk-decision-dot">
+                                  <DecisionIcon intent="rejected" />
+                                </span>
+                                reject
+                              </button>
+                              <button
+                                className="candidate-bulk-decision pending"
+                                disabled={bulkCandidatePending}
+                                onClick={() => void handleBulkCandidateStatusChange('pending')}
+                                title="back to undecided"
+                                type="button"
+                              >
+                                <span aria-hidden="true" className="candidate-bulk-decision-dot">
+                                  <DecisionIcon intent="pending" />
+                                </span>
+                                reset
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                       {isCompletedReview ? (
                         <>
-                          <div className="candidate-export-name-stack">
-                            <label className="candidate-export-name-wrap">
-                              <span className="sr-only">export zip name</span>
-                              <input
-                                aria-label="export zip name"
-                                className="candidate-export-name-field"
-                                onChange={(event) => setExportNameDraft(event.target.value)}
-                                placeholder="use server filename"
-                                value={exportNameDraft}
-                              />
-                              <span className="candidate-export-name-suffix">.zip</span>
-                            </label>
-                            <span className="candidate-export-name-preview">
-                              {resolvedExportFilenamePreview
-                                ? `→ ${resolvedExportFilenamePreview}`
-                                : '→ server-generated filename'}
-                            </span>
-                          </div>
-                          {selectedRunExportLabel ? (
-                            <span className="analysis-export-status">{selectedRunExportLabel}</span>
-                          ) : null}
+                          {/* Only export on the bar; the file's name and when it was last exported are in its menu. */}
                           <div className="candidate-export-shell" ref={exportMenuRef}>
                             <button
                               aria-expanded={openPopover === 'export'}
@@ -2182,6 +2119,24 @@ export function AnalysisScreen({
                             </button>
                             {openPopover === 'export' ? (
                               <div className="candidate-export-popover">
+                                <div className="candidate-export-name-stack">
+                                  <label className="candidate-export-name-wrap">
+                                    <span className="sr-only">export zip name</span>
+                                    <input
+                                      aria-label="export zip name"
+                                      className="candidate-export-name-field"
+                                      onChange={(event) => setExportNameDraft(event.target.value)}
+                                      placeholder="file name (optional)"
+                                      value={exportNameDraft}
+                                    />
+                                    <span className="candidate-export-name-suffix">.zip</span>
+                                  </label>
+                                  <span className="candidate-export-name-preview">
+                                    {resolvedExportFilenamePreview
+                                      ? `→ ${resolvedExportFilenamePreview}`
+                                      : '→ named by the server'}
+                                  </span>
+                                </div>
                                 <div className="candidate-export-option-list">
                                   <button
                                     className="analysis-task-link subtle"
@@ -2200,6 +2155,9 @@ export function AnalysisScreen({
                                     export all
                                   </button>
                                 </div>
+                                {selectedRunExportLabel ? (
+                                  <span className="analysis-export-status">{selectedRunExportLabel}</span>
+                                ) : null}
                               </div>
                             ) : null}
                           </div>
@@ -2222,8 +2180,6 @@ export function AnalysisScreen({
                           show all
                         </button>
                       </>
-                    ) : canShowTimeline ? (
-                      'click a label above the timeline to hide its steps'
                     ) : null}
                   </span>
                   <div className="candidate-view-controls">
@@ -2282,7 +2238,17 @@ export function AnalysisScreen({
                   >
                     <div className="candidate-row candidate-row-head" role="row">
                       <span className="candidate-row-select" role="columnheader">
-                        <span className="sr-only">select</span>
+                        <input
+                          aria-label={shownSelectionState === 'all' ? 'select none of the steps shown' : 'select every step shown'}
+                          checked={shownSelectionState === 'all'}
+                          onChange={() =>
+                            setSelectedCandidateIds(shownSelectionState === 'all' ? [] : shownCandidateIds)
+                          }
+                          ref={(box) => {
+                            if (box) box.indeterminate = shownSelectionState === 'some';
+                          }}
+                          type="checkbox"
+                        />
                       </span>
                       <span className="candidate-row-thumb" role="columnheader">
                         <span className="sr-only">screenshot</span>
@@ -2302,13 +2268,13 @@ export function AnalysisScreen({
                         <CandidateRow
                           candidate={candidate}
                           isActive={activeCandidateId === candidate.id}
-                          isSelectable={candidate.status === 'pending'}
-                          isSelected={selectedPendingCandidateIds.includes(candidate.id)}
+                          isSelectable
+                          isSelected={selectedShownCandidateIds.includes(candidate.id)}
                           key={candidate.id}
                           onActivate={() => setActiveCandidateId(candidate.id)}
                           onJumpToSimilar={similarityLink ? () => jumpToAnchor(similarityLink.targetId) : undefined}
                           onSetStatus={(status) => handleCandidateStatusChange(candidate, status)}
-                          onToggleSelection={() => toggleCandidateSelection(candidate.id)}
+                          onToggleSelection={(shift) => toggleCandidateSelection(candidate.id, shift)}
                           onUpdate={(payload) => onUpdateCandidate(candidate.id, payload)}
                           similarLink={similarityLink}
                           steps={selectedRun.candidates}
@@ -2339,13 +2305,13 @@ export function AnalysisScreen({
                           hover={stepHover(candidate)}
                           isActive={activeCandidateId === candidate.id}
                           isAnnotationExpanded={expandedAnnotationCandidateId === candidate.id}
-                          isSelected={selectedPendingCandidateIds.includes(candidate.id)}
-                          isSelectable={candidate.status === 'pending'}
+                          isSelected={selectedShownCandidateIds.includes(candidate.id)}
+                          isSelectable
                           key={candidate.id}
                           onActivate={() => setActiveCandidateId(candidate.id)}
                           onJumpToSimilar={similarityLink ? () => jumpToAnchor(similarityLink.targetId) : undefined}
                           onSetStatus={(status) => handleCandidateStatusChange(candidate, status)}
-                          onToggleSelection={() => toggleCandidateSelection(candidate.id)}
+                          onToggleSelection={(shift) => toggleCandidateSelection(candidate.id, shift)}
                           onToggleAnnotation={() => handleToggleCandidateAnnotation(candidate.id)}
                           onUpdate={(payload) => onUpdateCandidate(candidate.id, payload)}
                           recordingHeight={selectedRecordingSummary?.height}
