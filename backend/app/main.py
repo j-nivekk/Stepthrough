@@ -543,6 +543,7 @@ def _serialize_run_summary(row: dict) -> DetectionRunSummary:
         message=row.get("message"),
         candidate_count=row.get("candidate_count", 0),
         accepted_count=row.get("accepted_count", 0),
+        rejected_count=row.get("rejected_count", 0),
         created_at=row["created_at"],
         started_at=row.get("started_at"),
         completed_at=row.get("completed_at"),

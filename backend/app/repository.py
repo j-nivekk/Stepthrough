@@ -651,12 +651,13 @@ def recording_has_active_runs(recording_id: str) -> bool:
     return bool(row[0])
 
 
-# A run with how many steps are accepted, and who last changed it. Runs from before changes were recorded give the
-# last change to one of their steps instead, or when they were made, and no one.
+# A run with how many steps are accepted or rejected, and who last changed it. Runs from before changes were recorded
+# give the last change to one of their steps instead, or when they were made, and no one.
 RUN_SUMMARY_SELECT = """
 SELECT
     dr.*,
     COALESCE(SUM(CASE WHEN c.status = 'accepted' THEN 1 ELSE 0 END), 0) AS accepted_count,
+    COALESCE(SUM(CASE WHEN c.status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected_count,
     COALESCE(dr.modified_at, MAX(c.updated_at), dr.created_at) AS last_modified_at,
     COALESCE(u.display_name, u.name) AS modified_by_name
 FROM detection_runs dr

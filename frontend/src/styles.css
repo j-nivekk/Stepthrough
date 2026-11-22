@@ -2843,6 +2843,11 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   scrollbar-gutter: auto;
 }
 
+.analysis-tasks {
+  container-type: inline-size;
+  container-name: tasks-list;
+}
+
 /* Below the rule, as the load / save row of parameters: the filters, and what to do with a selection. */
 .analysis-task-tools {
   display: flex;
@@ -3204,6 +3209,28 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   text-decoration-color: rgba(255, 255, 255, 0.6);
 }
 
+.analysis-task-row.selected .analysis-task-link:not(:disabled):hover,
+.analysis-task-row.selected .analysis-task-link:not(:disabled):focus-visible,
+.analysis-video-row.selected .analysis-task-link:not(:disabled):hover,
+.analysis-video-row.selected .analysis-task-link:not(:disabled):focus-visible {
+  color: #fff;
+  text-decoration-color: #fff;
+}
+
+.analysis-task-row.selected .analysis-task-more:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.analysis-task-row.selected :focus-visible,
+.analysis-video-row.selected :focus-visible {
+  outline-color: rgba(255, 255, 255, 0.8);
+}
+
+.analysis-task-row.selected .editable-name-input,
+.analysis-video-row.selected .editable-name-input {
+  background: #fff;
+}
+
 .analysis-video-row.selected .analysis-video-context-badge,
 .analysis-task-row.selected .analysis-task-more.is-open,
 .analysis-task-row.selected .live-pill {
@@ -3411,6 +3438,68 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   text-decoration: none;
 }
 
+/* How far a completed run has been reviewed: X/Y reviewed over a mini segmented bar (accepted green, rejected red,
+   pending track). At narrower column widths, the bar hides so only X/Y reviewed stays in view. */
+.analysis-task-review {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.analysis-task-review-count {
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.analysis-task-review.complete .analysis-task-review-count {
+  color: #000;
+}
+
+.analysis-task-review-bar {
+  display: flex;
+  width: 100%;
+  min-width: 64px;
+  height: 5px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.14);
+  overflow: hidden;
+}
+
+.analysis-task-review-seg {
+  height: 100%;
+  min-width: 2px;
+  flex: 0 0 auto;
+}
+
+.analysis-task-review-seg.accepted {
+  background: #48af7c;
+}
+
+.analysis-task-review-seg.rejected {
+  background: #bf2725;
+}
+
+/* On a selected orange row, keep the count white and frame the bar so accepted green and rejected red read cleanly. */
+.analysis-task-row.selected .analysis-task-review .analysis-task-review-count {
+  color: #fff;
+}
+
+.analysis-task-row.selected .analysis-task-review-bar {
+  height: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  background: #d6d6d6;
+}
+
+@container tasks-list (max-width: 300px) {
+  .analysis-task-review-bar {
+    display: none;
+  }
+}
+
 .analysis-task-elapsed {
   color: rgba(0, 0, 0, 0.6);
   font-size: 12px;
@@ -3561,6 +3650,11 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   right: 0;
 }
 
+.candidate-export-popover {
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+}
+
 .analysis-toolbar-popover-wide {
   width: min(340px, calc(100vw - 140px));
 }
@@ -3584,7 +3678,6 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   color: rgba(255, 255, 255, 0.92);
 }
 
-.analysis-toolbar-option-list,
 /* The export menu, with the file's name at the top (left empty, the server names it). */
 .candidate-export-popover .candidate-export-name-field {
   width: 200px;
@@ -5501,12 +5594,22 @@ button:disabled {
   min-width: 0;
   padding: 0 10px;
   height: 30px;
-  background: var(--analysis-surface-muted);
+  background: var(--analysis-surface-overlay);
+  border: 1px solid rgba(0, 0, 0, 0.24);
+  border-radius: 3px;
+  cursor: text;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.candidate-export-name-wrap:hover {
+  border-color: rgba(0, 0, 0, 0.42);
 }
 
 .candidate-export-name-wrap:focus-within {
+  background: #fff;
+  border-color: rgba(0, 0, 0, 0.56);
   outline: 2px solid rgba(72, 175, 124, 0.32);
-  outline-offset: 3px;
+  outline-offset: 1px;
 }
 
 .candidate-export-name-stack {
@@ -6586,7 +6689,8 @@ button:disabled {
 }
 
 .pathway-tool-title {
-  width: 170px;
+  flex: 0 1 150px;
+  width: 150px;
   min-width: 80px;
   padding: 0 8px;
   background: rgba(255, 255, 255, 0.68);
@@ -6598,9 +6702,11 @@ button:disabled {
 }
 
 .pathway-tool-select {
+  flex: 0 0 auto;
   max-width: 190px;
   padding: 0 26px 0 9px;
   background-color: rgba(255, 255, 255, 0.68);
+  white-space: nowrap;
 }
 
 .pathway-tool-select:hover,

@@ -164,6 +164,8 @@ export interface AnalysisScreenProps {
   selectedRecording: RecordingDetail | null;
   selectedRecordingId: string | null;
   selectedRecordingSummary: RecordingSummary | null;
+  /** Video focus bumped when selecting a video in the video list (not when picking a run in the tasks list). */
+  videoListFocus: { recordingId: string; nonce: number } | null;
   selectedRunId: string | null;
   selectedRun: RunDetail | null;
   selectedRunLoading?: boolean;
@@ -289,6 +291,7 @@ export function AnalysisScreen({
   selectedRecording,
   selectedRecordingId,
   selectedRecordingSummary,
+  videoListFocus,
   selectedRunId,
   selectedRun,
   selectedRunLoading = false,
@@ -692,8 +695,19 @@ export function AnalysisScreen({
       setOpenPopover(null);
     }
 
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setOpenPopover(null);
+      }
+    }
+
     window.addEventListener('pointerdown', handlePointerDown);
-    return () => window.removeEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
   }, [openPopover]);
 
   useEffect(() => {
@@ -792,6 +806,13 @@ export function AnalysisScreen({
       if (event.metaKey || event.ctrlKey || event.altKey) {
         return;
       }
+      if (event.key === 'Escape') {
+        if (selectedCandidateIds.length > 0) {
+          event.preventDefault();
+          setSelectedCandidateIds([]);
+        }
+        return;
+      }
       if (!activeCandidate && filteredCandidates.length > 0) {
         setActiveCandidateId(filteredCandidates[0].id);
         return;
@@ -834,7 +855,7 @@ export function AnalysisScreen({
 
     window.addEventListener('keydown', handleReviewKeydown);
     return () => window.removeEventListener('keydown', handleReviewKeydown);
-  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedRun?.summary.id, showPathway]);
+  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedCandidateIds.length, selectedRun?.summary.id, showPathway]);
 
   useEffect(() => {
     if (!previewVideoUrl) {
@@ -1440,7 +1461,7 @@ export function AnalysisScreen({
             bulkExportPending={bulkExportPending}
             duplicateRunPending={duplicateRunPending}
             expandedTaskRunId={expandedTaskRunId}
-            selectedRecordingId={selectedRecordingId}
+            videoListFocus={videoListFocus}
             groupedTaskItems={groupedTaskItems}
             onAbortRun={onAbortRun}
             onDeleteRun={handleDeleteRun}
@@ -2342,7 +2363,7 @@ export function AnalysisScreen({
             <h2>{selectedRecording.filename}</h2>
             {selectedRunId && selectedRunLoading ? <p>loading task details…</p> : null}
             {!selectedRunId && !selectedRunLoading && (
-              <p>select a video name or a task link to review candidates, logs, and exports here.</p>
+              <p>select a video or a run to review steps and exports here.</p>
             )}
           </section>
         ) : null}

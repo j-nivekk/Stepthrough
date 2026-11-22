@@ -2,7 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 
 import type { PhaseBoundary, PhaseSteps } from '../../api';
 import { isPopupStep, popupChange } from '../../components/ScreenChoice';
+import { formatPathwayTime } from '../../lib/pathwayFigure';
 import { record, undoChanges, type HistoryEntry } from '../../lib/pathwayHistory';
+import { unstackAllChanges, unstackByVisitChanges, unstackStepsChanges } from '../../lib/pathwayUnstack';
 import type { CandidateChanges, CandidateFrame, Pathway, PathwayPhase, PathwayRowChoice, PathwayScreen, PathwayStep } from '../../types';
 import { PathwayPhases } from './PathwayPhases';
 
@@ -71,6 +73,8 @@ interface MenuItem {
   run?: () => void;
   items?: MenuItem[];
   danger?: boolean;
+  /** Draws a thin rule above this item to separate groups in a menu or submenu. */
+  divider?: boolean;
 }
 
 const DRAG_START = 5;
@@ -124,7 +128,7 @@ export function PathwayCanvas({
   const toolboxRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; kind: 'context' | 'unstack' } | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
   const [history, setHistory] = useState<Undoable[]>([]);
   /** Where the pointer last chose something, for placing the phases panel near it. */
@@ -268,21 +272,49 @@ export function PathwayCanvas({
   const moveStep = (steps: PathwayStep[], target: PathwayScreen | 'own' | 'auto') => {
     const first = steps[0];
     if (!first) return;
+    if (target === 'own') {
+      const own = screenOf(first.source_candidate_id);
+      const allSteps = own ? stepsOf(own) : [];
+      if (own && allSteps.length > 1 && steps.length < allSteps.length) {
+        const changes = unstackStepsChanges(steps, allSteps, candidateById);
+        if (!changes.length) return;
+        void act(`gave ${numbersOf(steps)} a screen of its own`, changes);
+        setSelection({ kind: 'boxes', ids: [first.source_candidate_id] });
+        return;
+      }
+    }
     const label =
       target === 'own' ? `gave ${numbersOf(steps)} a screen of its own` : target === 'auto' ? `put ${numbersOf(steps)} back where it was found` : `put ${numbersOf(steps)} on ${name(target)}`;
     const link = target === 'own' ? 'new' : target === 'auto' ? 'auto' : firstOf(target);
     void act(label, [[first.source_candidate_id, { screen_link: link }]]);
   };
-  // every visit after the first starts a screen of its own; the steps that scroll or type on go with it
-  const unstack = (screen: PathwayScreen) =>
-    void act(
-      `unstacked ${name(screen)}`,
-      screen.visits
-        .slice(1)
-        .map((visit) => stepById.get(visit.step_ids[0]))
-        .filter((step): step is PathwayStep => Boolean(step))
-        .map((step) => [step.source_candidate_id, { screen_link: 'new' }]),
-    );
+  const stepMenuLabel = (step: PathwayStep): string => {
+    const customTitle = candidateById.get(step.source_candidate_id)?.title?.trim();
+    const detail = customTitle || formatPathwayTime(step.timestamp_ms);
+    return `step ${step.step_index} · ${detail}`;
+  };
+  const unstackAll = (screen: PathwayScreen) => {
+    const steps = stepsOf(screen);
+    const changes = unstackAllChanges(steps, candidateById);
+    if (!changes.length) return;
+    void act(`unstacked all ${steps.length} steps of ${name(screen)}`, changes);
+  };
+  const unstackByVisit = (screen: PathwayScreen) => {
+    const changes = unstackByVisitChanges(screen, stepById, candidateById);
+    if (!changes.length) return;
+    void act(`unstacked ${name(screen)} by visit`, changes);
+  };
+  const unstackOneStep = (screen: PathwayScreen, step: PathwayStep) => {
+    const changes = unstackStepsChanges([step], stepsOf(screen), candidateById);
+    if (!changes.length) return;
+    void act(`gave step ${step.step_index} a screen of its own`, changes);
+    setSelection({ kind: 'boxes', ids: [step.source_candidate_id] });
+  };
+  const editStepsOf = (screen: PathwayScreen) => {
+    const steps = stepsOf(screen);
+    if (!steps.length) return;
+    setSelection({ kind: 'step', ids: [steps[0].source_candidate_id] });
+  };
   const chooseRow = (screen: PathwayScreen, value: 'auto' | PathwayRowChoice) => {
     const first = firstOf(screen);
     // a say left on another step of the box would still count after this one's
@@ -309,8 +341,33 @@ export function PathwayCanvas({
     openPhases({ from: Math.min(...numbers), to: Math.max(...numbers) });
   };
 
+  function unstackMenuItems(box: PathwayScreen, includeEditSteps = false): MenuItem[] {
+    const steps = stepsOf(box);
+    if (steps.length < 2) return [];
+    const list: MenuItem[] = [
+      { label: `unstack all (${steps.length} steps)`, run: () => unstackAll(box) },
+    ];
+    if (box.visits.length > 1 && steps.length > box.visits.length) {
+      list.push({ label: `by visit (${box.visits.length} visits)`, run: () => unstackByVisit(box) });
+    }
+    steps.forEach((step, index) => {
+      list.push({
+        label: stepMenuLabel(step),
+        divider: index === 0,
+        run: () => unstackOneStep(box, step),
+      });
+    });
+    if (includeEditSteps) {
+      list.push({ label: 'edit steps…', divider: true, run: () => editStepsOf(box) });
+    }
+    return list;
+  }
+
   // ── the actions for what is selected: the toolbox shows the usual ones, the menu all of them ──
   function menuItems(): MenuItem[] {
+    if (menu?.kind === 'unstack' && selectedBoxes.length === 1) {
+      return unstackMenuItems(selectedBoxes[0], true);
+    }
     const items: MenuItem[] = [];
     const others = (except: PathwayScreen[]) =>
       pathway.screens.filter((screen) => !except.includes(screen)).map((screen) => ({ label: `${name(screen)} (${numbersOf(stepsOf(screen))})`, screen }));
@@ -322,7 +379,10 @@ export function PathwayCanvas({
       items.push({ label: 'rename', hint: 'Enter', run: () => titleRef.current?.focus() });
       if (first) items.push({ label: isPopupStep(first) ? 'not a pop-up' : 'a pop-up', hint: 'P', run: () => togglePopup(first.id, name(box)) });
       items.push({ label: 'stack onto', items: others([box]).map(({ label, screen }) => ({ label, run: () => stackBox(box, screen) })) });
-      if (box.visits.length > 1) items.push({ label: 'unstack: a screen for each visit', run: () => unstack(box) });
+      if (steps.length > 1) {
+        items.push({ label: 'unstack', items: unstackMenuItems(box) });
+        items.push({ label: 'edit steps…', run: () => editStepsOf(box) });
+      }
       if (parent) {
         items.push({
           label: 'row',
@@ -343,6 +403,10 @@ export function PathwayCanvas({
       const first = candidateById.get(selectedSteps[0].source_candidate_id);
       items.push({ label: 'a screen of its own', run: () => moveStep(selectedSteps, 'own') });
       items.push({ label: 'put it on', items: others(own ? [own] : []).map(({ label, screen }) => ({ label, run: () => moveStep(selectedSteps, screen) })) });
+      if (own && stepsOf(own).length > 1) {
+        const boxStepCount = stepsOf(own).length;
+        items.push({ label: `unstack all (${boxStepCount} steps)`, run: () => unstackAll(own) });
+      }
       if (first?.screen_link) items.push({ label: 'back where it was found', run: () => moveStep(selectedSteps, 'auto') });
       if (first) items.push({ label: isPopupStep(first) ? 'not a pop-up' : 'a pop-up', hint: 'P', run: () => togglePopup(first.id, numbersOf(selectedSteps)) });
       const phase = phaseOfStep(selectedSteps[0].step_index);
@@ -378,7 +442,15 @@ export function PathwayCanvas({
     const selected = selectedBoxes.length
       ? selectedBoxes.map((screen) => rectOf(imageOf(screen))).filter((rect): rect is Rect => Boolean(rect))
       : selectedSteps.length
-        ? [rectOf(numberOf(selectedSteps))].filter((rect): rect is Rect => Boolean(rect))
+        ? [
+            rectOf(
+              numberOf(selectedSteps) ??
+                (() => {
+                  const own = screenOf(selectedSteps[0].source_candidate_id);
+                  return own ? imageOf(own) : null;
+                })(),
+            ),
+          ].filter((rect): rect is Rect => Boolean(rect))
         : [];
     const target = drag?.target?.kind === 'box' ? rectOf(imageOf(drag.target.screen)) : null;
     const sourceScreen = drag ? screenOf(drag.ids[0]) : undefined;
@@ -543,8 +615,8 @@ export function PathwayCanvas({
   });
 
   /** The menu is placed in the window (the figure's frame would cut it off at its edge), so a scroll closes it. */
-  function openMenuAt(x: number, y: number) {
-    setMenu({ x, y });
+  function openMenuAt(x: number, y: number, kind: 'context' | 'unstack' = 'context') {
+    setMenu({ x, y, kind });
   }
   useEffect(() => {
     if (!menu) return;
@@ -625,7 +697,12 @@ export function PathwayCanvas({
   useEffect(() => {
     if (!menu) return;
     function away(event: globalThis.PointerEvent) {
-      if (!(event.target instanceof Element) || !event.target.closest('.pathway-menu')) setMenu(null);
+      if (
+        !(event.target instanceof Element) ||
+        (!event.target.closest('.pathway-menu') && !event.target.closest('[data-pathway-unstack-trigger]'))
+      ) {
+        setMenu(null);
+      }
     }
     window.addEventListener('pointerdown', away, true);
     return () => window.removeEventListener('pointerdown', away, true);
@@ -658,7 +735,11 @@ export function PathwayCanvas({
     );
   } else if (selectedBoxes.length === 1) {
     const box = selectedBoxes[0];
-    status = `${name(box)}: ${numbersOf(stepsOf(box))}. drag it onto another box to stack it, or right-click for more.`;
+    const boxSteps = stepsOf(box);
+    status =
+      boxSteps.length > 1
+        ? `${name(box)}: ${numbersOf(boxSteps)}. drag onto another box to stack, or use unstack to separate steps.`
+        : `${name(box)}: ${numbersOf(boxSteps)}. drag it onto another box to stack it, or right-click for more.`;
   } else if (selectedBoxes.length > 1) {
     status = `${selectedBoxes.length} boxes selected: stack them together, or make them a phase.`;
   } else if (selectedSteps.length) {
@@ -749,6 +830,26 @@ export function PathwayCanvas({
               </option>
             ))}
           </select>
+          {steps.length > 1 ? (
+            <button
+              aria-expanded={menu?.kind === 'unstack'}
+              aria-haspopup="menu"
+              className={`pathway-tool ${menu?.kind === 'unstack' ? 'is-on' : ''}`}
+              data-pathway-unstack-trigger=""
+              onClick={(event) => {
+                if (menu?.kind === 'unstack') {
+                  setMenu(null);
+                  return;
+                }
+                const button = event.currentTarget.getBoundingClientRect();
+                openMenuAt(button.left, button.bottom + 4, 'unstack');
+              }}
+              title="unstack all steps, pop out one step, or open the step editor"
+              type="button"
+            >
+              unstack…
+            </button>
+          ) : null}
           <button className="pathway-tool" onClick={() => (phase ? openPhases({ phase }) : phaseFor(steps))} title={phase ? `the phase ${phase.name}` : 'make a phase from this box'} type="button">
             {phase ? `phase: ${phase.name}` : 'phase…'}
           </button>
@@ -771,22 +872,21 @@ export function PathwayCanvas({
     } else {
       const own = screenOf(selectedSteps[0].source_candidate_id);
       const first = candidateById.get(selectedSteps[0].source_candidate_id);
-      // A number can stand for several steps in a row ("4–5"): each can be picked on its own.
-      const visit = own?.visits.find((item) => item.step_ids.includes(selectedSteps[0].step_id));
-      const visitSteps = (visit?.step_ids ?? []).map((id) => stepById.get(id)).filter((step): step is PathwayStep => Boolean(step));
+      // Every step stacked on this box can be picked on its own from the step toolbar.
+      const boxSteps = own ? stepsOf(own) : selectedSteps;
       const picked = new Set(selectedSteps.map((step) => step.step_id));
       tools = (
         <>
-          {visitSteps.length > 1 ? (
+          {boxSteps.length > 1 ? (
             <span aria-label="which step" className="pathway-tool-steps" role="group">
               <span className="pathway-tool-label">step</span>
-              {visitSteps.map((step, index) => (
+              {boxSteps.map((step) => (
                 <button
                   aria-pressed={picked.has(step.step_id) && picked.size === 1}
                   className={`pathway-tool ${picked.has(step.step_id) && picked.size === 1 ? 'is-on' : ''}`}
                   key={step.step_id}
                   onClick={() => setSelection({ kind: 'step', ids: [step.source_candidate_id] })}
-                  title={index === 0 ? `step ${step.step_index}: the steps after it on this screen move with it` : `step ${step.step_index} alone`}
+                  title={`select ${stepMenuLabel(step)}`}
                   type="button"
                 >
                   {step.step_index}
@@ -796,7 +896,7 @@ export function PathwayCanvas({
           ) : (
             <span className="pathway-tool-label">{numbersOf(selectedSteps)}</span>
           )}
-          <button className="pathway-tool" onClick={() => moveStep(selectedSteps, 'own')} title="a box of its own, with the steps that scroll or type on from it" type="button">
+          <button className="pathway-tool" onClick={() => moveStep(selectedSteps, 'own')} title="pop this step out into a box of its own" type="button">
             own screen
           </button>
           <select
@@ -958,6 +1058,7 @@ function PathwayMenu({ items, x, y, onClose }: { items: MenuItem[]; x: number; y
     >
       {items.map((item, index) => (
         <div className="pathway-menu-row" key={item.label} onPointerEnter={() => setOpen(item.items ? index : null)}>
+          {item.divider ? <div aria-hidden="true" className="pathway-menu-divider" /> : null}
           <button
             aria-expanded={item.items ? open === index : undefined}
             aria-haspopup={item.items ? 'menu' : undefined}
@@ -995,6 +1096,7 @@ function PathwaySubmenu({ items, onClose }: { items: MenuItem[]; onClose: () => 
     <div className={`pathway-menu pathway-submenu ${toLeft ? 'to-left' : ''}`} ref={ref} role="menu">
       {items.map((child) => (
         <div className="pathway-menu-row" key={child.label}>
+          {child.divider ? <div aria-hidden="true" className="pathway-menu-divider" /> : null}
           <button
             className="pathway-menu-item"
             onClick={() => {

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { joinFilename, splitFilename } from '../lib/utils';
 
 export interface EditableNameProps {
+  /** Allow clearing the field to save an empty string (e.g. removing a run's custom name). */
+  allowEmpty?: boolean;
   buttonClassName?: string;
   containerClassName?: string;
   disabled?: boolean;
@@ -18,6 +20,7 @@ export interface EditableNameProps {
 }
 
 export function EditableName({
+  allowEmpty = false,
   buttonClassName,
   containerClassName,
   disabled = false,
@@ -81,7 +84,7 @@ export function EditableName({
   async function commitRename() {
     if (saving.current) return false;
     const nextBase = draft.trim();
-    if (!nextBase) {
+    if (!nextBase && !allowEmpty) {
       setError('name required');
       return false;
     }

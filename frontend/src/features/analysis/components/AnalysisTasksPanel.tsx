@@ -6,6 +6,15 @@ import { formatElapsedDuration } from '../../../lib/utils';
 import { EditableName } from '../../../components/EditableName';
 import { formatLastChange, formatPercent, formatPhase, formatRunNumber, formatRunShortTimestamp, formatRunTitle } from '../../../lib/formatters';
 import { formatRecordingTypeLabel, getEffectiveStableValues } from '../../../lib/stableSettings';
+import {
+  createTaskGroupFoldState,
+  focusVideoGroup,
+  isTaskGroupCollapsed,
+  revealTaskGroup,
+  setTaskGroupCollapsed,
+  summarizeRunReview,
+  type TaskGroupFoldState,
+} from '../../../lib/taskGroups';
 import type { AnalysisMetadata, RunSettings, RunSummary } from '../../../types';
 
 const COLLAPSED_GROUPS_KEY = 'stepthrough.taskGroups.collapsed';
@@ -86,8 +95,8 @@ export interface AnalysisTasksPanelProps {
   projectDefaultSettings: RunSettings;
   runNumberById: Map<string, number>;
   selectedRunId: string | null;
-  /** The video selected in the videos column: while one is, the runs of the others are folded away. */
-  selectedRecordingId: string | null;
+  /** Video focus bumped when selecting a video in the videos column: shows its runs and folds the others. */
+  videoListFocus: { recordingId: string; nonce: number } | null;
   selectedRunSummary: RunSummary | null;
   selectedTaskRunIds: string[];
   taskClockMs: number;
@@ -122,47 +131,52 @@ export function AnalysisTasksPanel({
   projectDefaultSettings,
   runNumberById,
   selectedRunId,
-  selectedRecordingId,
+  videoListFocus,
   selectedRunSummary,
   selectedTaskRunIds,
   taskClockMs,
   taskFilter,
   taskSelectMode,
 }: AnalysisTasksPanelProps) {
-  const [collapsedRecordingIds, setCollapsedRecordingIds] = useState<Set<string>>(loadCollapsedGroups);
+  const [groupFoldState, setGroupFoldState] = useState<TaskGroupFoldState>(() =>
+    createTaskGroupFoldState(loadCollapsedGroups(), videoListFocus?.recordingId ?? null),
+  );
   // which run's name to edit, from its context menu; the nonce starts the edit again on a second click
   const [renameRequest, setRenameRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [menu, setMenu] = useState<TaskMenuState | null>(null);
   // the run whose log is open in its details
   const [logsRunId, setLogsRunId] = useState<string | null>(null);
   const knownActiveRunIds = useRef<Set<string> | null>(null);
+  const lastVideoFocusNonce = useRef<number | null>(videoListFocus?.nonce ?? null);
 
-  // While a video is selected, the runs of the other videos are folded away for the time being: this is not
-  // saved with the groups folded by hand. A group opened meanwhile stays open until another video is selected.
-  const [openedBesideSelection, setOpenedBesideSelection] = useState<Set<string>>(() => new Set());
-  const foldedForSelection = (recordingId: string) =>
-    Boolean(selectedRecordingId) && recordingId !== selectedRecordingId && !openedBesideSelection.has(recordingId);
-
-  function setGroupCollapsed(recordingId: string, collapsed: boolean) {
-    if (!collapsed) {
-      setOpenedBesideSelection((current) => (current.has(recordingId) ? current : new Set(current).add(recordingId)));
-    }
-    setCollapsedRecordingIds((current) => {
-      if (current.has(recordingId) === collapsed) return current;
-      const next = new Set(current);
-      if (collapsed) next.add(recordingId);
-      else next.delete(recordingId);
-      saveCollapsedGroups(next);
+  function updateGroupFoldState(updater: (current: TaskGroupFoldState) => TaskGroupFoldState) {
+    setGroupFoldState((current) => {
+      const next = updater(current);
+      if (
+        next.collapsed.size !== current.collapsed.size ||
+        Array.from(next.collapsed).some((id) => !current.collapsed.has(id))
+      ) {
+        saveCollapsedGroups(next.collapsed);
+      }
       return next;
     });
   }
 
-  // Selecting another video folds the others again, and opens its own runs.
+  function setGroupCollapsed(recordingId: string, collapsed: boolean) {
+    updateGroupFoldState((current) => setTaskGroupCollapsed(current, recordingId, collapsed));
+  }
+
+  // Selecting a video in the video list opens its runs and folds the others. Clicking a run directly in this list
+  // does not bump `videoListFocus`, so manually opened groups stay as-is.
   useEffect(() => {
-    setOpenedBesideSelection(new Set());
-    if (selectedRecordingId) setGroupCollapsed(selectedRecordingId, false);
+    const nextNonce = videoListFocus?.nonce ?? null;
+    if (nextNonce === lastVideoFocusNonce.current && (videoListFocus?.recordingId ?? null) === groupFoldState.focusedRecordingId) {
+      return;
+    }
+    lastVideoFocusNonce.current = nextNonce;
+    updateGroupFoldState((current) => focusVideoGroup(current, videoListFocus?.recordingId ?? null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedRecordingId]);
+  }, [videoListFocus?.recordingId, videoListFocus?.nonce]);
 
   // A run that has just been started opens its video's group, so a new run never starts out of sight.
   useEffect(() => {
@@ -172,15 +186,17 @@ export function AnalysisTasksPanel({
     if (!previous) return;
     activeItems
       .filter((item) => !previous.has(item.run.id))
-      .forEach((item) => setGroupCollapsed(item.recording.id, false));
+      .forEach((item) => updateGroupFoldState((current) => revealTaskGroup(current, item.recording.id)));
   }, [analysisTaskItems]);
 
-  // Selecting a run from elsewhere (the videos list, the review board) opens the group it sits in.
+  // Selecting a run from elsewhere (e.g. comparison or a newly created manual run) opens the group it sits in,
+  // without folding any other groups that are already open.
   useEffect(() => {
     if (!selectedRunId) return;
     const item = analysisTaskItems.find((candidate) => candidate.run.id === selectedRunId);
-    if (item) setGroupCollapsed(item.recording.id, false);
+    if (item) updateGroupFoldState((current) => revealTaskGroup(current, item.recording.id));
     // only a change of selection reopens a group; list refreshes must not undo a collapse
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRunId]);
 
   const menuItem = menu ? analysisTaskItems.find((candidate) => candidate.run.id === menu.runId) ?? null : null;
@@ -344,6 +360,7 @@ export function AnalysisTasksPanel({
               : []),
           ]
         : [];
+    const reviewSummary = isDone ? summarizeRunReview(run) : null;
     const progressLabel = isDone
       ? `${run.candidate_count} ${run.candidate_count === 1 ? 'step' : 'steps'}`
       : isError
@@ -390,6 +407,7 @@ export function AnalysisTasksPanel({
             )}
             <div className="analysis-task-title-wrap">
               <EditableName
+                allowEmpty
                 containerClassName="analysis-task-name"
                 disabled={busy}
                 displayButtonClassName={`analysis-task-title ${isError ? 'error' : ''}`}
@@ -402,9 +420,12 @@ export function AnalysisTasksPanel({
                   }
                 }}
                 // Typing the number back (or the name away) takes the name away: the run is called by its number again.
-                onSave={(nextValue, previousValue) =>
-                  onRenameRun(run.id, nextValue === numberLabel ? '' : nextValue, previousValue === numberLabel ? '' : previousValue)
-                }
+                onSave={(nextValue, previousValue) => {
+                  const nextName = nextValue === numberLabel ? '' : nextValue;
+                  const previousName = previousValue === numberLabel ? '' : previousValue;
+                  if (nextName === previousName) return;
+                  return onRenameRun(run.id, nextName, previousName);
+                }}
                 renameLabel={`rename ${numberLabel}`}
                 showRenameButton={false}
                 textClassName="analysis-task-name-text"
@@ -417,9 +438,33 @@ export function AnalysisTasksPanel({
           <div className="analysis-task-meta">
             {busy ? <span className="analysis-task-busy live-pill" title="being changed in another browser">busy</span> : null}
             {hasExported ? <span className="analysis-task-export-badge">exported</span> : null}
-            <span className={`analysis-task-progress ${isError ? 'error' : isDone ? 'success' : ''}`}>
-              {progressLabel}
-            </span>
+            {reviewSummary ? (
+              <span
+                aria-label={reviewSummary.tooltip}
+                className={`analysis-task-review ${reviewSummary.reviewed === reviewSummary.total ? 'complete' : ''}`}
+                title={reviewSummary.tooltip}
+              >
+                <span className="analysis-task-review-count">{reviewSummary.label}</span>
+                <span aria-hidden="true" className="analysis-task-review-bar">
+                  {reviewSummary.accepted > 0 ? (
+                    <span
+                      className="analysis-task-review-seg accepted"
+                      style={{ width: `${reviewSummary.acceptedPct}%` }}
+                    />
+                  ) : null}
+                  {reviewSummary.rejected > 0 ? (
+                    <span
+                      className="analysis-task-review-seg rejected"
+                      style={{ width: `${reviewSummary.rejectedPct}%` }}
+                    />
+                  ) : null}
+                </span>
+              </span>
+            ) : (
+              <span className={`analysis-task-progress ${isError ? 'error' : isDone ? 'success' : ''}`}>
+                {progressLabel}
+              </span>
+            )}
             {elapsedLabel ? <span className="analysis-task-elapsed">{elapsedLabel}</span> : null}
             {run.is_abortable ? (
               <button className="analysis-task-link danger" disabled={busy} onClick={() => onAbortRun(run.id)} type="button">
@@ -485,7 +530,7 @@ export function AnalysisTasksPanel({
   }
 
   function renderTaskGroup(group: AnalysisTaskGroup) {
-    const isCollapsed = collapsedRecordingIds.has(group.recording.id) || foldedForSelection(group.recording.id);
+    const isCollapsed = isTaskGroupCollapsed(groupFoldState, group.recording.id);
     const runCountLabel = `${group.runs.length} ${group.runs.length === 1 ? 'run' : 'runs'}`;
     const liveCount = group.runs.filter((item) => liveRunStatuses.includes(item.run.status)).length;
     const queuedCount = group.runs.filter((item) => item.run.status === 'queued').length;

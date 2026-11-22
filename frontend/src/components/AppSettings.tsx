@@ -36,7 +36,8 @@ export function AppSettings({
   useEffect(() => {
     if (!open) return;
     function handlePointerDown(event: MouseEvent) {
-      if (shellRef.current?.contains(event.target as Node)) return;
+      const target = event.target as Element | null;
+      if (shellRef.current?.contains(target) || target?.closest('[data-corner-panel-trigger="settings"]')) return;
       onClose();
     }
     window.addEventListener('pointerdown', handlePointerDown);

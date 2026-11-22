@@ -360,6 +360,7 @@ class DetectionRunSummary(BaseModel):
     message: str | None = None
     candidate_count: int = 0
     accepted_count: int = 0
+    rejected_count: int = 0
     created_at: str
     started_at: str | None = None
     completed_at: str | None = None

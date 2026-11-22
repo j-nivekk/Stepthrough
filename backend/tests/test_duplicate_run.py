@@ -188,3 +188,37 @@ def test_duplicate_keeps_the_analysis_times_and_every_step_column(client: TestCl
     with connect() as conn:
         copied = conn.execute("SELECT later_field FROM candidate_frames WHERE run_id = ?", (copy["id"],)).fetchone()
     assert copied["later_field"] == "kept"
+
+
+def test_run_summary_reports_accepted_and_rejected_counts(client: TestClient, video_factory) -> None:
+    _project, recording = _seed_recording(client, video_factory)
+    run = client.post(f"/recordings/{recording['id']}/runs/manual").json()
+    s1 = client.post(f"/runs/{run['id']}/candidates/manual", json={"timestamp_ms": 300}).json()
+    s2 = client.post(f"/runs/{run['id']}/candidates/manual", json={"timestamp_ms": 800}).json()
+    s3 = client.post(f"/runs/{run['id']}/candidates/manual", json={"timestamp_ms": 1400}).json()
+
+    client.patch(f"/candidates/{s1['id']}", json={"status": "accepted"})
+    client.patch(f"/candidates/{s2['id']}", json={"status": "rejected"})
+    client.patch(f"/candidates/{s3['id']}", json={"status": "pending"})
+
+    detail = client.get(f"/runs/{run['id']}").json()
+    assert detail["summary"]["candidate_count"] == 3
+    assert detail["summary"]["accepted_count"] == 1
+    assert detail["summary"]["rejected_count"] == 1
+
+    rec = client.get(f"/recordings/{recording['id']}").json()
+    summary = next(item for item in rec["runs"] if item["id"] == run["id"])
+    assert summary["candidate_count"] == 3
+    assert summary["accepted_count"] == 1
+    assert summary["rejected_count"] == 1
+
+    dup = client.post(f"/runs/{run['id']}/duplicate").json()
+    assert dup["candidate_count"] == 3
+    assert dup["accepted_count"] == 1
+    assert dup["rejected_count"] == 1
+
+    # Resetting a rejected step back to pending lowers rejected_count.
+    client.patch(f"/candidates/{s2['id']}", json={"status": "pending"})
+    after_reset = client.get(f"/runs/{run['id']}").json()["summary"]
+    assert after_reset["accepted_count"] == 1
+    assert after_reset["rejected_count"] == 0

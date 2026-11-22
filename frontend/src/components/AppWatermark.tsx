@@ -66,7 +66,8 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
           aria-expanded={panel === 'account'}
           aria-label={`account: ${accountLabel}`}
           className={`app-watermark-about app-watermark-account ${panel === 'account' ? 'active' : ''}`}
-          onClick={() => setPanel('account')}
+          data-corner-panel-trigger="account"
+          onClick={() => setPanel(panel === 'account' ? null : 'account')}
           type="button"
         >
           {accountLabel}
@@ -76,7 +77,8 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
         <button
           aria-expanded={panel === 'settings'}
           className={`app-watermark-about ${panel === 'settings' ? 'active' : ''}`}
-          onClick={() => setPanel('settings')}
+          data-corner-panel-trigger="settings"
+          onClick={() => setPanel(panel === 'settings' ? null : 'settings')}
           type="button"
         >
           settings

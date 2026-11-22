@@ -157,6 +157,7 @@ export interface RunSummary {
   message?: string | null;
   candidate_count: number;
   accepted_count: number;
+  rejected_count?: number;
   created_at: string;
   started_at?: string | null;
   completed_at?: string | null;

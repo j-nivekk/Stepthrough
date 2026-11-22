@@ -135,6 +135,9 @@ function App({ session, onSessionChange }: AppProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [pendingAnalysisProjectId, setPendingAnalysisProjectId] = useState<string | null>(null);
   const [selectedRecordingId, setSelectedRecordingId] = useState<string | null>(null);
+  // Which video the tasks list focuses on (showing its runs and folding the others): bumped when a video is
+  // chosen in the videos list or when entering analysis, NOT when a run is clicked directly in the tasks list.
+  const [videoListFocus, setVideoListFocus] = useState<{ recordingId: string; nonce: number } | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [pendingTaskNavigation, setPendingTaskNavigation] = useState<PendingTaskNavigation | null>(null);
   const [runSettings, setRunSettingsState] = useState<RunSettings>(defaultRunSettings);
@@ -305,6 +308,7 @@ function App({ session, onSessionChange }: AppProps) {
     }
     setSelectedProjectId(null);
     setSelectedRecordingId(null);
+    setVideoListFocus(null);
     setSelectedRunId(null);
     setPendingTaskNavigation(null);
     setAppError('This project is no longer available.');
@@ -379,6 +383,7 @@ function App({ session, onSessionChange }: AppProps) {
     const recordings = projectDetailQuery.data?.recordings ?? [];
     if (recordings.length > 0) {
       setSelectedRecordingId(recordings[0].id);
+      focusVideoInTasks(recordings[0].id);
       setSelectedRunId(null);
       setPendingAnalysisProjectId(null);
       return;
@@ -409,6 +414,7 @@ function App({ session, onSessionChange }: AppProps) {
     const stillSelected = recordings.some((recording) => recording.id === selectedRecordingId);
     if (!stillSelected) {
       setSelectedRecordingId(null);
+      setVideoListFocus(null);
       setSelectedRunId(null);
     }
   }, [projectDetailQuery.data, selectedRecordingId]);
@@ -810,6 +816,7 @@ function App({ session, onSessionChange }: AppProps) {
         setSelectedProjectId(null);
         setPendingAnalysisProjectId(null);
         setSelectedRecordingId(null);
+        setVideoListFocus(null);
         setSelectedRunId(null);
         setPreviewRecordingId(null);
       }
@@ -859,6 +866,7 @@ function App({ session, onSessionChange }: AppProps) {
       // The first video of a project becomes the selection; later ones do not take it from what is being worked on.
       if (recording.project_id === selectedProjectIdRef.current && !selectedRecordingIdRef.current) {
         setSelectedRecordingId(recording.id);
+        focusVideoInTasks(recording.id);
         setSelectedRunId(null);
       }
       queryClient.invalidateQueries({ queryKey: ['projects'] });
@@ -979,6 +987,7 @@ function App({ session, onSessionChange }: AppProps) {
       );
       if (selectedRecordingId === variables.recordingId) {
         setSelectedRecordingId(null);
+        setVideoListFocus(null);
         setSelectedRunId(null);
         setPendingTaskNavigation(null);
       }
@@ -1014,6 +1023,7 @@ function App({ session, onSessionChange }: AppProps) {
     onSuccess: () => {
       setSelectedProjectId(null);
       setSelectedRecordingId(null);
+      setVideoListFocus(null);
       setSelectedRunId(null);
       setWorkflowStage('projects');
       queryClient.clear();
@@ -1106,6 +1116,14 @@ function App({ session, onSessionChange }: AppProps) {
     throw new Error('Timed out while waiting for the task to stop.');
   }
 
+  function focusVideoInTasks(recordingId: string | null) {
+    if (!recordingId) {
+      setVideoListFocus(null);
+      return;
+    }
+    setVideoListFocus((current) => ({ recordingId, nonce: (current?.nonce ?? 0) + 1 }));
+  }
+
   function clearAnalysisMessages() {
     setAppError('');
     setAnalysisActionMessage('');
@@ -1115,6 +1133,7 @@ function App({ session, onSessionChange }: AppProps) {
     setSelectedProjectId(projectId);
     setPendingAnalysisProjectId(targetStage === 'analysis' ? projectId : null);
     setSelectedRecordingId(null);
+    setVideoListFocus(null);
     setSelectedRunId(null);
     setPendingTaskNavigation(null);
     setPreviewRecordingId(null);
@@ -1186,6 +1205,7 @@ function App({ session, onSessionChange }: AppProps) {
   function setAnalysisSelection(recordingId: string, jumpToRunDetail: boolean) {
     const latestRun = latestRunByRecordingId.get(recordingId) ?? null;
     setSelectedRecordingId(recordingId);
+    focusVideoInTasks(recordingId);
     setSelectedRunId(latestRun?.id ?? null);
     setPendingTaskNavigation(null);
     if (latestRun && jumpToRunDetail) {
@@ -1553,6 +1573,7 @@ function App({ session, onSessionChange }: AppProps) {
     // Failed rows go; uploads still on their way carry on and join the videos column when they are in.
     setImportQueue((current) => current.filter((item) => item.status !== 'error' || item.projectId !== selectedProjectId));
     setSelectedRecordingId(nextRecordingId);
+    focusVideoInTasks(nextRecordingId);
     setSelectedRunId(null);
     setPendingTaskNavigation(null);
     setWorkflowStage('analysis');
@@ -1979,6 +2000,7 @@ function App({ session, onSessionChange }: AppProps) {
         runSettings={runSettings}
         selectedRecording={selectedRecording}
         selectedRecordingId={selectedRecordingId}
+        videoListFocus={videoListFocus}
         selectedRunId={selectedRunId}
         selectedRecordingSummary={selectedRecordingSummary}
         selectedRun={selectedRun}
