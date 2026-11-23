@@ -249,3 +249,263 @@ test('a phase that goes on in another row is open where it breaks, and says cont
   assert.equal([...page.svg.matchAll(/data-phase="0"/g)].length, 2);
   assert.ok(page.svg.includes('tabindex="0" role="button" aria-label="Screen 1"'));
 });
+
+function buildComplexPathway(): Pathway {
+  const [base] = pathway.steps as [PathwayStep];
+  const [first] = pathway.screens as [PathwayScreen];
+  const screens: PathwayScreen[] = [];
+  const steps: PathwayStep[] = [];
+  let nextStep = 1;
+  const addScreen = (index: number, reachedFrom: string | null, rowChoice: PathwayScreen['row_choice'] = 'automatic') => {
+    const id = `screen-${String(index).padStart(2, '0')}`;
+    const stepId = `step-${String(nextStep).padStart(3, '0')}`;
+    steps.push({
+      ...base,
+      step_id: stepId,
+      step_index: nextStep,
+      screen_id: id,
+      timestamp_ms: nextStep * 1000,
+      title: `Screen ${index}`,
+      notes: '',
+      source_candidate_id: `c${nextStep}`,
+    });
+    screens.push({
+      ...first,
+      id,
+      index,
+      title: `Screen ${index}`,
+      title_step_id: null,
+      reached_from: reachedFrom,
+      image_step_id: stepId,
+      row_choice: rowChoice,
+      visits: [{ visit: 1, step_ids: [stepId], arrived_ms: nextStep * 1000, time_on_screen_ms: 1000 }],
+    });
+    nextStep += 1;
+    return id;
+  };
+
+  // Row 0: S1 -> S2 -> S3 -> S4 -> S5
+  const s1 = addScreen(1, null);
+  const s2 = addScreen(2, s1);
+  const s3 = addScreen(3, s2);
+  const s4 = addScreen(4, s3);
+  const s5 = addScreen(5, s4);
+  // Row 1 (branch 1 from S2): S6 -> S7
+  const s6 = addScreen(6, s2, 'below');
+  const s7 = addScreen(7, s6);
+  // Row 2 (branch 2 from S2): S8 -> S9
+  const s8 = addScreen(8, s2, 'below');
+  const s9 = addScreen(9, s8);
+  // Row 3 (branch 3 from S2): S10 -> S11
+  const s10 = addScreen(10, s2, 'below');
+  const s11 = addScreen(11, s10);
+
+  let passStep = 20;
+  const transition = (from: string, to: string, kind: 'forward' | 'return' = 'forward') => ({
+    from_screen: from,
+    to_screen: to,
+    kind,
+    passes: [{ step_id: `step-${passStep}`, step_index: passStep++, timestamp_ms: passStep * 1000, transition_type: 'tap' }],
+  });
+
+  return {
+    ...pathway,
+    step_count: steps.length,
+    screen_count: screens.length,
+    steps,
+    screens,
+    transitions: [
+      transition(s1, s2),
+      transition(s2, s3),
+      transition(s3, s4),
+      transition(s4, s5),
+      // Long same-row forward detour (4 columns wide)
+      transition(s1, s5, 'forward'),
+      // Three distinct branches from S2
+      transition(s2, s6),
+      transition(s6, s7),
+      transition(s2, s8),
+      transition(s8, s9),
+      transition(s2, s10),
+      transition(s10, s11),
+      // Adjacent-row return (row 1 -> row 0)
+      transition(s7, s3, 'return'),
+      // Distant multi-row return (row 3 -> row 0, 3 rows apart -> paired portal chips)
+      transition(s11, s1, 'return'),
+    ],
+  };
+}
+
+function moveGroup(svg: string, id: string): string {
+  const start = svg.indexOf(`<g id="${id}"`);
+  if (start < 0) return '';
+  let depth = 0;
+  let pos = start;
+  const tag = /<\/?g(?:\s|>)/g;
+  tag.lastIndex = start;
+  let match: RegExpExecArray | null;
+  while ((match = tag.exec(svg))) {
+    if (match[0].startsWith('</')) {
+      depth -= 1;
+      if (depth === 0) return svg.slice(start, match.index + 4);
+    } else {
+      depth += 1;
+    }
+    pos = tag.lastIndex;
+  }
+  return svg.slice(start, pos);
+}
+
+test('complex multi-row pathways separate branches, detours and returns with halos, distinct gutters, and paired jump chips', () => {
+  const complex = buildComplexPathway();
+  const page = buildPathwayFigure({ ...input, pathway: complex, options: { notes: 'hidden', caption: true, times: false }, aspect: 390 / 844, peek: true });
+  const file = buildPathwayFigure({ ...input, pathway: complex, options: { notes: 'hidden', caption: true, times: false }, aspect: 390 / 844, peek: false });
+
+  // Encodings metadata reflects all active visual encodings.
+  assert.deepEqual(page.encodings, { hasBranch: true, hasReturn: true, hasPortal: true, hasPopup: false });
+
+  // Semantic colours and white crossing halos exist in both page and export SVGs.
+  assert.ok(file.svg.includes('stroke="#a44d10"'), 'branch / detour colour missing');
+  assert.ok(file.svg.includes('stroke="#2c5f8a"'), 'return colour missing');
+  assert.ok(file.svg.includes('class="pathway-move-halo"'), 'white crossing halo missing');
+
+  // The three branch elbows leaving screen-02 must use distinct vertical gutter X coordinates so stems never stack.
+  const elbowXs = [6, 8, 10].map((idx) => {
+    const id = `move-screen-02-screen-${String(idx).padStart(2, '0')}`;
+    const group = moveGroup(file.svg, id);
+    // First horizontal segment ends at the elbow's vertical gutter X: M<x0> <y0> L<gx-r> <y0> Q<gx> <y0>
+    const gutter = group.match(/Q([\d.]+) [\d.]+ [\d.]+ [\d.]+/);
+    assert.ok(gutter, `expected elbow curve for ${id}`);
+    return Number(gutter[1]);
+  });
+  assert.equal(new Set(elbowXs).size, 3, `expected 3 distinct gutter X positions, got ${elbowXs.join(', ')}`);
+
+  // Distant 3-row return (screen-11 -> screen-01) uses paired jump chips (→ S1 and S11 →) with click-to-jump on page only.
+  const portalPage = moveGroup(page.svg, 'move-screen-11-screen-01-ret');
+  assert.ok(portalPage.includes('→ S1'), 'missing departure jump chip → S1');
+  assert.ok(portalPage.includes('S11 →'), 'missing arrival jump chip S11 →');
+  assert.ok(portalPage.includes('data-jump-to="screen-01"'), 'missing clickable departure jump target');
+  assert.ok(portalPage.includes('data-jump-to="screen-11"'), 'missing clickable arrival jump target');
+
+  // Exported file omits all interactive attributes and keeps identical geometry.
+  for (const interactiveMark of ['data-move', 'data-jump-to', 'pathway-move-hit', 'pathway-jump-chip']) {
+    assert.ok(!file.svg.includes(interactiveMark), `export SVG should not contain ${interactiveMark}`);
+  }
+  assert.equal(page.width, file.width);
+  assert.equal(page.height, file.height);
+
+  // Legend stays inside bounds and explains branches, returns, and jump tags.
+  const legendTexts = texts(file.svg, 'legend');
+  assert.ok(legendTexts.some((t) => t.content.includes('branch or detour')), 'legend missing branch/detour entry');
+  assert.ok(legendTexts.some((t) => t.content.includes('return')), 'legend missing return entry');
+  assert.ok(legendTexts.some((t) => t.content.includes('jump across rows')), 'legend missing jump entry');
+  for (const line of legendTexts) {
+    const right = line.x + measure(line.content, line.size) * (line.centered ? 0.5 : 1);
+    assert.ok(right <= file.width - 48 + 0.1, `legend overflows: ${line.content}`);
+  }
+});
+
+test('wrapped multi-row pathways label both ends on 1-row wraps and stay inside bounds on multi-row wraps', () => {
+  const [base] = pathway.steps as [PathwayStep];
+  const [first] = pathway.screens as [PathwayScreen];
+  const screens: PathwayScreen[] = [];
+  const steps: PathwayStep[] = [];
+  const transitions: Pathway['transitions'] = [];
+  // Desktop 16:9 fits 3 screens per row:
+  // Row 0: S1 -> S2 -> S3; Row 1: branch S5 below S2; Row 2: S4 (2-row wrap from S3) -> S6 -> S7; Row 3: S8 (1-row wrap from S7) -> S9.
+  const add = (index: number, reachedFrom: string | null, rowChoice: PathwayScreen['row_choice'] = 'automatic') => {
+    const id = `screen-${String(index).padStart(2, '0')}`;
+    const stepId = `step-${String(index).padStart(3, '0')}`;
+    steps.push({
+      ...base,
+      step_id: stepId,
+      step_index: index,
+      screen_id: id,
+      timestamp_ms: index * 1000,
+      title: `Screen ${index}`,
+      notes: '',
+      source_candidate_id: `c${index}`,
+    });
+    screens.push({
+      ...first,
+      id,
+      index,
+      title: `Screen ${index}`,
+      title_step_id: null,
+      reached_from: reachedFrom,
+      image_step_id: stepId,
+      row_choice: rowChoice,
+      visits: [{ visit: 1, step_ids: [stepId], arrived_ms: index * 1000, time_on_screen_ms: 1000 }],
+    });
+    if (reachedFrom) {
+      transitions.push({
+        from_screen: reachedFrom,
+        to_screen: id,
+        kind: 'forward',
+        passes: [{ step_id: stepId, step_index: index, timestamp_ms: index * 1000, transition_type: 'tap' }],
+      });
+    }
+    return id;
+  };
+  const s1 = add(1, null);
+  const s2 = add(2, s1);
+  const s3 = add(3, s2);
+  const s4 = add(4, s3);
+  add(5, s2, 'below');
+  const s6 = add(6, s4);
+  const s7 = add(7, s6);
+  const s8 = add(8, s7);
+  add(9, s8);
+
+  const wrapped: Pathway = { ...pathway, step_count: steps.length, screen_count: screens.length, steps, screens, transitions };
+  const figure = buildPathwayFigure({ ...input, pathway: wrapped, aspect: 16 / 9, options: { notes: 'hidden', caption: true, times: false }, peek: true });
+
+  // S3 -> S4 wraps across 2 rows (row 0 -> row 2) so it uses paired wrap-portal chips.
+  const multiWrap = moveGroup(figure.svg, 'move-screen-03-screen-04');
+  assert.ok(multiWrap.includes('→ S4'), 'multi-row wrap missing departure chip → S4');
+  assert.ok(multiWrap.includes('S3 →'), 'multi-row wrap missing arrival chip S3 →');
+
+  // S7 -> S8 wraps 1 row (row 2 -> row 3) so it draws a continuous wrap wire with both endpoint chips.
+  const singleWrap = moveGroup(figure.svg, 'move-screen-07-screen-08');
+  assert.ok(singleWrap.includes('→ S8'), '1-row wrap missing departure label → S8');
+  assert.ok(singleWrap.includes('S7 →'), '1-row wrap missing arrival label S7 →');
+  assert.ok(singleWrap.includes('class="pathway-move-halo"'), '1-row wrap missing halo');
+
+  // Every text in #moves stays inside [0, figure.width].
+  const movesMarkup = moveGroup(figure.svg, 'moves');
+  for (const line of texts(movesMarkup, 'moves')) {
+    const left = line.x - (line.centered ? measure(line.content, line.size) / 2 : 0);
+    const right = line.x + measure(line.content, line.size) * (line.centered ? 0.5 : 1);
+    assert.ok(left >= -1, `move label clips left edge (${left}): ${line.content}`);
+    assert.ok(right <= figure.width + 1, `move label clips right edge (${right} > ${figure.width}): ${line.content}`);
+  }
+});
+
+test('renamed screens display a compact S# badge with their title while untitled screens do not duplicate it', () => {
+  const renamed = threeScreens();
+  renamed.screens[1] = { ...renamed.screens[1], title: 'Gemini reply', title_step_id: 'step-002' };
+  renamed.screens[2] = { ...renamed.screens[2], title: 'Authentication flow', title_step_id: 'step-003' };
+  const figure = buildPathwayFigure({ ...input, pathway: renamed, options: { notes: 'hidden', caption: false, times: false }, aspect: 390 / 844 });
+
+  const s1 = moveGroup(figure.svg, 'screen-01');
+  const s2 = moveGroup(figure.svg, 'screen-02');
+  const s3 = moveGroup(figure.svg, 'screen-03');
+
+  // Untitled Screen 1 already says "Screen 1" and does not add a redundant S1 pill.
+  assert.ok(!s1.includes('>S1</text>'), 'untitled screen should not duplicate S1 badge');
+  assert.ok(s1.includes('>Screen 1</text>'));
+
+  // Renamed screens carry compact S2 / S3 badges alongside their custom titles, staying within card bounds.
+  assert.ok(s2.includes('>S2</text>'), 'renamed screen-02 missing S2 badge');
+  assert.ok(s2.includes('>Gemini reply</text>'), 'renamed screen-02 missing custom title');
+  assert.ok(s3.includes('>S3</text>'), 'renamed screen-03 missing S3 badge');
+  assert.ok(s3.includes('>Authentication</text>') || s3.includes('>Authentication flow</text>'));
+
+  // First line of screen-02 title starts to the right of the S2 badge and stays inside the card width.
+  const cardWidth = Number(s2.match(/<rect width="([\d.]+)"/)?.[1]);
+  const s2Texts = texts(`<g id="card">${s2}</g>`, 'card');
+  const titleLine = s2Texts.find((line) => line.size === 12);
+  assert.ok(titleLine, 'screen-02 title text missing');
+  assert.ok(titleLine.x >= 25, `expected title line indented after S2 badge, got x=${titleLine.x}`);
+  assert.ok(titleLine.x + measure(titleLine.content, 12) <= cardWidth + 0.1, 'title line overflows card width');
+});

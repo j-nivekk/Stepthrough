@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 
-import type { PhaseBoundary, PhaseSteps } from '../../api';
+import { absoluteApiUrl, type PhaseBoundary, type PhaseSteps } from '../../api';
 import { isPopupStep, popupChange } from '../../components/ScreenChoice';
-import { formatPathwayTime } from '../../lib/pathwayFigure';
+import { formatPathwayTime, type PathwayFigure } from '../../lib/pathwayFigure';
 import { record, undoChanges, type HistoryEntry } from '../../lib/pathwayHistory';
 import { unstackAllChanges, unstackByVisitChanges, unstackStepsChanges } from '../../lib/pathwayUnstack';
 import type { CandidateChanges, CandidateFrame, Pathway, PathwayPhase, PathwayRowChoice, PathwayScreen, PathwayStep } from '../../types';
@@ -47,6 +47,10 @@ interface PathwayCanvasProps {
   onSetPhase: (phase: PhaseSteps & { name: string; replacing?: PhaseSteps | null }) => Promise<PhaseBoundary[]>;
   /** Put every phase back, as long as they are still `expected`; rejects when someone else changed them since. */
   onRestorePhases: (phases: PhaseBoundary[], expected: PhaseBoundary[]) => Promise<void>;
+  /** Controls rendered at the top of the sticky bar so zoom, view and download stay reachable on tall charts. */
+  stickyHeader?: ReactNode;
+  /** Which route encodings appear in this chart, shown as a compact inline key in the sticky status strip. */
+  encodings?: PathwayFigure['encodings'];
   onPointerOver: (event: PointerEvent<HTMLDivElement>) => void;
   onPointerLeave: () => void;
 }
@@ -71,14 +75,41 @@ interface Drag {
   target: { kind: 'box'; screen: PathwayScreen } | { kind: 'empty' } | null;
 }
 
+type MenuKind = 'context' | 'overflow' | 'stacking' | 'put';
+
+interface MenuState {
+  x: number;
+  y: number;
+  flipY?: number;
+  kind: MenuKind;
+}
+
+interface MenuBounds {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
 interface MenuItem {
   label: string;
   hint?: string;
+  /** Optional small screenshot thumbnail shown to the left of screen or step titles. */
+  thumb?: string;
   run?: () => void;
   items?: MenuItem[];
   danger?: boolean;
   /** Draws a thin rule above this item to separate groups in a menu or submenu. */
   divider?: boolean;
+}
+
+interface HoveredMove {
+  id: string;
+  from: string;
+  to: string;
+  role: string;
+  steps: string;
+  hasJump: boolean;
 }
 
 const DRAG_START = 5;
@@ -101,9 +132,9 @@ function typing(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
 }
 
-/** A key pressed on a box, a button or a panel of the figure's tools is theirs: Enter there presses it. */
+/** A key pressed on a box, a jump chip, a button or a panel of the figure's tools is theirs: Enter there presses it. */
 function onControl(target: EventTarget | null): boolean {
-  return target instanceof Element && Boolean(target.closest('[data-screen], button, a, select, .pathway-toolbox, .pathway-menu, .pathway-phases'));
+  return target instanceof Element && Boolean(target.closest('[data-screen], [data-jump-to], button, a, select, .pathway-toolbox, .pathway-menu, .pathway-phases'));
 }
 
 /** How much of a title the status line, the menus and the labels show; the box itself shows all of it. */
@@ -137,6 +168,8 @@ export function PathwayCanvas({
   phaseBoundaries,
   onSetPhase,
   onRestorePhases,
+  stickyHeader,
+  encodings,
   onPointerOver,
   onPointerLeave,
 }: PathwayCanvasProps) {
@@ -144,16 +177,34 @@ export function PathwayCanvas({
   const figureRef = useRef<HTMLDivElement | null>(null);
   const toolboxRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+  const focusTitleRef = useRef(false);
   const [selection, setSelection] = useState<Selection>(null);
-  const [menu, setMenu] = useState<{ x: number; y: number; kind: 'context' | 'unstack' } | null>(null);
+  const [menu, setMenu] = useState<MenuState | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+  const [panning, setPanning] = useState(false);
+  const panRef = useRef<{ startX: number; startY: number; scrollLeft: number; scrollTop: number; winY: number } | null>(null);
+  const [hoveredMove, setHoveredMove] = useState<HoveredMove | null>(null);
+  const [jumpPulse, setJumpPulse] = useState<{ screenId: string; key: number } | null>(null);
   const [history, setHistory] = useState<Undoable[]>([]);
   /** Where the pointer last chose something, for placing the phases panel near it. */
   const lastPoint = useRef<{ x: number; y: number }>({ x: 24, y: 120 });
   const [message, setMessage] = useState<{ text: string; key: number } | null>(null);
-  const [rects, setRects] = useState<{ selected: Rect[]; target: Rect | null; source: Rect | null }>({ selected: [], target: null, source: null });
-  const [toolboxShift, setToolboxShift] = useState(0);
-  const down = useRef<{ x: number; y: number; screen: PathwayScreen | null; stepIds: string[] | null; phase: number | null; shift: boolean } | null>(null);
+  const [rects, setRects] = useState<{ selected: Rect[]; target: Rect | null; source: Rect | null; pulse: Rect | null }>({
+    selected: [],
+    target: null,
+    source: null,
+    pulse: null,
+  });
+  const [toolboxLayout, setToolboxLayout] = useState<{ shift: number; maxWidth: number | null }>({ shift: 0, maxWidth: null });
+  const down = useRef<{
+    x: number;
+    y: number;
+    screen: PathwayScreen | null;
+    stepIds: string[] | null;
+    phase: number | null;
+    jumpTo: PathwayScreen | null;
+    shift: boolean;
+  } | null>(null);
 
   // ── what is where ──
   const stepById = useMemo(() => new Map(pathway.steps.map((step) => [step.step_id, step])), [pathway]);
@@ -198,8 +249,20 @@ export function PathwayCanvas({
   useEffect(() => {
     setHistory([]);
     setSelection(null);
+    setHoveredMove(null);
+    setJumpPulse(null);
     setMessage(null);
   }, [runId]);
+
+  useEffect(() => {
+    setHoveredMove(null);
+  }, [markup]);
+
+  useEffect(() => {
+    if (!jumpPulse) return;
+    const timer = window.setTimeout(() => setJumpPulse((current) => (current?.key === jumpPulse.key ? null : current)), 950);
+    return () => window.clearTimeout(timer);
+  }, [jumpPulse]);
 
   function say(text: string) {
     setMessage({ text, key: Date.now() });
@@ -311,7 +374,7 @@ export function PathwayCanvas({
       }
     }
     const label =
-      target === 'own' ? `gave ${numbersOf(steps)} a screen of its own` : target === 'auto' ? `put ${numbersOf(steps)} back where it was found` : `put ${numbersOf(steps)} on ${name(target)}`;
+      target === 'own' ? `gave ${numbersOf(steps)} a screen of its own` : target === 'auto' ? `stacked ${numbersOf(steps)} automatically` : `put ${numbersOf(steps)} on ${name(target)}`;
     const link = target === 'own' ? 'new' : target === 'auto' ? 'auto' : firstOf(target);
     void act(label, [[first.source_candidate_id, { screen_link: link }]]);
   };
@@ -375,80 +438,182 @@ export function PathwayCanvas({
     openPhases({ from: Math.min(...numbers), to: Math.max(...numbers) });
   };
 
-  /** The ways to take a box's steps apart. The toolbox's menu also has stack automatically and edit steps; the
-   *  right-click menu has those beside its unstack. */
-  function unstackMenuItems(box: PathwayScreen, inToolbox = false): MenuItem[] {
+  /** Every stacking & unstacking action for a single box in one unified menu. On a plain 1-step box with no
+   *  overrides, lists the destination screens directly; otherwise groups stack onto, unstack, stack automatically,
+   *  and edit steps cleanly under dividers. */
+  function stackingMenuItems(box: PathwayScreen, otherBoxes: Array<{ label: string; thumb?: string; screen: PathwayScreen }>): MenuItem[] {
     const steps = stepsOf(box);
+    const hasOverrides = chosenScreens(box).length > 0;
+    const isStacked = steps.length > 1;
+    if (!isStacked && !hasOverrides) {
+      return otherBoxes.map(({ label, thumb, screen }) => ({ label, thumb, run: () => stackBox(box, screen) }));
+    }
     const list: MenuItem[] = [];
-    if (steps.length > 1) {
-      list.push({ label: `unstack all (${steps.length} steps)`, run: () => unstackAll(box) });
+    if (otherBoxes.length) {
+      list.push({
+        label: 'stack onto',
+        items: otherBoxes.map(({ label, thumb, screen }) => ({ label, thumb, run: () => stackBox(box, screen) })),
+      });
+    }
+    if (isStacked) {
+      const startDivider = list.length > 0;
+      list.push({ label: `unstack all (${steps.length} steps)`, divider: startDivider, run: () => unstackAll(box) });
       if (box.visits.length > 1 && steps.length > box.visits.length) {
         list.push({ label: `by visit (${box.visits.length} visits)`, run: () => unstackByVisit(box) });
       }
       steps.forEach((step, index) => {
-        list.push({ label: stepMenuLabel(step), divider: index === 0, run: () => unstackOneStep(box, step) });
+        list.push({
+          label: stepMenuLabel(step),
+          thumb: step.image_url ? absoluteApiUrl(step.image_url) : undefined,
+          divider: index === 0,
+          run: () => unstackOneStep(box, step),
+        });
       });
     }
-    if (inToolbox) {
-      const rest: MenuItem[] = [];
-      if (chosenScreens(box).length) rest.push({ label: 'stack automatically', run: () => stackAutomatically(box) });
-      if (steps.length > 1) rest.push({ label: 'edit steps…', run: () => editStepsOf(box) });
-      rest.forEach((item, index) => list.push({ ...item, divider: index === 0 && list.length > 0 }));
-    }
+    const tail: MenuItem[] = [];
+    if (hasOverrides) tail.push({ label: 'stack automatically', run: () => stackAutomatically(box) });
+    if (isStacked) tail.push({ label: 'edit steps…', run: () => editStepsOf(box) });
+    tail.forEach((item, index) => list.push({ ...item, divider: index === 0 && list.length > 0 }));
     return list;
   }
 
-  // ── the actions for what is selected: the toolbox shows the usual ones, the menu all of them ──
+  /** Unstack-only items for the right-click context menu (where stack onto, stack automatically, and edit steps sit
+   *  directly beside unstack). */
+  function unstackSubmenuItems(box: PathwayScreen): MenuItem[] {
+    const steps = stepsOf(box);
+    if (steps.length <= 1) return [];
+    const list: MenuItem[] = [{ label: `unstack all (${steps.length} steps)`, run: () => unstackAll(box) }];
+    if (box.visits.length > 1 && steps.length > box.visits.length) {
+      list.push({ label: `by visit (${box.visits.length} visits)`, run: () => unstackByVisit(box) });
+    }
+    steps.forEach((step, index) => {
+      list.push({
+        label: stepMenuLabel(step),
+        thumb: step.image_url ? absoluteApiUrl(step.image_url) : undefined,
+        divider: index === 0,
+        run: () => unstackOneStep(box, step),
+      });
+    });
+    return list;
+  }
+
+  function rowChoiceItems(box: PathwayScreen, parent: PathwayScreen, withPrefix = false): MenuItem[] {
+    const choice = box.row_choice ?? 'automatic';
+    const prefix = withPrefix ? 'row: ' : '';
+    return [
+      { label: `${prefix}automatic`, hint: choice === 'automatic' ? '✓' : undefined, run: () => chooseRow(box, 'auto') },
+      { label: `${prefix}next to Screen ${parent.index}`, hint: choice === 'continue' ? '✓' : undefined, run: () => chooseRow(box, 'continue') },
+      { label: `${prefix}on a row below`, hint: choice === 'below' ? '✓' : undefined, run: () => chooseRow(box, 'below') },
+    ];
+  }
+
+  /** Secondary actions shown in the toolbox's `⋯` overflow menu — strictly items NOT already on the floating bar. */
+  function overflowMenuItems(): MenuItem[] {
+    if (selectedBoxes.length === 1) {
+      const box = selectedBoxes[0];
+      const parent = pathway.screens.find((screen) => screen.id === box.reached_from);
+      return parent ? rowChoiceItems(box, parent, true) : [];
+    }
+    if (selectedBoxes.length > 1) return [];
+    if (selectedSteps.length) {
+      const own = screenOf(selectedSteps[0].source_candidate_id);
+      const first = candidateById.get(selectedSteps[0].source_candidate_id);
+      const items: MenuItem[] = [];
+      if (own && stepsOf(own).length > 1) {
+        items.push({ label: `unstack all (${stepsOf(own).length} steps)`, run: () => unstackAll(own) });
+      }
+      if (first?.screen_link) {
+        items.push({ label: 'stack automatically', run: () => moveStep(selectedSteps, 'auto') });
+      }
+      const phase = phaseOfStep(selectedSteps[0].step_index);
+      items.push(
+        phase
+          ? { label: `change the phase ${phase.name}…`, divider: items.length > 0, run: () => openPhases({ phase }) }
+          : { label: 'make a phase from here…', divider: items.length > 0, run: () => phaseFor(selectedSteps) },
+      );
+      return items;
+    }
+    return [];
+  }
+
+  // ── the actions for what is selected: toolbox triggers open focused menus; right-click opens the full menu ──
   function menuItems(): MenuItem[] {
-    if (menu?.kind === 'unstack' && selectedBoxes.length === 1) {
-      return unstackMenuItems(selectedBoxes[0], true);
+    const thumbOf = (screen: PathwayScreen): string | undefined => {
+      const url = stepById.get(screen.image_step_id)?.image_url;
+      return url ? absoluteApiUrl(url) : undefined;
+    };
+    const others = (except: PathwayScreen[]) =>
+      pathway.screens
+        .filter((screen) => !except.includes(screen))
+        .map((screen) => ({ label: `${name(screen)} (${numbersOf(stepsOf(screen))})`, thumb: thumbOf(screen), screen }));
+    if (menu?.kind === 'overflow') {
+      return overflowMenuItems();
+    }
+    if (menu?.kind === 'stacking' && selectedBoxes.length === 1) {
+      const box = selectedBoxes[0];
+      return stackingMenuItems(box, others([box]));
+    }
+    if (menu?.kind === 'put' && selectedSteps.length) {
+      const own = screenOf(selectedSteps[0].source_candidate_id);
+      return others(own ? [own] : []).map(({ label, thumb, screen }) => ({ label, thumb, run: () => moveStep(selectedSteps, screen) }));
     }
     const items: MenuItem[] = [];
-    const others = (except: PathwayScreen[]) =>
-      pathway.screens.filter((screen) => !except.includes(screen)).map((screen) => ({ label: `${name(screen)} (${numbersOf(stepsOf(screen))})`, screen }));
     if (selectedBoxes.length === 1) {
       const box = selectedBoxes[0];
       const steps = stepsOf(box);
       const first = candidateById.get(firstOf(box));
       const parent = pathway.screens.find((screen) => screen.id === box.reached_from);
-      items.push({ label: 'rename', hint: 'Enter', run: () => titleRef.current?.focus() });
+      const otherBoxes = others([box]);
+      items.push({
+        label: 'rename',
+        hint: 'Enter',
+        run: () => {
+          if (titleRef.current) {
+            titleRef.current.focus();
+            titleRef.current.select();
+          } else {
+            focusTitleRef.current = true;
+          }
+        },
+      });
       if (first) items.push({ label: isPopupStep(first) ? 'not a pop-up' : 'a pop-up', hint: 'P', run: () => togglePopup(first.id, name(box)) });
-      items.push({ label: 'stack onto', items: others([box]).map(({ label, screen }) => ({ label, run: () => stackBox(box, screen) })) });
-      if (steps.length > 1) items.push({ label: 'unstack', items: unstackMenuItems(box) });
+      if (otherBoxes.length) {
+        items.push({ label: 'stack onto', divider: true, items: otherBoxes.map(({ label, thumb, screen }) => ({ label, thumb, run: () => stackBox(box, screen) })) });
+      }
+      if (steps.length > 1) items.push({ label: 'unstack', items: unstackSubmenuItems(box) });
       if (chosenScreens(box).length) items.push({ label: 'stack automatically', run: () => stackAutomatically(box) });
       if (steps.length > 1) items.push({ label: 'edit steps…', run: () => editStepsOf(box) });
       if (parent) {
-        items.push({
-          label: 'row',
-          items: [
-            { label: 'automatic', run: () => chooseRow(box, 'auto') },
-            { label: `next to Screen ${parent.index}`, run: () => chooseRow(box, 'continue') },
-            { label: 'on a row below', run: () => chooseRow(box, 'below') },
-          ],
-        });
+        items.push({ label: 'row', divider: true, items: rowChoiceItems(box, parent) });
       }
       const phase = phaseOfStep(steps[0]?.step_index ?? 0);
-      items.push(phase ? { label: `change the phase ${phase.name}…`, run: () => openPhases({ phase }) } : { label: 'make a phase from here…', run: () => phaseFor(steps) });
+      items.push(
+        phase
+          ? { label: `change the phase ${phase.name}…`, divider: !parent, run: () => openPhases({ phase }) }
+          : { label: 'make a phase from here…', divider: !parent, run: () => phaseFor(steps) },
+      );
     } else if (selectedBoxes.length > 1) {
       items.push({ label: `stack these ${selectedBoxes.length} together`, run: () => stackTogether(selectedBoxes) });
       items.push({ label: 'make a phase of these…', run: () => phaseFor(selectedBoxes.flatMap(stepsOf)) });
     } else if (selectedSteps.length) {
       const own = screenOf(selectedSteps[0].source_candidate_id);
       const first = candidateById.get(selectedSteps[0].source_candidate_id);
-      items.push({ label: 'a screen of its own', run: () => moveStep(selectedSteps, 'own') });
-      items.push({ label: 'put it on', items: others(own ? [own] : []).map(({ label, screen }) => ({ label, run: () => moveStep(selectedSteps, screen) })) });
-      if (own && stepsOf(own).length > 1) {
-        const boxStepCount = stepsOf(own).length;
+      const otherBoxes = others(own ? [own] : []);
+      const boxStepCount = own ? stepsOf(own).length : 0;
+      if (boxStepCount > 1) items.push({ label: 'a screen of its own', run: () => moveStep(selectedSteps, 'own') });
+      if (otherBoxes.length) {
+        items.push({ label: 'put it on', items: otherBoxes.map(({ label, thumb, screen }) => ({ label, thumb, run: () => moveStep(selectedSteps, screen) })) });
+      }
+      if (own && boxStepCount > 1) {
         items.push({ label: `unstack all (${boxStepCount} steps)`, run: () => unstackAll(own) });
       }
-      if (first?.screen_link) items.push({ label: 'back where it was found', run: () => moveStep(selectedSteps, 'auto') });
-      if (first) items.push({ label: isPopupStep(first) ? 'not a pop-up' : 'a pop-up', hint: 'P', run: () => togglePopup(first.id, numbersOf(selectedSteps)) });
+      if (first?.screen_link) items.push({ label: 'stack automatically', run: () => moveStep(selectedSteps, 'auto') });
+      if (first) items.push({ label: isPopupStep(first) ? 'not a pop-up' : 'a pop-up', hint: 'P', divider: true, run: () => togglePopup(first.id, numbersOf(selectedSteps)) });
       const phase = phaseOfStep(selectedSteps[0].step_index);
       items.push(phase ? { label: `change the phase ${phase.name}…`, run: () => openPhases({ phase }) } : { label: 'make a phase from here…', run: () => phaseFor(selectedSteps) });
     } else {
       items.push({ label: 'add a phase…', run: () => phaseFor(pathway.steps.slice(0, 1)) });
     }
-    if (history.length) items.push({ label: `undo: ${history[history.length - 1].label}`, hint: '⌘Z', run: undo });
     return items;
   }
 
@@ -489,8 +654,10 @@ export function PathwayCanvas({
     const target = drag?.target?.kind === 'box' ? rectOf(imageOf(drag.target.screen)) : null;
     const sourceScreen = drag ? screenOf(drag.ids[0]) : undefined;
     const source = drag ? (drag.kind === 'box' && sourceScreen ? rectOf(imageOf(sourceScreen)) : rectOf(numberOf(drag.ids.map((id) => stepByCandidate.get(id)).filter((step): step is PathwayStep => Boolean(step))))) : null;
-    setRects({ selected, target, source });
-  }, [selectedBoxes, selectedSteps, drag, rectOf, imageOf, numberOf, screenOf, stepByCandidate]);
+    const pulseScreen = jumpPulse ? screenById.get(jumpPulse.screenId) : undefined;
+    const pulse = pulseScreen ? rectOf(imageOf(pulseScreen)) : null;
+    setRects({ selected, target, source, pulse });
+  }, [selectedBoxes, selectedSteps, drag, jumpPulse, rectOf, imageOf, numberOf, screenOf, screenById, stepByCandidate]);
   useLayoutEffect(measure, [measure, markup, width]);
   // While boxes glide to a new place (below), what is measured is where they are on the way, not where they land: a
   // phase added above them makes the figure taller, and the outline was left where the box set off. So the outline
@@ -542,34 +709,118 @@ export function PathwayCanvas({
     placesRef.current = next;
   }, [markup, screenById, firstOf]);
 
-  // The toolbox stays inside what can be seen of the figure.
-  useLayoutEffect(() => {
+  // The toolbox always stays completely visible inside the pathway canvas (even when `.pathway-stage` is centered
+  // inside a wider `.pathway-scroll`, scrolled horizontally, or resized). Uses the exact unshifted `toolboxBaseLeft`
+  // from `rects.selected` so rounding never creates a feedback loop.
+  const toolboxBaseLeft =
+    !drag && rects.selected.length && (selectedBoxes.length || selectedSteps.length)
+      ? Math.min(...rects.selected.map((rect) => rect.left))
+      : null;
+
+  const clampToolbox = useCallback(() => {
     const toolbox = toolboxRef.current;
-    const scroller = stageRef.current?.parentElement;
-    if (!toolbox || !scroller) {
-      setToolboxShift(0);
+    const stage = stageRef.current;
+    const scroller = stage?.parentElement;
+    if (!toolbox || !stage || !scroller || toolboxBaseLeft === null) {
+      setToolboxLayout((current) => (current.shift === 0 && current.maxWidth === null ? current : { shift: 0, maxWidth: null }));
       return;
     }
-    const left = toolbox.offsetLeft - toolboxShift;
-    const visibleRight = scroller.scrollLeft + scroller.clientWidth - 8;
-    const visibleLeft = scroller.scrollLeft + 4;
-    const shift = Math.max(visibleLeft - left, Math.min(0, visibleRight - (left + toolbox.offsetWidth)));
-    if (Math.abs(shift - toolboxShift) > 0.5) setToolboxShift(shift);
-  });
+    const stageRect = stage.getBoundingClientRect();
+    const scrollerRect = scroller.getBoundingClientRect();
+    const visLeft = Math.max(scrollerRect.left, 8) + 8;
+    const visRight = Math.min(scrollerRect.right, window.innerWidth - 8) - 8;
+    const maxWidth = Math.max(180, Math.floor(visRight - visLeft));
+    const baseLeftViewport = stageRect.left + toolboxBaseLeft;
+    const boxWidth = Math.min(toolbox.offsetWidth, maxWidth);
+    let shift = 0;
+    if (baseLeftViewport + boxWidth > visRight) shift = visRight - (baseLeftViewport + boxWidth);
+    if (baseLeftViewport + shift < visLeft) shift = visLeft - baseLeftViewport;
+    shift = Math.round(shift);
+    setToolboxLayout((current) => (current.shift === shift && current.maxWidth === maxWidth ? current : { shift, maxWidth }));
+  }, [toolboxBaseLeft]);
+
+  useLayoutEffect(clampToolbox, [clampToolbox, selection, markup, width]);
+
+  useEffect(() => {
+    const scroller = stageRef.current?.parentElement;
+    const toolbox = toolboxRef.current;
+    if (!scroller) return;
+    scroller.addEventListener('scroll', clampToolbox, { passive: true });
+    window.addEventListener('resize', clampToolbox);
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(clampToolbox) : null;
+    observer?.observe(scroller);
+    if (toolbox) observer?.observe(toolbox);
+    return () => {
+      scroller.removeEventListener('scroll', clampToolbox);
+      window.removeEventListener('resize', clampToolbox);
+      observer?.disconnect();
+    };
+  }, [clampToolbox, selection, markup, width]);
+
+  // Spotlight a hovered route (and its endpoints) or the routes connected to the selected box(es).
+  useEffect(() => {
+    const figure = figureRef.current;
+    if (!figure) return;
+    figure.classList.remove('is-spotlighting-move', 'is-spotlighting-box');
+    for (const lit of figure.querySelectorAll('.is-lit')) lit.classList.remove('is-lit');
+    if (drag) return;
+    if (hoveredMove) {
+      figure.classList.add('is-spotlighting-move');
+      figure.querySelector(`#${CSS.escape(hoveredMove.id)}`)?.classList.add('is-lit');
+      figure.querySelector(`[data-screen="${CSS.escape(hoveredMove.from)}"]`)?.classList.add('is-lit');
+      figure.querySelector(`[data-screen="${CSS.escape(hoveredMove.to)}"]`)?.classList.add('is-lit');
+      return;
+    }
+    if (selectedBoxes.length) {
+      const ids = new Set(selectedBoxes.map((screen) => screen.id));
+      let connected = 0;
+      for (const move of figure.querySelectorAll('[data-move]')) {
+        const from = move.getAttribute('data-from') ?? '';
+        const to = move.getAttribute('data-to') ?? '';
+        if (ids.has(from) || ids.has(to)) {
+          move.classList.add('is-lit');
+          connected += 1;
+        }
+      }
+      if (connected > 0) figure.classList.add('is-spotlighting-box');
+    }
+  }, [hoveredMove, selectedBoxes, drag, markup]);
 
   // ── the pointer ──
   function hit(target: EventTarget | null) {
     const element = target instanceof Element ? target : null;
+    const jump = element?.closest('[data-jump-to]');
     const number = element?.closest('[data-peek]');
     const box = element?.closest('[data-screen]');
     const phase = element?.closest('[data-phase]');
     const screen = box ? screenById.get(box.getAttribute('data-screen') ?? '') ?? null : null;
     const stepIds = number ? (number.getAttribute('data-peek') ?? '').split(' ').filter((id) => stepById.has(id)) : null;
-    return { screen, stepIds: stepIds?.length ? stepIds : null, phase: phase ? Number(phase.getAttribute('data-phase')) : null };
+    const jumpTo = jump ? screenById.get(jump.getAttribute('data-jump-to') ?? '') ?? null : null;
+    return {
+      screen,
+      stepIds: stepIds?.length ? stepIds : null,
+      phase: phase ? Number(phase.getAttribute('data-phase')) : null,
+      jumpTo,
+    };
+  }
+
+  function jumpToScreen(target: PathwayScreen) {
+    setHoveredMove(null);
+    setSelection({ kind: 'boxes', ids: [firstOf(target)] });
+    setJumpPulse({ screenId: target.id, key: Date.now() });
+    const element = figureRef.current?.querySelector(`[data-screen="${CSS.escape(target.id)}"]`);
+    if (element) {
+      element.scrollIntoView({ behavior: prefersStill() ? 'auto' : 'smooth', block: 'center', inline: 'center' });
+    }
+    say(`jumped to ${name(target)}`);
   }
 
   function selectAt(at: ReturnType<typeof hit>, shift: boolean) {
     setMessage(null); // a choice made by hand: the line says what is selected again
+    if (at.jumpTo && !at.screen) {
+      jumpToScreen(at.jumpTo);
+      return;
+    }
     if (at.phase !== null && !at.screen) {
       const phase = (pathway.phases ?? [])[at.phase];
       if (phase) openPhases({ phase });
@@ -593,6 +844,31 @@ export function PathwayCanvas({
     setSelection(null);
   }
 
+  function handleFigurePointerOver(event: PointerEvent<HTMLDivElement>) {
+    onPointerOver(event);
+    if (drag) return;
+    const moveEl = event.target instanceof Element ? event.target.closest('[data-move]') : null;
+    if (!moveEl) {
+      if (hoveredMove) setHoveredMove(null);
+      return;
+    }
+    const id = moveEl.getAttribute('id') ?? '';
+    if (!id || hoveredMove?.id === id) return;
+    setHoveredMove({
+      id,
+      from: moveEl.getAttribute('data-from') ?? '',
+      to: moveEl.getAttribute('data-to') ?? '',
+      role: moveEl.getAttribute('data-role') ?? 'main',
+      steps: moveEl.getAttribute('data-steps') ?? '',
+      hasJump: Boolean(moveEl.querySelector('[data-jump-to]')),
+    });
+  }
+
+  function handleFigurePointerLeave() {
+    onPointerLeave();
+    setHoveredMove(null);
+  }
+
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
     lastPoint.current = { x: event.clientX + 8, y: event.clientY + 8 };
@@ -603,6 +879,19 @@ export function PathwayCanvas({
 
   useEffect(() => {
     function move(event: globalThis.PointerEvent) {
+      if (panRef.current) {
+        const pan = panRef.current;
+        const scroller = stageRef.current?.parentElement;
+        if (scroller) {
+          scroller.scrollLeft = pan.scrollLeft - (event.clientX - pan.startX);
+          if (scroller.scrollHeight > scroller.clientHeight + 2) {
+            scroller.scrollTop = pan.scrollTop - (event.clientY - pan.startY);
+          } else {
+            window.scrollTo({ top: Math.max(0, pan.winY - (event.clientY - pan.startY)) });
+          }
+        }
+        return;
+      }
       const start = down.current;
       if (!start) return;
       if (!drag) {
@@ -614,6 +903,22 @@ export function PathwayCanvas({
         } else if (start.screen) {
           setSelection({ kind: 'boxes', ids: [firstOf(start.screen)] });
           setDrag({ kind: 'box', ids: [firstOf(start.screen)], label: name(start.screen), x: event.clientX, y: event.clientY, target: null });
+        } else if (!start.jumpTo && start.phase === null) {
+          // Dragging empty pathway canvas pans the zoomed figure smoothly.
+          const scroller = stageRef.current?.parentElement;
+          if (scroller) {
+            panRef.current = {
+              startX: start.x,
+              startY: start.y,
+              scrollLeft: scroller.scrollLeft,
+              scrollTop: scroller.scrollTop,
+              winY: window.scrollY,
+            };
+            down.current = null;
+            setPanning(true);
+            return;
+          }
+          down.current = null;
         } else {
           down.current = null;
         }
@@ -635,6 +940,11 @@ export function PathwayCanvas({
       }
     }
     function up(event: globalThis.PointerEvent) {
+      if (panRef.current) {
+        panRef.current = null;
+        setPanning(false);
+        return;
+      }
       const start = down.current;
       down.current = null;
       if (drag) {
@@ -649,9 +959,13 @@ export function PathwayCanvas({
         }
         return;
       }
-      if (start && figureRef.current?.contains(event.target as Node)) selectAt({ screen: start.screen, stepIds: start.stepIds, phase: start.phase }, start.shift);
+      if (start && figureRef.current?.contains(event.target as Node)) {
+        selectAt({ screen: start.screen, stepIds: start.stepIds, phase: start.phase, jumpTo: start.jumpTo }, start.shift);
+      }
     }
     function cancel() {
+      panRef.current = null;
+      setPanning(false);
       down.current = null;
       setDrag(null);
     }
@@ -665,18 +979,23 @@ export function PathwayCanvas({
     };
   });
 
-  /** The menu is placed in the window (the figure's frame would cut it off at its edge), so a scroll closes it. */
-  function openMenuAt(x: number, y: number, kind: 'context' | 'unstack' = 'context') {
-    setMenu({ x, y, kind });
+  /** The menu is placed in the window (the figure's frame would cut it off at its edge), so an outside scroll closes it. */
+  function openMenuAt(x: number, y: number, kind: MenuKind = 'context', flipY?: number) {
+    setMenu({ x, y, flipY, kind });
   }
   useEffect(() => {
     if (!menu) return;
-    const close = () => setMenu(null);
+    const close = (event: Event) => {
+      // Scrolling inside a tall menu or submenu keeps it open.
+      if (event.target instanceof Element && event.target.closest('.pathway-menu')) return;
+      setMenu(null);
+    };
+    const closeResize = () => setMenu(null);
     window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
+    window.addEventListener('resize', closeResize);
     return () => {
       window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
+      window.removeEventListener('resize', closeResize);
     };
   }, [menu]);
 
@@ -687,7 +1006,7 @@ export function PathwayCanvas({
     const inSelection =
       (selection?.kind === 'boxes' && id && selection.ids.includes(id) && !at.stepIds) ||
       (selection?.kind === 'step' && at.stepIds && at.stepIds.some((stepId) => selection.ids.includes(stepById.get(stepId)?.source_candidate_id ?? '')));
-    if (!inSelection) selectAt({ ...at, phase: null }, false);
+    if (!inSelection) selectAt({ ...at, phase: null, jumpTo: null }, false);
     lastPoint.current = { x: event.clientX, y: event.clientY };
     openMenuAt(event.clientX, event.clientY);
   }
@@ -696,13 +1015,18 @@ export function PathwayCanvas({
   // P marks a pop-up, Enter renames, the arrows go to the box before or after, Escape lets go; ⌘Z takes back.
   function handleFigureKey(event: KeyboardEvent<HTMLDivElement>) {
     const at = hit(event.target);
+    if (at.jumpTo && !at.screen && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      jumpToScreen(at.jumpTo);
+      return;
+    }
     if (!at.screen) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      selectAt({ ...at, stepIds: null, phase: null }, event.shiftKey);
+      selectAt({ ...at, stepIds: null, phase: null, jumpTo: null }, event.shiftKey);
     } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
       event.preventDefault();
-      selectAt({ ...at, stepIds: null, phase: null }, false);
+      selectAt({ ...at, stepIds: null, phase: null, jumpTo: null }, false);
       const image = imageOf(at.screen)?.getBoundingClientRect();
       if (image) openMenuAt(image.left + 12, image.top + 12);
     }
@@ -750,7 +1074,7 @@ export function PathwayCanvas({
     function away(event: globalThis.PointerEvent) {
       if (
         !(event.target instanceof Element) ||
-        (!event.target.closest('.pathway-menu') && !event.target.closest('[data-pathway-unstack-trigger]'))
+        (!event.target.closest('.pathway-menu') && !event.target.closest('[data-pathway-menu-trigger]'))
       ) {
         setMenu(null);
       }
@@ -784,12 +1108,20 @@ export function PathwayCanvas({
         ) : null}
       </>
     );
+  } else if (hoveredMove) {
+    const fromScreen = screenById.get(hoveredMove.from);
+    const toScreen = screenById.get(hoveredMove.to);
+    const roleLabel = hoveredMove.role === 'return' ? 'return' : hoveredMove.role === 'branch' ? 'branch / detour' : 'main flow';
+    const stepPrefix = hoveredMove.steps ? (hoveredMove.steps.includes(',') ? `steps ${hoveredMove.steps}: ` : `step ${hoveredMove.steps}: `) : '';
+    const route = fromScreen && toScreen ? `${name(fromScreen)} → ${name(toScreen)}` : 'move';
+    const jumpHint = hoveredMove.hasJump ? ' · click a jump tag to scroll there' : '';
+    status = `${stepPrefix}${route} (${roleLabel})${jumpHint}`;
   } else if (selectedBoxes.length === 1) {
     const box = selectedBoxes[0];
     const boxSteps = stepsOf(box);
     status =
       boxSteps.length > 1
-        ? `${name(box)}: ${numbersOf(boxSteps)}. drag onto another box to stack, or use unstack to separate steps.`
+        ? `${name(box)}: ${numbersOf(boxSteps)}. drag onto another box to stack, or use stacking to separate steps.`
         : `${name(box)}: ${numbersOf(boxSteps)}. drag it onto another box to stack it, or right-click for more.`;
   } else if (selectedBoxes.length > 1) {
     status = `${selectedBoxes.length} boxes selected: stack them together, or make them a phase.`;
@@ -805,35 +1137,50 @@ export function PathwayCanvas({
     return () => window.clearTimeout(timer);
   }, [message]);
 
-  // ── the toolbox, beside the selection ──
+  // ── the toolbox, beside the selection (hidden while a right-click context menu is open so both never stack) ──
+  const hasOverflow = overflowMenuItems().length > 0;
   let toolbox: ReactNode = null;
-  if (!drag && rects.selected.length && (selectedBoxes.length || selectedSteps.length)) {
+  if (!drag && menu?.kind !== 'context' && rects.selected.length && (selectedBoxes.length || selectedSteps.length)) {
     const top = Math.min(...rects.selected.map((rect) => rect.top));
     const bottom = Math.max(...rects.selected.map((rect) => rect.top + rect.height));
     const left = Math.min(...rects.selected.map((rect) => rect.left));
-    const above = top > 52;
-    const style = { left: `${left + toolboxShift}px`, top: `${above ? top - 10 : bottom + 10}px` };
+    const above = selectedBoxes.length ? top > 76 : top > 52;
+    const aboveOffset = selectedBoxes.length ? 28 : 10;
+    const style = {
+      left: `${left + toolboxLayout.shift}px`,
+      top: `${above ? top - aboveOffset : bottom + 10}px`,
+      ...(toolboxLayout.maxWidth !== null ? { maxWidth: `${toolboxLayout.maxWidth}px` } : {}),
+    };
     const others = (except: PathwayScreen[]) => pathway.screens.filter((screen) => !except.includes(screen));
-    const more = (
+    const more = hasOverflow ? (
       <button
+        aria-expanded={menu?.kind === 'overflow'}
+        aria-haspopup="menu"
         aria-label="more"
-        className="pathway-tool"
+        className={`pathway-tool ${menu?.kind === 'overflow' ? 'is-on' : ''}`}
+        data-pathway-menu-trigger="overflow"
         onClick={(event) => {
+          if (menu?.kind === 'overflow') {
+            setMenu(null);
+            return;
+          }
           const button = event.currentTarget.getBoundingClientRect();
-          openMenuAt(button.left, button.bottom + 4);
+          openMenuAt(button.left, button.bottom + 4, 'overflow', button.top - 4);
         }}
-        title="everything else (right-click)"
+        title="more actions"
         type="button"
       >
         ⋯
       </button>
-    );
+    ) : null;
     let tools: ReactNode;
     if (selectedBoxes.length === 1) {
       const box = selectedBoxes[0];
       const first = candidateById.get(firstOf(box));
       const steps = stepsOf(box);
       const phase = phaseOfStep(steps[0]?.step_index ?? 0);
+      const otherBoxes = others([box]);
+      const hasStacking = otherBoxes.length > 0 || steps.length > 1 || chosenScreens(box).length > 0;
       tools = (
         <>
           <input
@@ -851,7 +1198,14 @@ export function PathwayCanvas({
               }
             }}
             placeholder={`Screen ${box.index}`}
-            ref={titleRef}
+            ref={(node) => {
+              titleRef.current = node;
+              if (node && focusTitleRef.current) {
+                focusTitleRef.current = false;
+                node.focus();
+                node.select();
+              }
+            }}
           />
           {first ? (
             <button
@@ -864,45 +1218,28 @@ export function PathwayCanvas({
               pop-up
             </button>
           ) : null}
-          <select
-            aria-label="stack onto another box"
-            className="pathway-tool-select"
-            onChange={(event) => {
-              const target = screenById.get(event.target.value);
-              if (target) stackBox(box, target);
-            }}
-            title={`moves all of ${numbersOf(steps)} into the box you choose`}
-            value=""
-          >
-            <option value="">stack onto…</option>
-            {others([box]).map((screen) => (
-              <option key={screen.id} value={screen.id}>
-                {name(screen)} ({numbersOf(stepsOf(screen))})
-              </option>
-            ))}
-          </select>
-          {steps.length > 1 || chosenScreens(box).length ? (
+          {hasStacking ? (
             <button
-              aria-expanded={menu?.kind === 'unstack'}
+              aria-expanded={menu?.kind === 'stacking'}
               aria-haspopup="menu"
-              className={`pathway-tool ${menu?.kind === 'unstack' ? 'is-on' : ''}`}
-              data-pathway-unstack-trigger=""
+              className={`pathway-tool ${menu?.kind === 'stacking' ? 'is-on' : ''}`}
+              data-pathway-menu-trigger="stacking"
               onClick={(event) => {
-                if (menu?.kind === 'unstack') {
+                if (menu?.kind === 'stacking') {
                   setMenu(null);
                   return;
                 }
                 const button = event.currentTarget.getBoundingClientRect();
-                openMenuAt(button.left, button.bottom + 4, 'unstack');
+                openMenuAt(button.left, button.bottom + 4, 'stacking', button.top - 4);
               }}
               title={
                 steps.length > 1
-                  ? 'unstack all its steps or one of them, or edit its steps'
-                  : 'stack this box automatically again, as it was found'
+                  ? 'stack onto another box, unstack steps, or edit steps'
+                  : 'stack this box onto another, or reset automatic stacking'
               }
               type="button"
             >
-              {steps.length > 1 ? 'unstack…' : 'stack…'}
+              stacking…
             </button>
           ) : null}
           <button
@@ -926,7 +1263,6 @@ export function PathwayCanvas({
           <button className="pathway-tool" onClick={() => phaseFor(selectedBoxes.flatMap(stepsOf))} type="button">
             phase…
           </button>
-          {more}
         </>
       );
     } else {
@@ -935,6 +1271,7 @@ export function PathwayCanvas({
       // Every step stacked on this box can be picked on its own from the step toolbar.
       const boxSteps = own ? stepsOf(own) : selectedSteps;
       const picked = new Set(selectedSteps.map((step) => step.step_id));
+      const otherBoxes = others(own ? [own] : []);
       tools = (
         <>
           {boxSteps.length > 1 ? (
@@ -956,25 +1293,31 @@ export function PathwayCanvas({
           ) : (
             <span className="pathway-tool-label">{numbersOf(selectedSteps)}</span>
           )}
-          <button className="pathway-tool" onClick={() => moveStep(selectedSteps, 'own')} title="pop this step out into a box of its own" type="button">
-            own screen
-          </button>
-          <select
-            aria-label="put it on another box"
-            className="pathway-tool-select"
-            onChange={(event) => {
-              const target = screenById.get(event.target.value);
-              if (target) moveStep(selectedSteps, target);
-            }}
-            value=""
-          >
-            <option value="">put it on…</option>
-            {others(own ? [own] : []).map((screen) => (
-              <option key={screen.id} value={screen.id}>
-                {name(screen)} ({numbersOf(stepsOf(screen))})
-              </option>
-            ))}
-          </select>
+          {boxSteps.length > 1 ? (
+            <button className="pathway-tool" onClick={() => moveStep(selectedSteps, 'own')} title="pop this step out into a box of its own" type="button">
+              own screen
+            </button>
+          ) : null}
+          {otherBoxes.length ? (
+            <button
+              aria-expanded={menu?.kind === 'put'}
+              aria-haspopup="menu"
+              className={`pathway-tool ${menu?.kind === 'put' ? 'is-on' : ''}`}
+              data-pathway-menu-trigger="put"
+              onClick={(event) => {
+                if (menu?.kind === 'put') {
+                  setMenu(null);
+                  return;
+                }
+                const button = event.currentTarget.getBoundingClientRect();
+                openMenuAt(button.left, button.bottom + 4, 'put', button.top - 4);
+              }}
+              title="move this step onto another box"
+              type="button"
+            >
+              put it on…
+            </button>
+          ) : null}
           {first ? (
             <button
               aria-pressed={isPopupStep(first)}
@@ -1005,19 +1348,61 @@ export function PathwayCanvas({
     );
   }
 
+  const showInlineKey = Boolean(encodings && (encodings.hasBranch || encodings.hasReturn || encodings.hasPortal));
+
   return (
     <>
       <div className="pathway-sticky">
+        {stickyHeader}
         <div className="pathway-status" role="status">
           <span className="pathway-status-text" key={message?.key ?? 'state'}>
             {status}
           </span>
-          <span className="pathway-status-keys">
-            {history.length ? (
-              <button className="analysis-task-link subtle" disabled={busy} onClick={undo} type="button">
-                undo ⌘Z
-              </button>
+          <span className="pathway-status-meta">
+            {showInlineKey ? (
+              <span aria-label="path key" className="pathway-status-legend">
+                <span className="pathway-key-item" title="main forward flow">
+                  <svg aria-hidden="true" height="8" viewBox="0 0 18 8" width="18">
+                    <line stroke="#111" strokeWidth="1.5" x1="1" x2="14" y1="4" y2="4" />
+                    <path d="M12 1.5 L16.5 4 L12 6.5 Z" fill="#111" />
+                  </svg>
+                  main
+                </span>
+                {encodings?.hasBranch ? (
+                  <span className="pathway-key-item" title="branch or detour path">
+                    <svg aria-hidden="true" height="8" viewBox="0 0 18 8" width="18">
+                      <line stroke="#a44d10" strokeWidth="1.5" x1="1" x2="14" y1="4" y2="4" />
+                      <path d="M12 1.5 L16.5 4 L12 6.5 Z" fill="#a44d10" />
+                    </svg>
+                    branch
+                  </span>
+                ) : null}
+                {encodings?.hasReturn ? (
+                  <span className="pathway-key-item" title="return to an earlier screen">
+                    <svg aria-hidden="true" height="8" viewBox="0 0 18 8" width="18">
+                      <line stroke="#2c5f8a" strokeDasharray="3 2" strokeWidth="1.35" x1="1" x2="14" y1="4" y2="4" />
+                      <path d="M12 1.5 L16.5 4 L12 6.5 Z" fill="#2c5f8a" />
+                    </svg>
+                    return
+                  </span>
+                ) : null}
+                {encodings?.hasPortal ? (
+                  <span className="pathway-key-item" title="cross-row jump tag; click to scroll to the other screen">
+                    <span aria-hidden="true" className="pathway-key-chip">
+                      → S#
+                    </span>
+                    jump
+                  </span>
+                ) : null}
+              </span>
             ) : null}
+            <span className="pathway-status-keys">
+              {history.length ? (
+                <button className="analysis-task-link subtle" disabled={busy} onClick={undo} type="button">
+                  undo ⌘Z
+                </button>
+              ) : null}
+            </span>
           </span>
         </div>
       </div>
@@ -1032,7 +1417,7 @@ export function PathwayCanvas({
         />
       ) : null}
       <div className="pathway-scroll">
-        <div className={`pathway-stage ${drag ? 'is-dragging' : ''}`} ref={stageRef} style={{ width: `${width}px` }}>
+        <div className={`pathway-stage ${drag ? 'is-dragging' : ''} ${panning ? 'is-panning' : ''}`} ref={stageRef} style={{ width: `${width}px` }}>
           <div
             aria-label={ariaLabel}
             className="pathway-figure"
@@ -1041,8 +1426,8 @@ export function PathwayCanvas({
             onContextMenu={handleContextMenu}
             onKeyDown={handleFigureKey}
             onPointerDown={handlePointerDown}
-            onPointerLeave={onPointerLeave}
-            onPointerOver={onPointerOver}
+            onPointerLeave={handleFigurePointerLeave}
+            onPointerOver={handleFigurePointerOver}
             ref={figureRef}
           />
           {rects.selected.map((rect, index) => (
@@ -1058,6 +1443,14 @@ export function PathwayCanvas({
               <i />
             </span>
           ))}
+          {rects.pulse && jumpPulse ? (
+            <span
+              aria-hidden="true"
+              className="pathway-jump-pulse"
+              key={jumpPulse.key}
+              style={{ left: rects.pulse.left - 6, top: rects.pulse.top - 6, width: rects.pulse.width + 12, height: rects.pulse.height + 12 }}
+            />
+          ) : null}
           {rects.source ? (
             <span aria-hidden="true" className="pathway-drag-source" style={{ left: rects.source.left, top: rects.source.top, width: rects.source.width, height: rects.source.height }} />
           ) : null}
@@ -1065,7 +1458,25 @@ export function PathwayCanvas({
             <span aria-hidden="true" className="pathway-drop" style={{ left: rects.target.left - 6, top: rects.target.top - 6, width: rects.target.width + 12, height: rects.target.height + 12 }} />
           ) : null}
           {toolbox}
-          {menu ? <PathwayMenu items={menuItems()} onClose={() => setMenu(null)} x={menu.x} y={menu.y} /> : null}
+          {menu ? (
+            <PathwayMenu
+              bounds={(() => {
+                const scroller = stageRef.current?.parentElement?.getBoundingClientRect();
+                if (!scroller) return undefined;
+                return {
+                  left: Math.max(8, scroller.left + 4),
+                  right: Math.min(window.innerWidth - 8, scroller.right - 4),
+                  top: 8,
+                  bottom: window.innerHeight - 8,
+                };
+              })()}
+              flipY={menu.flipY}
+              items={menuItems()}
+              onClose={() => setMenu(null)}
+              x={menu.x}
+              y={menu.y}
+            />
+          ) : null}
         </div>
       </div>
       {drag ? (
@@ -1077,21 +1488,70 @@ export function PathwayCanvas({
   );
 }
 
+/** Clamps a floating menu rectangle to stay completely visible inside the pathway canvas (or viewport if narrower). */
+function clampMenuBounds(width: number, height: number, bounds?: MenuBounds) {
+  const viewLeft = 8;
+  const viewRight = window.innerWidth - 8;
+  const viewTop = 8;
+  const viewBottom = window.innerHeight - 8;
+  const useCanvasX = Boolean(bounds && bounds.right - bounds.left >= width);
+  return {
+    minLeft: useCanvasX && bounds ? bounds.left : viewLeft,
+    maxRight: useCanvasX && bounds ? bounds.right : viewRight,
+    minTop: viewTop,
+    maxBottom: viewBottom,
+    width,
+    height,
+  };
+}
+
 /** The actions as a menu, at the pointer; an item with items of its own opens them beside it. */
-function PathwayMenu({ items, x, y, onClose }: { items: MenuItem[]; x: number; y: number; onClose: () => void }) {
+function PathwayMenu({
+  items,
+  x,
+  y,
+  flipY,
+  bounds,
+  onClose,
+}: {
+  items: MenuItem[];
+  x: number;
+  y: number;
+  flipY?: number;
+  bounds?: MenuBounds;
+  onClose: () => void;
+}) {
   const [open, setOpen] = useState<number | null>(null);
+  const [openAnchor, setOpenAnchor] = useState<HTMLElement | null>(null);
   const ref = useRef<HTMLDivElement | null>(null);
-  const [shift, setShift] = useState({ x: 0, y: 0 });
-  // A menu near the right or bottom edge of the window opens to the left or upwards.
+  const [pos, setPos] = useState<{ left: number; top: number }>({ left: x, top: y });
+  const bLeft = bounds?.left;
+  const bRight = bounds?.right;
+  const bTop = bounds?.top;
+  const bBottom = bounds?.bottom;
+  // Keep the menu completely visible inside the pathway canvas & viewport (flipping left/up when near edges).
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
     const box = element.getBoundingClientRect();
-    setShift({
-      x: box.right > window.innerWidth - 8 ? -(box.width) : 0,
-      y: box.bottom > window.innerHeight - 8 ? -(box.bottom - window.innerHeight + 8) : 0,
-    });
-  }, [x, y]);
+    const rectBounds =
+      bLeft !== undefined && bRight !== undefined && bTop !== undefined && bBottom !== undefined
+        ? { left: bLeft, right: bRight, top: bTop, bottom: bBottom }
+        : undefined;
+    const { minLeft, maxRight, minTop, maxBottom } = clampMenuBounds(box.width, box.height, rectBounds);
+    let left = x;
+    if (left + box.width > maxRight) {
+      const flipped = x - box.width;
+      left = flipped >= minLeft ? flipped : maxRight - box.width;
+    }
+    left = Math.round(Math.max(minLeft, Math.min(left, Math.max(minLeft, maxRight - box.width))));
+    let top = y;
+    if (top + box.height > maxBottom) {
+      top = flipY !== undefined && flipY - box.height >= minTop ? flipY - box.height : maxBottom - box.height;
+    }
+    top = Math.round(Math.max(minTop, Math.min(top, Math.max(minTop, maxBottom - box.height))));
+    setPos((current) => (current.left === left && current.top === top ? current : { left, top }));
+  }, [x, y, flipY, bLeft, bRight, bTop, bBottom, items.length]);
   /** Whether the open submenu was opened with the keyboard, and so takes the focus. */
   const [byKey, setByKey] = useState(false);
   useEffect(() => {
@@ -1112,11 +1572,13 @@ function PathwayMenu({ items, x, y, onClose }: { items: MenuItem[]; x: number; y
     } else if (event.key === 'ArrowRight' && !submenu && index >= 0 && items[index]?.items) {
       event.preventDefault();
       setByKey(true);
+      setOpenAnchor((document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.pathway-menu-row') ?? null);
       setOpen(index);
     } else if (event.key === 'ArrowLeft' && submenu) {
       event.preventDefault();
       submenu.parentElement?.querySelector<HTMLButtonElement>(':scope > button')?.focus();
       setOpen(null);
+      setOpenAnchor(null);
     } else if (event.key === 'Escape') {
       onClose();
     }
@@ -1129,15 +1591,16 @@ function PathwayMenu({ items, x, y, onClose }: { items: MenuItem[]; x: number; y
       onPointerDown={(event) => event.stopPropagation()}
       ref={ref}
       role="menu"
-      style={{ left: x + shift.x, top: y + shift.y }}
+      style={{ left: pos.left, top: pos.top }}
     >
       {items.map((item, index) => (
         <div
           className="pathway-menu-row"
           key={item.label}
-          onPointerEnter={() => {
+          onPointerEnter={(event) => {
             setByKey(false);
             setOpen(item.items ? index : null);
+            setOpenAnchor(item.items ? event.currentTarget : null);
           }}
         >
           {item.divider ? <div aria-hidden="true" className="pathway-menu-divider" /> : null}
@@ -1149,7 +1612,9 @@ function PathwayMenu({ items, x, y, onClose }: { items: MenuItem[]; x: number; y
               if (item.items) {
                 // Enter or Space (a click with no pointer) opens it with its first item in focus.
                 setByKey(event.detail === 0);
-                setOpen(open === index ? null : index);
+                const nextOpen = open === index ? null : index;
+                setOpen(nextOpen);
+                setOpenAnchor(nextOpen !== null ? event.currentTarget.closest<HTMLElement>('.pathway-menu-row') : null);
                 return;
               }
               onClose();
@@ -1159,36 +1624,72 @@ function PathwayMenu({ items, x, y, onClose }: { items: MenuItem[]; x: number; y
             title={item.label}
             type="button"
           >
-            <span>{item.label}</span>
+            <span className="pathway-menu-main">
+              {item.thumb ? <img alt="" className="pathway-menu-thumb" loading="lazy" src={item.thumb} /> : null}
+              <span className="pathway-menu-label">{item.label}</span>
+            </span>
             <span className="pathway-menu-hint">{item.items ? '▸' : item.hint ?? ''}</span>
           </button>
-          {item.items && open === index ? <PathwaySubmenu focusFirst={byKey} items={item.items} onClose={onClose} /> : null}
+          {item.items && open === index ? (
+            <PathwaySubmenu anchor={openAnchor} bounds={bounds} focusFirst={byKey} items={item.items} onClose={onClose} />
+          ) : null}
         </div>
       ))}
     </div>
   );
 }
 
-/** The items of a menu item, beside it: to the right, or to the left where the window ends, and moved up where it
- *  would run past the bottom. */
-function PathwaySubmenu({ focusFirst, items, onClose }: { focusFirst: boolean; items: MenuItem[]; onClose: () => void }) {
+/** The items of a menu item, placed fixed beside its parent row and clamped strictly inside the canvas & viewport. */
+function PathwaySubmenu({
+  anchor,
+  bounds,
+  focusFirst,
+  items,
+  onClose,
+}: {
+  anchor: HTMLElement | null;
+  bounds?: MenuBounds;
+  focusFirst: boolean;
+  items: MenuItem[];
+  onClose: () => void;
+}) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [place, setPlace] = useState({ toLeft: false, up: 0 });
+  const [pos, setPos] = useState<{ left: number; top: number }>(() => {
+    const row = anchor?.getBoundingClientRect();
+    return row ? { left: row.right + 2, top: row.top - 4 } : { left: 8, top: 8 };
+  });
+  const bLeft = bounds?.left;
+  const bRight = bounds?.right;
+  const bTop = bounds?.top;
+  const bBottom = bounds?.bottom;
   useLayoutEffect(() => {
-    const box = ref.current?.getBoundingClientRect();
-    if (!box) return;
-    const over = box.bottom - (window.innerHeight - 8);
-    setPlace({ toLeft: box.right > window.innerWidth - 8, up: over > 0 ? Math.min(over, Math.max(0, box.top - 8)) : 0 });
-  }, []);
+    const element = ref.current;
+    const row = anchor?.getBoundingClientRect();
+    if (!element || !row) return;
+    const box = element.getBoundingClientRect();
+    const rectBounds =
+      bLeft !== undefined && bRight !== undefined && bTop !== undefined && bBottom !== undefined
+        ? { left: bLeft, right: bRight, top: bTop, bottom: bBottom }
+        : undefined;
+    const { minLeft, maxRight, minTop, maxBottom } = clampMenuBounds(box.width, box.height, rectBounds);
+    let left = row.right + 2;
+    if (left + box.width > maxRight) {
+      const flipped = row.left - box.width - 2;
+      left = flipped >= minLeft ? flipped : maxRight - box.width;
+    }
+    left = Math.round(Math.max(minLeft, Math.min(left, Math.max(minLeft, maxRight - box.width))));
+    const top = Math.round(Math.max(minTop, Math.min(row.top - 4, Math.max(minTop, maxBottom - box.height))));
+    setPos((current) => (current.left === left && current.top === top ? current : { left, top }));
+  }, [anchor, bLeft, bRight, bTop, bBottom, items.length]);
   useEffect(() => {
     if (focusFirst) ref.current?.querySelector<HTMLButtonElement>('button')?.focus();
   }, [focusFirst]);
   return (
     <div
-      className={`pathway-menu pathway-submenu ${place.toLeft ? 'to-left' : ''}`}
+      className="pathway-menu pathway-submenu"
       ref={ref}
       role="menu"
-      style={place.up ? { top: -4 - place.up } : undefined}
+      style={{ left: pos.left, top: pos.top }}
     >
       {items.map((child) => (
         <div className="pathway-menu-row" key={child.label}>
@@ -1203,7 +1704,11 @@ function PathwaySubmenu({ focusFirst, items, onClose }: { focusFirst: boolean; i
             title={child.label}
             type="button"
           >
-            <span>{child.label}</span>
+            <span className="pathway-menu-main">
+              {child.thumb ? <img alt="" className="pathway-menu-thumb" loading="lazy" src={child.thumb} /> : null}
+              <span className="pathway-menu-label">{child.label}</span>
+            </span>
+            {child.hint ? <span className="pathway-menu-hint">{child.hint}</span> : null}
           </button>
         </div>
       ))}

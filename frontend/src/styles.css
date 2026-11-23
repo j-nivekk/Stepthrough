@@ -3674,6 +3674,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 .candidate-export-popover {
   border: 1px solid rgba(0, 0, 0, 0.14);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+  z-index: 18;
 }
 
 .analysis-toolbar-popover-wide {
@@ -5451,14 +5452,16 @@ button:disabled {
 
 .candidate-review-toolbar {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px 18px;
   flex-wrap: wrap;
+  container-type: inline-size;
+  container-name: review-toolbar;
 }
 
-/* Everything sits on the line of the export name field (30px high); the file name preview hangs below it. */
-.candidate-review-toolbar {
-  align-items: flex-start;
+.candidate-review-toolbar.has-selection .candidate-review-key-hint {
+  display: none;
 }
 
 .candidate-review-meta,
@@ -5482,6 +5485,23 @@ button:disabled {
   overscroll-behavior-x: contain;
   scrollbar-gutter: stable both-edges;
   scroll-snap-type: x proximity;
+  cursor: grab;
+}
+
+.accepted-strip.is-panning {
+  cursor: grabbing;
+  scroll-snap-type: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.accepted-step-chip {
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.accepted-step-chip:hover,
+.accepted-step-chip.is-cross-hovered {
+  box-shadow: inset 0 0 0 1.5px rgba(205, 109, 30, 0.65);
 }
 
 .candidate-filter-tabs {
@@ -5505,11 +5525,10 @@ button:disabled {
 
 .candidate-bulk-actions {
   display: flex;
-  margin-right: auto;
   align-items: center;
   gap: 10px 16px;
   flex-wrap: wrap;
-  min-height: 30px;
+  min-height: 26px;
 }
 
 /* Accept, reject and reset for the selected steps, in the colours of each step's own ✓ ✕ ↺, shaped as the app's
@@ -5603,9 +5622,11 @@ button:disabled {
 .candidate-review-nav-group {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 10px 18px;
   flex-wrap: wrap;
-  min-height: 30px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 28px;
 }
 
 .candidate-export-name-wrap {
@@ -5731,6 +5752,12 @@ button:disabled {
   background: var(--analysis-surface-muted);
   overflow: visible;
   isolation: isolate;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.candidate-timeline-rail.is-scrubbing {
+  cursor: ew-resize;
 }
 
 .candidate-timeline-playhead {
@@ -5741,6 +5768,99 @@ button:disabled {
   background: rgba(0, 0, 0, 0.45);
   transform: translateX(-50%);
   z-index: 1;
+  pointer-events: none;
+}
+
+.candidate-timeline-hover-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  background: #cd6d1e;
+  transform: translateX(-50%);
+  z-index: 12;
+  pointer-events: none;
+}
+
+.candidate-timeline-preview {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  color: #000;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.candidate-timeline-preview-thumb {
+  height: 44px;
+  width: auto;
+  max-width: 78px;
+  object-fit: cover;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #f3f3f0;
+  flex: none;
+}
+
+.candidate-timeline-preview-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.candidate-timeline-preview-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  line-height: 1.2;
+}
+
+.candidate-timeline-preview-head strong {
+  font-weight: 600;
+}
+
+.candidate-timeline-preview-head small,
+.candidate-timeline-preview-time {
+  color: rgba(0, 0, 0, 0.62);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.candidate-timeline-preview-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.candidate-timeline-preview-dot.accepted {
+  background: #48af7c;
+}
+
+.candidate-timeline-preview-dot.rejected {
+  background: #bf2725;
+}
+
+.candidate-timeline-preview-dot.pending {
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.candidate-timeline-preview-title {
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgba(0, 0, 0, 0.72);
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .candidate-timeline-pin {
@@ -5777,6 +5897,13 @@ button:disabled {
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18);
 }
 
+.candidate-timeline-pin:hover,
+.candidate-timeline-pin.is-hovered {
+  transform: translateX(-50%) scaleX(1.55) scaleY(1.3);
+  box-shadow: 0 0 0 2px rgba(205, 109, 30, 0.48);
+  z-index: 15;
+}
+
 .candidate-timeline-pin.manual-pending {
   pointer-events: none;
   box-shadow: 0 0 0 1px rgba(72, 175, 124, 0.24);
@@ -5801,7 +5928,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-.candidate-timeline-pin:hover::after,
 .candidate-timeline-pin:focus-visible::after {
   opacity: 1;
 }
@@ -5927,6 +6053,28 @@ button:disabled {
 
 .inline-link-button.screen-choice-trigger {
   color: rgba(0, 0, 0, 0.5);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  text-decoration: none;
+}
+
+.screen-choice-value {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.candidate-choice-icon {
+  display: none;
+  align-items: center;
+  flex: none;
+  color: currentColor;
 }
 
 .inline-link-button.screen-choice-trigger.chosen,
@@ -6074,13 +6222,21 @@ button:disabled {
   cursor: pointer;
 }
 
-/* steps | pathway: what the review area under the selected task shows. */
+/* steps | pathway on the left, export right-aligned directly under the run's finished time. */
+.review-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
+}
+
 .review-mode-switch {
   display: flex;
   align-items: baseline;
   gap: 18px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.12);
 }
 
 .review-mode-switch .candidate-filter-tab {
@@ -6353,17 +6509,25 @@ button:disabled {
    edge whatever the padding. */
 .pathway-editor select,
 .pathway-tool-select,
-.phase-choice-select,
 .run-compare-select,
 .users-keep-select,
 .usage-class-select {
   -webkit-appearance: none;
+  -moz-appearance: none;
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23000' stroke-opacity='.6' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-position: right 10px center;
   background-repeat: no-repeat;
   background-size: 10px 6px;
   cursor: pointer;
+}
+
+.pathway-editor select::picker-icon,
+.pathway-tool-select::picker-icon,
+.run-compare-select::picker-icon,
+.users-keep-select::picker-icon,
+.usage-class-select::picker-icon {
+  display: none;
 }
 
 .pathway-editor select:disabled {
@@ -6448,6 +6612,48 @@ button:disabled {
   fill: #cd6d1e;
 }
 
+/* Interactive route spotlighting & clickable cross-row jump chips on the page. */
+.pathway-figure [data-move] {
+  cursor: pointer;
+  transition: opacity 140ms ease;
+}
+
+.pathway-figure [data-screen] {
+  transition: opacity 140ms ease;
+}
+
+.pathway-figure.is-spotlighting-move [data-move] {
+  opacity: 0.16;
+}
+
+.pathway-figure.is-spotlighting-move [data-screen] {
+  opacity: 0.58;
+}
+
+.pathway-figure.is-spotlighting-box [data-move] {
+  opacity: 0.22;
+}
+
+.pathway-figure .is-lit {
+  opacity: 1 !important;
+}
+
+.pathway-figure.is-spotlighting-move [data-move].is-lit .pathway-move-line {
+  stroke-width: 2;
+}
+
+.pathway-figure .pathway-jump-chip {
+  cursor: pointer;
+  outline: none;
+}
+
+.pathway-figure .pathway-jump-chip:hover rect:first-of-type,
+.pathway-figure .pathway-jump-chip:focus-visible rect:first-of-type {
+  fill: #fff6ee;
+  stroke: #cd6d1e;
+  stroke-width: 1.5;
+}
+
 /* Shown once, the first time a pathway is opened: an invitation to the hands-on tutorial. */
 .pathway-invite {
   display: flex;
@@ -6494,42 +6700,119 @@ button:disabled {
 }
 
 .pathway-stage.is-dragging,
-.pathway-stage.is-dragging [data-screen] {
-  cursor: grabbing;
+.pathway-stage.is-dragging [data-screen],
+.pathway-stage.is-panning,
+.pathway-stage.is-panning * {
+  cursor: grabbing !important;
 }
 
-/* The status line and, when open, the phases stay at the top of the window while the figure scrolls. */
+.pathway-stage.is-panning {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The controls bar and status line stay at the top of the window while a tall figure scrolls. */
 .pathway-sticky {
   position: sticky;
   top: 0;
   z-index: 8;
   display: grid;
+  gap: 8px;
+  padding-top: 4px;
   background: var(--bg);
 }
 
 .pathway-status {
   display: flex;
   align-items: center;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 6px 16px;
   min-height: 28px;
   padding: 4px 12px;
   background: #ebebeb;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
   font-size: 12px;
   line-height: 1.3;
   color: rgba(0, 0, 0, 0.72);
 }
 
 .pathway-status-text {
-  flex: 1 1 auto;
+  flex: 1 1 240px;
   min-width: 0;
   overflow-wrap: anywhere;
   border-radius: 4px;
   animation: pathway-status-in 600ms ease-out;
 }
 
+.pathway-status-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.pathway-status-legend {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: rgba(0, 0, 0, 0.56);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.pathway-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.pathway-key-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border: 1px solid rgba(164, 77, 16, 0.65);
+  border-radius: 999px;
+  background: #fff;
+  color: #a44d10;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
 .pathway-status-keys {
   flex: 0 0 auto;
   font-size: 12px;
+}
+
+/* Brief ring around the destination box after clicking a cross-row jump tag. */
+.pathway-jump-pulse {
+  position: absolute;
+  z-index: 4;
+  border: 2.5px solid #cd6d1e;
+  border-radius: 4px;
+  pointer-events: none;
+  animation: pathway-jump-ring 900ms ease-out forwards;
+}
+
+@keyframes pathway-jump-ring {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.98);
+    box-shadow: 0 0 0 0 rgba(205, 109, 30, 0.35);
+  }
+  70% {
+    opacity: 0.7;
+    transform: scale(1.02);
+    box-shadow: 0 0 0 8px rgba(205, 109, 30, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.03);
+    box-shadow: 0 0 0 10px rgba(205, 109, 30, 0);
+  }
 }
 
 /* A new message lights up briefly, so it is noticed. */
@@ -6636,8 +6919,10 @@ button:disabled {
   z-index: 6;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 4px;
-  max-width: calc(100% - 8px);
+  width: max-content;
+  max-width: calc(100vw - 24px);
   padding: 5px;
   background: #d9d9d9;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
@@ -6764,6 +7049,8 @@ button:disabled {
   z-index: 40;
   min-width: 230px;
   max-width: min(360px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 4px;
   background: #d9d9d9;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
@@ -6774,7 +7061,6 @@ button:disabled {
 @keyframes pathway-menu-in {
   from {
     opacity: 0;
-    transform: translateY(-3px);
   }
 }
 
@@ -6804,6 +7090,7 @@ button:disabled {
 
 .pathway-menu-item {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 24px;
   width: 100%;
@@ -6867,18 +7154,36 @@ button:disabled {
   white-space: nowrap;
 }
 
-.pathway-submenu {
-  position: absolute;
-  left: calc(100% + 2px);
-  top: -4px;
-  max-width: 360px;
-  max-height: 60vh;
-  overflow-y: auto;
+.pathway-menu-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.pathway-submenu.to-left {
-  left: auto;
-  right: calc(100% + 2px);
+.pathway-menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pathway-menu-thumb {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  border-radius: 2px;
+  flex: none;
+}
+
+.pathway-submenu {
+  position: fixed;
+  z-index: 41;
+  max-width: min(360px, calc(100vw - 16px));
+  max-height: min(60vh, calc(100vh - 16px));
+  overflow-y: auto;
 }
 
 /* The phases, in a floating panel like the toolbox and the menu (PathwayPhases.tsx). */
@@ -6886,6 +7191,8 @@ button:disabled {
   position: fixed;
   z-index: 30;
   width: min(430px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 10px 12px 12px;
   display: grid;
   /* one column no wider than the panel: a long phase name is cut short in its chip, not let push the panel out */
@@ -7049,8 +7356,14 @@ button:disabled {
   .pathway-status-text,
   .pathway-toolbox,
   .pathway-menu,
-  .pathway-drop {
+  .pathway-drop,
+  .pathway-jump-pulse {
     animation: none;
+  }
+
+  .pathway-figure [data-move],
+  .pathway-figure [data-screen] {
+    transition: none;
   }
 }
 
@@ -7341,6 +7654,16 @@ button:disabled {
 
 .candidate-card.selected {
   box-shadow: inset 0 0 0 2px rgba(72, 175, 124, 0.42), var(--playback-ring);
+}
+
+/* Cross-highlight when hovering this step's timeline pin or accepted strip chip. */
+.candidate-card.is-cross-hovered:not(.active) {
+  outline: 1.5px solid rgba(205, 109, 30, 0.52);
+  outline-offset: 2px;
+}
+
+.candidate-row.is-cross-hovered:not(.active):not(.selected) {
+  background-color: rgba(205, 109, 30, 0.08);
 }
 
 /* While the preview plays, the step on screen gets a ring; --playback (0 to 1) is set by
@@ -7691,6 +8014,47 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  container-type: inline-size;
+  container-name: candidate-panel;
+}
+
+.candidate-pathway-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.candidate-pathway-item {
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: flex-start;
+}
+
+.candidate-pathway-item.is-end {
+  align-items: flex-end;
+  text-align: right;
+  margin-left: auto;
+}
+
+@container candidate-panel (max-width: 184px) {
+  .candidate-pathway-row {
+    align-items: center;
+    gap: 6px;
+  }
+
+  .candidate-pathway-label {
+    display: none;
+  }
+
+  .candidate-choice-icon {
+    display: inline-flex;
+  }
+
+  .candidate-pathway-row .screen-choice-trigger {
+    font-size: 12px;
+  }
 }
 
 .candidate-field-group {
@@ -7707,17 +8071,32 @@ button:disabled {
 
 .candidate-field {
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border: none;
   border-radius: 0;
   background: rgba(255, 255, 255, 0.68);
   color: #000;
-  padding: 10px 12px;
-  font-size: 14px;
-  line-height: 1.2;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.candidate-field:focus {
+  text-overflow: clip;
 }
 
 .candidate-notes-field {
-  min-height: 88px;
+  height: 54px;
+  min-height: 42px;
+  max-height: 180px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  text-overflow: clip;
   resize: vertical;
 }
 
@@ -7731,6 +8110,12 @@ button:disabled {
   white-space: nowrap;
   flex-wrap: wrap;
   margin-left: 4px;
+}
+
+@container review-toolbar (max-width: 1220px) {
+  .candidate-review-toolbar .candidate-review-key-hint {
+    display: none;
+  }
 }
 
 .candidate-key-badge {
@@ -9615,34 +10000,39 @@ button:disabled {
   padding-top: 12px;
 }
 
-/* The phase of an accepted step, in the step review (components/PhaseChoice.tsx). */
-.phase-choice {
-  display: inline-flex;
+/* The phase of an accepted step, in the step review (components/PhaseChoice.tsx), matching ScreenChoice's trigger
+   and floating popover. */
+.phase-choice-popover {
+  width: 236px;
+}
+
+.phase-choice-new {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.phase-choice-form {
+  display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  min-width: 0;
-}
-
-.phase-choice-prefix {
-  color: rgba(0, 0, 0, 0.5);
-  font-size: 12px;
-}
-
-.phase-choice-select {
-  max-width: 180px;
-  height: 24px;
-  padding: 0 24px 0 6px;
-  border: none;
-  border-radius: 0;
-  background-color: rgba(255, 255, 255, 0.68);
-  font: inherit;
-  font-size: 12px;
+  gap: 6px;
 }
 
 .phase-choice-input {
-  width: 140px;
-  height: 24px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  padding: 2px 7px;
+  font-size: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+}
+
+.phase-choice-save {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 10px;
   font-size: 12px;
 }
 

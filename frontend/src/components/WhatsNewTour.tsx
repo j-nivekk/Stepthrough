@@ -48,7 +48,7 @@ const STOPS: Stop[] = [
     title: 'click a box',
     text: (
       <>
-        opens its toolbox: <b>title</b>, <b>pop-up</b>, <b>stack onto</b> and <b>phase</b>. shift-click for several.
+        opens its toolbox: <b>title</b>, <b>pop-up</b>, <b>stacking</b> and <b>phase</b>. shift-click for several.
       </>
     ),
     find: () => boxes().slice(1, 2).concat(boxes().length === 1 ? boxes() : []),

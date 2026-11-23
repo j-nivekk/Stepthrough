@@ -335,6 +335,23 @@ export function AnalysisScreen({
   const [hintCardPosition, setHintCardPosition] = useState<{ left: number; top: number } | null>(null);
   const [hoveredLegendType, setHoveredLegendType] = useState<string | null>(null);
   const [hiddenSegmentTypes, setHiddenSegmentTypes] = useState<Set<string>>(new Set());
+  const [hoveredCandidateId, setHoveredCandidateId] = useState<string | null>(null);
+  const [timelineScrub, setTimelineScrub] = useState<{
+    pct: number;
+    ms: number;
+    candidate: CandidateFrame | null;
+    dragging: boolean;
+  } | null>(null);
+  const [acceptedStripPanning, setAcceptedStripPanning] = useState(false);
+  const acceptedStripDragRef = useRef<{
+    startX: number;
+    startScroll: number;
+    moved: boolean;
+  } | null>(null);
+  const paintSelectRef = useRef<{
+    mode: 'select' | 'deselect';
+    dragged: boolean;
+  } | null>(null);
   const [stepLayout, setStepLayout] = useState<StepLayout>(() => loadStepLayout());
   const [reviewMode, setReviewMode] = useState<'steps' | 'pathway'>('steps');
   const [stepAreaRef, stepAreaWidth] = useElementWidth<HTMLDivElement>();
@@ -1211,6 +1228,102 @@ export function AnalysisScreen({
     setExpandedAnnotationCandidateId((current) => (current === candidateId ? null : candidateId));
   }
 
+  // End checkbox paint-select whenever the pointer lifts anywhere in the window.
+  useEffect(() => {
+    function endPaint() {
+      paintSelectRef.current = null;
+    }
+    window.addEventListener('pointerup', endPaint);
+    window.addEventListener('pointercancel', endPaint);
+    return () => {
+      window.removeEventListener('pointerup', endPaint);
+      window.removeEventListener('pointercancel', endPaint);
+    };
+  }, []);
+
+  function startPaintSelect(candidateId: string, currentlySelected: boolean) {
+    const mode = currentlySelected ? 'deselect' : 'select';
+    selectionAnchorRef.current = candidateId;
+    paintSelectRef.current = { mode, dragged: false };
+    setSelectedCandidateIds((current) =>
+      mode === 'select'
+        ? current.includes(candidateId)
+          ? current
+          : [...current, candidateId]
+        : current.filter((id) => id !== candidateId),
+    );
+  }
+
+  function continuePaintSelect(candidateId: string) {
+    const paint = paintSelectRef.current;
+    if (!paint) return;
+    paint.dragged = true;
+    selectionAnchorRef.current = candidateId;
+    setSelectedCandidateIds((current) =>
+      paint.mode === 'select'
+        ? current.includes(candidateId)
+          ? current
+          : [...current, candidateId]
+        : current.filter((id) => id !== candidateId),
+    );
+  }
+
+  function resolveTimelinePoint(clientX: number, rect: DOMRect): { pct: number; ms: number; candidate: CandidateFrame | null } {
+    const duration = Math.max(1, selectedRecordingSummary?.duration_ms ?? 1);
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+    const pct = ratio * 100;
+    const ms = ratio * duration;
+    let nearest: CandidateFrame | null = null;
+    let bestDiff = Infinity;
+    for (const candidate of timelineCandidates) {
+      const cPct = Math.max(0, Math.min(100, (candidate.timestamp_ms / duration) * 100));
+      const diff = Math.abs(cPct - pct);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        nearest = candidate;
+      }
+    }
+    // Snap to a candidate pin within 3.5% of the rail width (about 16–45px).
+    return { pct, ms, candidate: bestDiff <= 3.5 ? nearest : null };
+  }
+
+  function handleTimelinePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    // Direct click on a pin button lets the pin handle activation cleanly unless dragged.
+    if (event.target instanceof Element && event.target.closest('.candidate-timeline-pin')) return;
+    const rail = event.currentTarget;
+    rail.setPointerCapture(event.pointerId);
+    const point = resolveTimelinePoint(event.clientX, rail.getBoundingClientRect());
+    setTimelineScrub({ ...point, dragging: true });
+    setHoveredCandidateId(point.candidate?.id ?? null);
+    if (previewMatchesSelectedRun) seekPreviewTo(point.ms);
+  }
+
+  function handleTimelinePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const rail = event.currentTarget;
+    const point = resolveTimelinePoint(event.clientX, rail.getBoundingClientRect());
+    const dragging = Boolean(timelineScrub?.dragging);
+    setTimelineScrub({ ...point, dragging });
+    setHoveredCandidateId(point.candidate?.id ?? null);
+    if (dragging && previewMatchesSelectedRun) seekPreviewTo(point.ms);
+  }
+
+  function handleTimelinePointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    if (!timelineScrub?.dragging) return;
+    const rail = event.currentTarget;
+    if (rail.hasPointerCapture(event.pointerId)) rail.releasePointerCapture(event.pointerId);
+    const point = resolveTimelinePoint(event.clientX, rail.getBoundingClientRect());
+    setTimelineScrub({ ...point, dragging: false });
+    if (point.candidate) activateCandidate(point.candidate.id, { reveal: true, seekPreview: true });
+    else if (previewMatchesSelectedRun) seekPreviewTo(point.ms);
+  }
+
+  function handleTimelinePointerLeave() {
+    if (timelineScrub?.dragging) return;
+    setTimelineScrub(null);
+    setHoveredCandidateId(null);
+  }
+
   function activateCandidate(candidateId: string, options?: { reveal?: boolean; seekPreview?: boolean }) {
     const candidate = selectedRun?.candidates.find((entry) => entry.id === candidateId);
     if (!candidate) {
@@ -1799,27 +1912,84 @@ export function AnalysisScreen({
             ) : null}
 
             {canReviewCandidates && isCompletedReview ? (
-              <div aria-label="what to review" className="review-mode-switch" role="tablist">
-                {(['steps', 'pathway'] as const).map((mode) => (
+              <div className="review-mode-bar">
+                <div aria-label="what to review" className="review-mode-switch" role="tablist">
+                  {(['steps', 'pathway'] as const).map((mode) => (
+                    <button
+                      aria-selected={reviewMode === mode}
+                      className={`candidate-filter-tab ${reviewMode === mode ? 'active' : ''}`}
+                      key={mode}
+                      onClick={() => {
+                        if (mode !== reviewMode) track({ kind: 'page', name: mode === 'pathway' ? 'pathway' : 'review' });
+                        setReviewMode(mode);
+                      }}
+                      role="tab"
+                      title={
+                        mode === 'steps'
+                          ? 'review the steps: accept, reject, title and annotate them'
+                          : 'the accepted steps as a chart of screens and the moves between them'
+                      }
+                      type="button"
+                    >
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+                {/* Export sits right-aligned under the run finish time, reachable from both steps and pathway views. */}
+                <div className="candidate-export-shell" ref={exportMenuRef}>
                   <button
-                    aria-selected={reviewMode === mode}
-                    className={`candidate-filter-tab ${reviewMode === mode ? 'active' : ''}`}
-                    key={mode}
-                    onClick={() => {
-                      if (mode !== reviewMode) track({ kind: 'page', name: mode === 'pathway' ? 'pathway' : 'review' });
-                      setReviewMode(mode);
-                    }}
-                    role="tab"
-                    title={
-                      mode === 'steps'
-                        ? 'review the steps: accept, reject, title and annotate them'
-                        : 'the accepted steps as a chart of screens and the moves between them'
-                    }
+                    aria-expanded={openPopover === 'export'}
+                    className="analysis-pill success"
+                    disabled={!canExportAll || exportRunPending}
+                    onClick={() => togglePopover('export')}
                     type="button"
                   >
-                    {mode}
+                    {exportRunPending ? 'exporting...' : 'export'}
                   </button>
-                ))}
+                  {openPopover === 'export' ? (
+                    <div className="candidate-export-popover">
+                      <div className="candidate-export-name-stack">
+                        <label className="candidate-export-name-wrap">
+                          <span className="sr-only">export zip name</span>
+                          <input
+                            aria-label="export zip name"
+                            className="candidate-export-name-field"
+                            onChange={(event) => setExportNameDraft(event.target.value)}
+                            placeholder="file name (optional)"
+                            value={exportNameDraft}
+                          />
+                          <span className="candidate-export-name-suffix">.zip</span>
+                        </label>
+                        <span className="candidate-export-name-preview">
+                          {resolvedExportFilenamePreview
+                            ? `→ ${resolvedExportFilenamePreview}`
+                            : '→ named by the server'}
+                        </span>
+                      </div>
+                      <div className="candidate-export-option-list">
+                        <button
+                          className="analysis-task-link subtle"
+                          disabled={!canExportAccepted || exportRunPending}
+                          onClick={() => void handleSelectedRunExport('accepted')}
+                          type="button"
+                        >
+                          export accepted
+                        </button>
+                        <button
+                          className="analysis-task-link subtle"
+                          disabled={!canExportAll || exportRunPending}
+                          onClick={() => void handleSelectedRunExport('all')}
+                          type="button"
+                        >
+                          export all
+                        </button>
+                      </div>
+                      {selectedRunExportLabel ? (
+                        <span className="analysis-export-status">{selectedRunExportLabel}</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : null}
 
@@ -1852,21 +2022,73 @@ export function AnalysisScreen({
                       <span className="accepted-strip-title">accepted steps</span>
                       <small>{selectedRun.accepted_steps.length}</small>
                     </button>
-                    <div className="accepted-strip" hidden={stepLayout.hideAccepted} id="analysis-accepted-strip">
+                    <div
+                      className={`accepted-strip ${acceptedStripPanning ? 'is-panning' : ''}`}
+                      hidden={stepLayout.hideAccepted}
+                      id="analysis-accepted-strip"
+                      onPointerDown={(event) => {
+                        if (event.button !== 0) return;
+                        if (event.target instanceof Element && event.target.closest('button')) return;
+                        const strip = event.currentTarget;
+                        if (strip.scrollWidth <= strip.clientWidth) return;
+                        acceptedStripDragRef.current = {
+                          startX: event.clientX,
+                          startScroll: strip.scrollLeft,
+                          moved: false,
+                        };
+                      }}
+                      onPointerMove={(event) => {
+                        const drag = acceptedStripDragRef.current;
+                        if (!drag) return;
+                        const dx = event.clientX - drag.startX;
+                        if (!drag.moved && Math.abs(dx) < 5) return;
+                        if (!drag.moved) {
+                          drag.moved = true;
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                          setAcceptedStripPanning(true);
+                        }
+                        event.currentTarget.scrollLeft = drag.startScroll - dx;
+                      }}
+                      onPointerUp={(event) => {
+                        const drag = acceptedStripDragRef.current;
+                        if (!drag) return;
+                        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                          event.currentTarget.releasePointerCapture(event.pointerId);
+                        }
+                        if (drag.moved) {
+                          // Swallow the trailing click caused by pointer release after panning.
+                          window.setTimeout(() => {
+                            acceptedStripDragRef.current = null;
+                          }, 0);
+                        } else {
+                          acceptedStripDragRef.current = null;
+                        }
+                        setAcceptedStripPanning(false);
+                      }}
+                      onPointerCancel={() => {
+                        acceptedStripDragRef.current = null;
+                        setAcceptedStripPanning(false);
+                      }}
+                    >
                       {selectedRun.accepted_steps.map((step) => {
                         const similarityLink = acceptedStepSimilarityLinks.get(step.step_id);
                         return (
                           <div
-                            className="accepted-step-chip"
+                            className={`accepted-step-chip ${hoveredCandidateId === step.source_candidate_id ? 'is-cross-hovered' : ''}`}
                             id={`accepted-step-${step.step_id}`}
                             key={step.step_id}
-                            onClick={() => activateCandidate(step.source_candidate_id, { reveal: true })}
+                            onClick={() => {
+                              if (acceptedStripDragRef.current?.moved) return;
+                              activateCandidate(step.source_candidate_id, { reveal: true });
+                            }}
                             onKeyDown={(event) => {
                               if (event.key === 'Enter' || event.key === ' ') {
                                 event.preventDefault();
                                 activateCandidate(step.source_candidate_id, { reveal: true });
                               }
                             }}
+                            onMouseEnter={() => setHoveredCandidateId(step.source_candidate_id)}
+                            onMouseLeave={() => setHoveredCandidateId((id) => (id === step.source_candidate_id ? null : id))}
                             role="button"
                             tabIndex={0}
                           >
@@ -1935,7 +2157,15 @@ export function AnalysisScreen({
                         ))}
                     </div>
                     <div className="candidate-timeline-shell">
-                      <div className="candidate-timeline-rail" aria-label="candidate timeline">
+                      <div
+                        aria-label="candidate timeline: hover to preview steps, click or drag to scrub"
+                        className={`candidate-timeline-rail ${timelineScrub?.dragging ? 'is-scrubbing' : ''}`}
+                        onPointerCancel={handleTimelinePointerUp}
+                        onPointerDown={handleTimelinePointerDown}
+                        onPointerLeave={handleTimelinePointerLeave}
+                        onPointerMove={handleTimelinePointerMove}
+                        onPointerUp={handleTimelinePointerUp}
+                      >
                       {candidateTimelineSegments
                         .filter((segment) => !hiddenSegmentTypes.has(segment.type))
                         .map((segment) => (
@@ -1967,24 +2197,72 @@ export function AnalysisScreen({
                           }}
                         />
                       ) : null}
+                      {timelineScrub ? (
+                        <>
+                          <span
+                            aria-hidden="true"
+                            className="candidate-timeline-hover-line"
+                            style={{ left: `${timelineScrub.pct}%` }}
+                          />
+                          <div
+                            aria-hidden="true"
+                            className="candidate-timeline-preview"
+                            style={{ left: `${Math.min(92, Math.max(8, timelineScrub.pct))}%` }}
+                          >
+                            {timelineScrub.candidate ? (
+                              <>
+                                <img
+                                  alt=""
+                                  className="candidate-timeline-preview-thumb"
+                                  src={absoluteApiUrl(timelineScrub.candidate.image_url)}
+                                />
+                                <div className="candidate-timeline-preview-meta">
+                                  <span className="candidate-timeline-preview-head">
+                                    <span className={`candidate-timeline-preview-dot ${timelineScrub.candidate.status}`} />
+                                    <strong>
+                                      {timelineScrub.candidate.candidate_origin === 'manual' ? 'manual' : 'step'}{' '}
+                                      {timelineScrub.candidate.detector_index}
+                                    </strong>
+                                    <small>{timelineScrub.candidate.timestamp_tc}</small>
+                                  </span>
+                                  {timelineScrub.candidate.title ? (
+                                    <span className="candidate-timeline-preview-title">
+                                      {timelineScrub.candidate.title}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="candidate-timeline-preview-time">
+                                {formatPlaybackTimestamp(timelineScrub.ms)}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      ) : null}
                       {timelineCandidates.map((candidate) => {
                         const tooltip = `${candidate.candidate_origin === 'manual' ? 'manual' : 'candidate'} ${candidate.detector_index} • ${candidate.timestamp_tc} • ${candidate.status}`;
+                        const pinPct = Math.min(
+                          100,
+                          Math.max(
+                            0,
+                            (candidate.timestamp_ms / Math.max(1, selectedRecordingSummary?.duration_ms ?? 1)) * 100,
+                          ),
+                        );
                         return (
                           <button
                             aria-label={tooltip}
-                            className={`candidate-timeline-pin ${candidate.status} ${activeCandidateId === candidate.id ? 'active' : ''}`}
+                            className={`candidate-timeline-pin ${candidate.status} ${activeCandidateId === candidate.id ? 'active' : ''} ${hoveredCandidateId === candidate.id ? 'is-hovered' : ''}`}
                             data-tooltip={tooltip}
                             key={candidate.id}
                             onClick={() => activateCandidate(candidate.id, { reveal: true, seekPreview: true })}
-                            style={{
-                              left: `${Math.min(
-                                100,
-                                Math.max(
-                                  0,
-                                  (candidate.timestamp_ms / Math.max(1, selectedRecordingSummary?.duration_ms ?? 1)) * 100,
-                                ),
-                              )}%`,
+                            onMouseEnter={() => {
+                              setHoveredCandidateId(candidate.id);
+                              setTimelineScrub((current) =>
+                                current?.dragging ? current : { pct: pinPct, ms: candidate.timestamp_ms, candidate, dragging: false },
+                              );
                             }}
+                            style={{ left: `${pinPct}%` }}
                             title={tooltip}
                             type="button"
                           />
@@ -2012,7 +2290,11 @@ export function AnalysisScreen({
                   </div>
                 ) : null}
 
-                <div className="candidate-review-toolbar" id="analysis-review-toolbar">
+                <div
+                  className={`candidate-review-toolbar ${selectedShownCandidateIds.length > 0 ? 'has-selection' : ''}`}
+                  id="analysis-review-toolbar"
+                  ref={stepAreaRef}
+                >
                   <div className="candidate-review-nav-group">
                     <div aria-label="candidate review filters" className="candidate-filter-tabs" role="tablist">
                       {candidateFilters.map((filter) => (
@@ -2042,167 +2324,87 @@ export function AnalysisScreen({
                         <span><span className="candidate-key-badge">← →</span> step</span>
                       </span>
                     )}
-                  </div>
-
-                  {(canReviewCandidates && filteredCandidates.length > 0) || isCompletedReview ? (
-                    <div className="candidate-review-actions">
-                      {canReviewCandidates && filteredCandidates.length > 0 ? (
-                        // Two groups: which steps (of the ones shown), and what to do with them.
-                        <div className="candidate-bulk-actions">
-                          <div aria-label="select steps" className="candidate-bulk-group" role="group">
-                            <span
-                              className="candidate-bulk-count"
-                              title="shift-click a step's box, or press shift+x, to select every step from the one selected last"
-                            >
-                              select
+                    {canReviewCandidates && filteredCandidates.length > 0 ? (
+                      // Two groups: which steps (of the ones shown), and what to do with them.
+                      <div className="candidate-bulk-actions">
+                        <div aria-label="select steps" className="candidate-bulk-group" role="group">
+                          <span
+                            className="candidate-bulk-count"
+                            title="shift-click a step's box, drag across checkboxes, or press shift+x to select a range"
+                          >
+                            select
+                          </span>
+                          <button
+                            className="analysis-task-link subtle"
+                            disabled={shownSelectionState === 'all'}
+                            onClick={() => setSelectedCandidateIds(shownCandidateIds)}
+                            title="every step shown"
+                            type="button"
+                          >
+                            all
+                          </button>
+                          <button
+                            className="analysis-task-link subtle"
+                            disabled={shownSelectionState === 'none'}
+                            onClick={() => setSelectedCandidateIds([])}
+                            type="button"
+                          >
+                            none
+                          </button>
+                          <button
+                            className="analysis-task-link subtle"
+                            onClick={() => setSelectedCandidateIds((current) => invertSelection(current, shownCandidateIds))}
+                            title="the steps shown that are not selected, instead of the ones that are"
+                            type="button"
+                          >
+                            invert
+                          </button>
+                        </div>
+                        {selectedShownCandidateIds.length > 0 ? (
+                          <div aria-label="act on the selected steps" className="candidate-bulk-group" role="group">
+                            <span className="candidate-bulk-count">
+                              {selectedShownCandidateIds.length} of {shownCandidateIds.length} selected
                             </span>
                             <button
-                              className="analysis-task-link subtle"
-                              disabled={shownSelectionState === 'all'}
-                              onClick={() => setSelectedCandidateIds(shownCandidateIds)}
-                              title="every step shown"
+                              className="candidate-bulk-decision accepted"
+                              disabled={bulkCandidatePending}
+                              onClick={() => void handleBulkCandidateStatusChange('accepted')}
                               type="button"
                             >
-                              all
-                            </button>
-                            <button
-                              className="analysis-task-link subtle"
-                              disabled={shownSelectionState === 'none'}
-                              onClick={() => setSelectedCandidateIds([])}
-                              type="button"
-                            >
-                              none
-                            </button>
-                            <button
-                              className="analysis-task-link subtle"
-                              onClick={() => setSelectedCandidateIds((current) => invertSelection(current, shownCandidateIds))}
-                              title="the steps shown that are not selected, instead of the ones that are"
-                              type="button"
-                            >
-                              invert
-                            </button>
-                          </div>
-                          {selectedShownCandidateIds.length > 0 ? (
-                            <div aria-label="act on the selected steps" className="candidate-bulk-group" role="group">
-                              <span className="candidate-bulk-count">
-                                {selectedShownCandidateIds.length} of {shownCandidateIds.length} selected
+                              <span aria-hidden="true" className="candidate-bulk-decision-dot">
+                                <DecisionIcon intent="accepted" />
                               </span>
-                              <button
-                                className="candidate-bulk-decision accepted"
-                                disabled={bulkCandidatePending}
-                                onClick={() => void handleBulkCandidateStatusChange('accepted')}
-                                type="button"
-                              >
-                                <span aria-hidden="true" className="candidate-bulk-decision-dot">
-                                  <DecisionIcon intent="accepted" />
-                                </span>
-                                accept
-                              </button>
-                              <button
-                                className="candidate-bulk-decision rejected"
-                                disabled={bulkCandidatePending}
-                                onClick={() => void handleBulkCandidateStatusChange('rejected')}
-                                type="button"
-                              >
-                                <span aria-hidden="true" className="candidate-bulk-decision-dot">
-                                  <DecisionIcon intent="rejected" />
-                                </span>
-                                reject
-                              </button>
-                              <button
-                                className="candidate-bulk-decision pending"
-                                disabled={bulkCandidatePending}
-                                onClick={() => void handleBulkCandidateStatusChange('pending')}
-                                title="back to undecided"
-                                type="button"
-                              >
-                                <span aria-hidden="true" className="candidate-bulk-decision-dot">
-                                  <DecisionIcon intent="pending" />
-                                </span>
-                                reset
-                              </button>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      {isCompletedReview ? (
-                        <>
-                          {/* Only export on the bar; the file's name and when it was last exported are in its menu. */}
-                          <div className="candidate-export-shell" ref={exportMenuRef}>
+                              accept
+                            </button>
                             <button
-                              aria-expanded={openPopover === 'export'}
-                              className="analysis-pill success"
-                              disabled={!canExportAll || exportRunPending}
-                              onClick={() => togglePopover('export')}
+                              className="candidate-bulk-decision rejected"
+                              disabled={bulkCandidatePending}
+                              onClick={() => void handleBulkCandidateStatusChange('rejected')}
                               type="button"
                             >
-                              {exportRunPending ? 'exporting...' : 'export'}
+                              <span aria-hidden="true" className="candidate-bulk-decision-dot">
+                                <DecisionIcon intent="rejected" />
+                              </span>
+                              reject
                             </button>
-                            {openPopover === 'export' ? (
-                              <div className="candidate-export-popover">
-                                <div className="candidate-export-name-stack">
-                                  <label className="candidate-export-name-wrap">
-                                    <span className="sr-only">export zip name</span>
-                                    <input
-                                      aria-label="export zip name"
-                                      className="candidate-export-name-field"
-                                      onChange={(event) => setExportNameDraft(event.target.value)}
-                                      placeholder="file name (optional)"
-                                      value={exportNameDraft}
-                                    />
-                                    <span className="candidate-export-name-suffix">.zip</span>
-                                  </label>
-                                  <span className="candidate-export-name-preview">
-                                    {resolvedExportFilenamePreview
-                                      ? `→ ${resolvedExportFilenamePreview}`
-                                      : '→ named by the server'}
-                                  </span>
-                                </div>
-                                <div className="candidate-export-option-list">
-                                  <button
-                                    className="analysis-task-link subtle"
-                                    disabled={!canExportAccepted || exportRunPending}
-                                    onClick={() => void handleSelectedRunExport('accepted')}
-                                    type="button"
-                                  >
-                                    export accepted
-                                  </button>
-                                  <button
-                                    className="analysis-task-link subtle"
-                                    disabled={!canExportAll || exportRunPending}
-                                    onClick={() => void handleSelectedRunExport('all')}
-                                    type="button"
-                                  >
-                                    export all
-                                  </button>
-                                </div>
-                                {selectedRunExportLabel ? (
-                                  <span className="analysis-export-status">{selectedRunExportLabel}</span>
-                                ) : null}
-                              </div>
-                            ) : null}
+                            <button
+                              className="candidate-bulk-decision pending"
+                              disabled={bulkCandidatePending}
+                              onClick={() => void handleBulkCandidateStatusChange('pending')}
+                              title="back to undecided"
+                              type="button"
+                            >
+                              <span aria-hidden="true" className="candidate-bulk-decision-dot">
+                                <DecisionIcon intent="pending" />
+                              </span>
+                              reset
+                            </button>
                           </div>
-                        </>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="candidate-view-bar" ref={stepAreaRef}>
-                  <span className="candidate-view-note">
-                    {labelHiddenCount > 0 ? (
-                      <>
-                        {labelHiddenCount} {labelHiddenCount === 1 ? 'step' : 'steps'} hidden by label{' · '}
-                        <button
-                          className="analysis-task-link subtle"
-                          onClick={() => setHiddenSegmentTypes(new Set())}
-                          type="button"
-                        >
-                          show all
-                        </button>
-                      </>
+                        ) : null}
+                      </div>
                     ) : null}
-                  </span>
+                  </div>
+
                   <div className="candidate-view-controls">
                     <div aria-label="step layout" className="candidate-view-switch" role="group">
                       {(['grid', 'list'] as const).map((view) => (
@@ -2249,6 +2451,21 @@ export function AnalysisScreen({
                   </div>
                 </div>
 
+                {labelHiddenCount > 0 ? (
+                  <div className="candidate-view-bar">
+                    <span className="candidate-view-note">
+                      {labelHiddenCount} {labelHiddenCount === 1 ? 'step' : 'steps'} hidden by label{' · '}
+                      <button
+                        className="analysis-task-link subtle"
+                        onClick={() => setHiddenSegmentTypes(new Set())}
+                        type="button"
+                      >
+                        show all
+                      </button>
+                    </span>
+                  </div>
+                ) : null}
+
                 {filteredCandidates.length && stepLayout.view === 'list' ? (
                   <div
                     aria-label="steps"
@@ -2289,11 +2506,17 @@ export function AnalysisScreen({
                         <CandidateRow
                           candidate={candidate}
                           isActive={activeCandidateId === candidate.id}
+                          isCrossHovered={hoveredCandidateId === candidate.id}
                           isSelectable
                           isSelected={selectedShownCandidateIds.includes(candidate.id)}
                           key={candidate.id}
                           onActivate={() => setActiveCandidateId(candidate.id)}
+                          onHoverChange={(hovering) =>
+                            setHoveredCandidateId((current) => (hovering ? candidate.id : current === candidate.id ? null : current))
+                          }
                           onJumpToSimilar={similarityLink ? () => jumpToAnchor(similarityLink.targetId) : undefined}
+                          onPaintEnter={() => continuePaintSelect(candidate.id)}
+                          onPaintStart={() => startPaintSelect(candidate.id, selectedShownCandidateIds.includes(candidate.id))}
                           onSetStatus={(status) => handleCandidateStatusChange(candidate, status)}
                           onToggleSelection={(shift) => toggleCandidateSelection(candidate.id, shift)}
                           onUpdate={(payload) => onUpdateCandidate(candidate.id, payload)}
@@ -2326,11 +2549,17 @@ export function AnalysisScreen({
                           hover={stepHover(candidate)}
                           isActive={activeCandidateId === candidate.id}
                           isAnnotationExpanded={expandedAnnotationCandidateId === candidate.id}
+                          isCrossHovered={hoveredCandidateId === candidate.id}
                           isSelected={selectedShownCandidateIds.includes(candidate.id)}
                           isSelectable
                           key={candidate.id}
                           onActivate={() => setActiveCandidateId(candidate.id)}
+                          onHoverChange={(hovering) =>
+                            setHoveredCandidateId((current) => (hovering ? candidate.id : current === candidate.id ? null : current))
+                          }
                           onJumpToSimilar={similarityLink ? () => jumpToAnchor(similarityLink.targetId) : undefined}
+                          onPaintEnter={() => continuePaintSelect(candidate.id)}
+                          onPaintStart={() => startPaintSelect(candidate.id, selectedShownCandidateIds.includes(candidate.id))}
                           onSetStatus={(status) => handleCandidateStatusChange(candidate, status)}
                           onToggleSelection={(shift) => toggleCandidateSelection(candidate.id, shift)}
                           onToggleAnnotation={() => handleToggleCandidateAnnotation(candidate.id)}

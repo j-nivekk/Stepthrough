@@ -37,6 +37,33 @@ function PlayFromHereButton({ iconOnly, onClick }: { iconOnly: boolean; onClick:
   );
 }
 
+/** Two offset closed screen cards (front card + matching back card tucked cleanly behind its edges). */
+function StackingIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="13" viewBox="0 0 16 16" width="13">
+      <rect height="10.25" rx="1" stroke="currentColor" strokeWidth="1.3" width="8.5" x="2" y="1.5" />
+      <path
+        d="M10.5 4.25h2.25a1 1 0 0 1 1 1v8.25a1 1 0 0 1-1 1H6.25a1 1 0 0 1-1-1V11.75"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.3"
+      />
+    </svg>
+  );
+}
+
+/** Three-stage moon phase sequence (new -> half -> full) for walkthrough phases. */
+function PhasesIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="13" viewBox="0 0 22 16" width="18">
+      <circle cx="3.75" cy="8" r="2.35" stroke="currentColor" strokeWidth="1.25" />
+      <circle cx="11" cy="8" r="2.75" stroke="currentColor" strokeWidth="1.25" />
+      <path d="M11 5.25A2.75 2.75 0 0 1 11 10.75Z" fill="currentColor" />
+      <circle cx="18.25" cy="8" fill="currentColor" r="2.65" />
+    </svg>
+  );
+}
+
 // Mouse rather than pointer events: browsers send mouse enter and leave when the page scrolls under a
 // still pointer. Moving within a screenshot restarts the wait after a scroll cancelled it.
 function hoverHandlers(hover: StepHoverProps | undefined, slot: { current: HTMLElement | null }) {
@@ -257,10 +284,14 @@ export interface CandidateCardProps {
   candidate: CandidateFrame;
   isActive: boolean;
   isAnnotationExpanded: boolean;
+  isCrossHovered?: boolean;
   isSelected: boolean;
   isSelectable: boolean;
   onActivate: () => void;
+  onHoverChange?: (hovering: boolean) => void;
   onJumpToSimilar?: (() => void) | undefined;
+  onPaintStart?: () => void;
+  onPaintEnter?: () => void;
   onSetStatus: (status: CandidateStatus) => void;
   /** Its box was clicked; with shift, every step from the last one clicked to this one goes along. */
   onToggleSelection: (shift: boolean) => void;
@@ -282,10 +313,14 @@ export function CandidateCard({
   candidate,
   isActive,
   isAnnotationExpanded,
+  isCrossHovered = false,
   isSelected,
   isSelectable,
   onActivate,
+  onHoverChange,
   onJumpToSimilar,
+  onPaintStart,
+  onPaintEnter,
   onSetStatus,
   onToggleSelection,
   onToggleAnnotation,
@@ -299,6 +334,7 @@ export function CandidateCard({
   hover,
 }: CandidateCardProps) {
   const liveSlotRef = useRef<HTMLDivElement | null>(null);
+  const paintedDownRef = useRef(false);
   const editing = useStepEditing(candidate);
   const { title, setTitle, notes, setNotes, commit: commitTextField } = useAnnotationDrafts(candidate, onUpdate, editing.lockedElsewhere);
   // The title and notes fields open only on request, so a selected card can still be just a screenshot.
@@ -313,10 +349,13 @@ export function CandidateCard({
 
   return (
     <article
-      className={`candidate-card ${candidate.status} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${compact ? 'compact' : ''} ${showAnnotation ? 'annotating' : ''}`}
+      className={`candidate-card ${candidate.status} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${isCrossHovered ? 'is-cross-hovered' : ''} ${compact ? 'compact' : ''} ${showAnnotation ? 'annotating' : ''}`}
       id={`candidate-${candidate.id}`}
       onClick={onActivate}
       onFocus={onActivate}
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
+      onPointerEnter={() => onPaintEnter?.()}
       tabIndex={-1}
     >
       <div
@@ -340,9 +379,21 @@ export function CandidateCard({
                 aria-label={`select step ${candidate.detector_index}`}
                 checked={isSelected}
                 onChange={() => undefined}
-                onClick={(event) => onToggleSelection(event.shiftKey)}
-                // shift-click selects a range of steps, not the text between them
+                onClick={(event) => {
+                  if (paintedDownRef.current) {
+                    paintedDownRef.current = false;
+                    return;
+                  }
+                  onToggleSelection(event.shiftKey);
+                }}
+                // shift-click selects a range of steps; pointerdown without shift starts drag-to-paint selection
                 onMouseDown={(event) => event.shiftKey && event.preventDefault()}
+                onPointerDown={(event) => {
+                  if (event.button === 0 && !event.shiftKey && onPaintStart) {
+                    paintedDownRef.current = true;
+                    onPaintStart();
+                  }
+                }}
                 type="checkbox"
               />
             </label>
@@ -479,7 +530,7 @@ export function CandidateCard({
 
         {screenSummary && !showAnnotation ? (
           <div className="candidate-secondary-row candidate-screen-summary" title="your choice for the pathway">
-            screen: {screenSummary}
+            stacking: {screenSummary}
           </div>
         ) : null}
 
@@ -498,7 +549,7 @@ export function CandidateCard({
                 onFocus={editing.onFocusField}
                 placeholder="optional custom label"
                 readOnly={editing.lockedElsewhere}
-                title={editing.lockedElsewhere ? EDITED_ELSEWHERE : undefined}
+                title={editing.lockedElsewhere ? EDITED_ELSEWHERE : title || undefined}
                 value={title}
               />
             </label>
@@ -516,22 +567,25 @@ export function CandidateCard({
                 onFocus={editing.onFocusField}
                 placeholder="add observation, annotation note, or coding hint"
                 readOnly={editing.lockedElsewhere}
-                title={editing.lockedElsewhere ? EDITED_ELSEWHERE : undefined}
+                rows={2}
+                title={editing.lockedElsewhere ? EDITED_ELSEWHERE : notes || undefined}
                 value={notes}
               />
             </label>
 
-            <div className="candidate-field-group">
-              <span>screen in the pathway</span>
-              <ScreenChoice candidate={candidate} onUpdate={onUpdate} steps={steps} />
-            </div>
-
-            {phases && candidate.status === 'accepted' ? (
-              <div className="candidate-field-group">
-                <span>phase of the walkthrough</span>
-                <PhaseChoice candidate={candidate} phases={phases.boundaries} runId={phases.runId} />
+            <div className="candidate-pathway-row">
+              <div className="candidate-field-group candidate-pathway-item">
+                <span className="candidate-pathway-label">stacking</span>
+                <ScreenChoice candidate={candidate} icon={<StackingIcon />} onUpdate={onUpdate} steps={steps} />
               </div>
-            ) : null}
+
+              {phases && candidate.status === 'accepted' ? (
+                <div className="candidate-field-group candidate-pathway-item is-end">
+                  <span className="candidate-pathway-label">phases…</span>
+                  <PhaseChoice candidate={candidate} icon={<PhasesIcon />} phases={phases.boundaries} runId={phases.runId} />
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
       </div>
@@ -542,10 +596,14 @@ export function CandidateCard({
 export interface CandidateRowProps {
   candidate: CandidateFrame;
   isActive: boolean;
+  isCrossHovered?: boolean;
   isSelected: boolean;
   isSelectable: boolean;
   onActivate: () => void;
+  onHoverChange?: (hovering: boolean) => void;
   onJumpToSimilar?: (() => void) | undefined;
+  onPaintStart?: () => void;
+  onPaintEnter?: () => void;
   onSetStatus: (status: CandidateStatus) => void;
   onToggleSelection: (shift: boolean) => void;
   onUpdate: CandidateCardProps['onUpdate'];
@@ -561,10 +619,14 @@ export interface CandidateRowProps {
 export function CandidateRow({
   candidate,
   isActive,
+  isCrossHovered = false,
   isSelected,
   isSelectable,
   onActivate,
+  onHoverChange,
   onJumpToSimilar,
+  onPaintStart,
+  onPaintEnter,
   onSetStatus,
   onToggleSelection,
   onUpdate,
@@ -576,6 +638,7 @@ export function CandidateRow({
   hover,
 }: CandidateRowProps) {
   const noSlot = useRef<HTMLElement | null>(null);
+  const paintedDownRef = useRef(false);
   const editing = useStepEditing(candidate);
   const locked = editing.lockedElsewhere;
   const { title, setTitle, notes, setNotes, commit } = useAnnotationDrafts(candidate, onUpdate, locked);
@@ -584,10 +647,13 @@ export function CandidateRow({
 
   return (
     <div
-      className={`candidate-row ${candidate.status} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${locked ? 'edited-elsewhere' : ''}`}
+      className={`candidate-row ${candidate.status} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''} ${isCrossHovered ? 'is-cross-hovered' : ''} ${locked ? 'edited-elsewhere' : ''}`}
       id={`candidate-${candidate.id}`}
       onClick={onActivate}
       onFocus={onActivate}
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
+      onPointerEnter={() => onPaintEnter?.()}
       role="row"
       tabIndex={-1}
     >
@@ -599,9 +665,20 @@ export function CandidateRow({
             onChange={() => undefined}
             onClick={(event) => {
               stop(event);
+              if (paintedDownRef.current) {
+                paintedDownRef.current = false;
+                return;
+              }
               onToggleSelection(event.shiftKey);
             }}
             onMouseDown={(event) => event.shiftKey && event.preventDefault()}
+            onPointerDown={(event) => {
+              stop(event);
+              if (event.button === 0 && !event.shiftKey && onPaintStart) {
+                paintedDownRef.current = true;
+                onPaintStart();
+              }
+            }}
             type="checkbox"
           />
         ) : null}
@@ -642,7 +719,7 @@ export function CandidateRow({
             {similarLink.label}
           </button>
         ) : null}
-        <ScreenChoice candidate={candidate} onUpdate={onUpdate} prefix="screen: " steps={steps} />
+        <ScreenChoice candidate={candidate} onUpdate={onUpdate} prefix="stacking: " steps={steps} />
         {phases && candidate.status === 'accepted' ? (
           <PhaseChoice candidate={candidate} phases={phases.boundaries} prefix="phase: " runId={phases.runId} />
         ) : null}
@@ -663,7 +740,7 @@ export function CandidateRow({
           onFocus={editing.onFocusField}
           placeholder={locked ? EDITED_ELSEWHERE : 'step title'}
           readOnly={locked}
-          title={locked ? EDITED_ELSEWHERE : undefined}
+          title={locked ? EDITED_ELSEWHERE : title || undefined}
           value={title}
         />
       </div>

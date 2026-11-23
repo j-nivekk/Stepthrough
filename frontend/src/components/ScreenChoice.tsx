@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 import { absoluteApiUrl } from '../api';
 import type { CandidateChanges, CandidateFrame } from '../types';
@@ -51,6 +52,8 @@ interface ScreenChoiceProps {
   onUpdate: (changes: CandidateChanges) => void;
   /** Text in front of the choice, for places without a heading of their own. */
   prefix?: string;
+  /** Compact icon shown in narrow cards when the text heading collapses. */
+  icon?: ReactNode;
   /** Offer later steps as well as earlier ones (in the pathway, where a step can move to any box). */
   anyStep?: boolean;
   /** Leave out the pop-up switch, where the place that shows the choice has its own. */
@@ -64,17 +67,19 @@ interface ScreenChoiceProps {
  * give the step a screen of its own, or pick an earlier step that shows the same screen. A switch marks the
  * step as a pop-up.
  */
-export function ScreenChoice({ candidate, steps, onUpdate, prefix, anyStep = false, hidePopup = false, inPathway }: ScreenChoiceProps) {
+export function ScreenChoice({ candidate, steps, onUpdate, prefix, icon, anyStep = false, hidePopup = false, inPathway }: ScreenChoiceProps) {
   const [open, setOpen] = useState(false);
   // Where the list opens, in the window: it is not part of the card, which would cut it off.
   const [place, setPlace] = useState<CSSProperties>({});
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    const inside = (node: Node | null) => Boolean(node && (shellRef.current?.contains(node) || popoverRef.current?.contains(node)));
     function closeOutside(event: PointerEvent) {
-      if (shellRef.current && !shellRef.current.contains(event.target as Node)) setOpen(false);
+      if (!inside(event.target as Node | null)) setOpen(false);
     }
     function closeOnEscape(event: KeyboardEvent) {
       if (event.key === 'Escape') {
@@ -84,7 +89,7 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, anyStep = fal
     }
     // The list stays where it opened, so it closes when the page under it moves (not when the list itself scrolls).
     function closeOnScroll(event: Event) {
-      if (!(event.target instanceof Node) || !shellRef.current?.contains(event.target)) setOpen(false);
+      if (!(event.target instanceof Node) || !inside(event.target)) setOpen(false);
     }
     const close = () => setOpen(false);
     document.addEventListener('pointerdown', closeOutside, true);
@@ -136,85 +141,92 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, anyStep = fal
     triggerRef.current?.focus();
   }
 
+  const valueText = `${link ?? 'automatic'}${popup && !hidePopup ? ' · pop-up' : ''}`;
+  const popover = open ? (
+    <div
+      aria-label={`stacking of step ${candidate.detector_index} in the pathway`}
+      className="screen-choice-popover"
+      onClick={stop}
+      onPointerDown={stop}
+      ref={popoverRef}
+      role="dialog"
+      style={place}
+    >
+      <p className="screen-choice-heading">in the pathway, this step shows</p>
+      <button
+        aria-pressed={!candidate.screen_link}
+        className={`screen-choice-option ${!candidate.screen_link ? 'active' : ''}`}
+        onClick={() => choose('auto')}
+        type="button"
+      >
+        <span>automatic</span>
+        <small>from revisits and labels</small>
+      </button>
+      <button
+        aria-pressed={candidate.screen_link === 'new'}
+        className={`screen-choice-option ${candidate.screen_link === 'new' ? 'active' : ''}`}
+        onClick={() => choose('new')}
+        type="button"
+      >
+        <span>a new screen</span>
+        <small>a box of its own</small>
+      </button>
+      {earlier.length > 0 ? (
+        <>
+          <p className="screen-choice-heading">the same screen as</p>
+          <p className="screen-choice-note">
+            {inPathway ? `moves step ${ownNumber} alone` : 'moves this step alone'}, with the steps that scroll or
+            type on from it.
+            {inPathway && inPathway.boxSize > 1
+              ? ` to move ${inPathway.boxSize === 2 ? 'both' : `all ${inPathway.boxSize}`} steps of its box together, use merge into.`
+              : ''}
+          </p>
+          <div className="screen-choice-steps">
+            {earlier.map((step) => (
+              <button
+                aria-pressed={candidate.screen_link === step.id}
+                className={`screen-choice-step ${candidate.screen_link === step.id ? 'active' : ''}`}
+                key={step.id}
+                onClick={() => choose(step.id)}
+                type="button"
+              >
+                <img alt="" loading="lazy" src={absoluteApiUrl(step.image_url)} />
+                <strong>{numberOf(step) ?? step.detector_index}</strong>
+                <span>
+                  {step.title || step.timestamp_tc}
+                  {inPathway?.box.get(step.id) ? <small className="screen-choice-box">in {inPathway.box.get(step.id)}</small> : null}
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+      {hidePopup ? null : (
+        <label className="screen-choice-popup">
+          <input checked={popup} onChange={(event) => onUpdate(popupChange(candidate, event.target.checked))} type="checkbox" />
+          this step is a pop-up
+        </label>
+      )}
+    </div>
+  ) : null;
+
   return (
     <div className="screen-choice" onClick={stop} onPointerDown={stop} ref={shellRef}>
       <button
         aria-expanded={open}
         aria-haspopup="dialog"
+        aria-label={`stacking: ${valueText}`}
         className={`inline-link-button screen-choice-trigger ${link || candidate.screen_kind ? 'chosen' : ''}`}
         onClick={toggle}
         ref={triggerRef}
-        title="which screen this step shows in the pathway"
+        title={`stacking: ${valueText}`}
         type="button"
       >
+        {icon ? <span className="candidate-choice-icon" aria-hidden="true">{icon}</span> : null}
         {prefix ? <span className="screen-choice-prefix">{prefix}</span> : null}
-        {link ?? 'automatic'}
-        {popup && !hidePopup ? ' · pop-up' : ''}
+        <span className="screen-choice-value">{valueText}</span>
       </button>
-      {open ? (
-        <div
-          aria-label={`screen of step ${candidate.detector_index} in the pathway`}
-          className="screen-choice-popover"
-          role="dialog"
-          style={place}
-        >
-          <p className="screen-choice-heading">in the pathway, this step shows</p>
-          <button
-            aria-pressed={!candidate.screen_link}
-            className={`screen-choice-option ${!candidate.screen_link ? 'active' : ''}`}
-            onClick={() => choose('auto')}
-            type="button"
-          >
-            <span>automatic</span>
-            <small>from revisits and labels</small>
-          </button>
-          <button
-            aria-pressed={candidate.screen_link === 'new'}
-            className={`screen-choice-option ${candidate.screen_link === 'new' ? 'active' : ''}`}
-            onClick={() => choose('new')}
-            type="button"
-          >
-            <span>a new screen</span>
-            <small>a box of its own</small>
-          </button>
-          {earlier.length > 0 ? (
-            <>
-              <p className="screen-choice-heading">the same screen as</p>
-              <p className="screen-choice-note">
-                {inPathway ? `moves step ${ownNumber} alone` : 'moves this step alone'}, with the steps that scroll or
-                type on from it.
-                {inPathway && inPathway.boxSize > 1
-                  ? ` to move ${inPathway.boxSize === 2 ? 'both' : `all ${inPathway.boxSize}`} steps of its box together, use merge into.`
-                  : ''}
-              </p>
-              <div className="screen-choice-steps">
-                {earlier.map((step) => (
-                  <button
-                    aria-pressed={candidate.screen_link === step.id}
-                    className={`screen-choice-step ${candidate.screen_link === step.id ? 'active' : ''}`}
-                    key={step.id}
-                    onClick={() => choose(step.id)}
-                    type="button"
-                  >
-                    <img alt="" loading="lazy" src={absoluteApiUrl(step.image_url)} />
-                    <strong>{numberOf(step) ?? step.detector_index}</strong>
-                    <span>
-                      {step.title || step.timestamp_tc}
-                      {inPathway?.box.get(step.id) ? <small className="screen-choice-box">in {inPathway.box.get(step.id)}</small> : null}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : null}
-          {hidePopup ? null : (
-            <label className="screen-choice-popup">
-              <input checked={popup} onChange={(event) => onUpdate(popupChange(candidate, event.target.checked))} type="checkbox" />
-              this step is a pop-up
-            </label>
-          )}
-        </div>
-      ) : null}
+      {popover && typeof document !== 'undefined' ? createPortal(popover, document.body) : popover}
     </div>
   );
 }

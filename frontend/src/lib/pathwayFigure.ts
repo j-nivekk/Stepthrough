@@ -5,8 +5,17 @@
  * Layout: a screen sits one column to the right of the screen it was first reached from. The first screen
  * reached from somewhere continues that row; further ones start a new row below (a branch). The reviewer can say
  * otherwise for a box (its row choice): continue the row, or start a row below. A row that reaches the last column
- * continues on a new row at the left (a wrap). Moves along those links are drawn between the sides of the
- * screenshots; every other move runs over the top of the row.
+ * continues on a new row at the left (a wrap).
+ *
+ * Routing:
+ * - Main flow along row links runs horizontally in dark ink; branches and forward detours use muted terracotta;
+ *   returns to earlier screens are dashed in muted slate-blue.
+ * - Every routed path carries a white under-stroke halo so crossings read cleanly as over/under.
+ * - Branch elbows allocate separate vertical gutter tracks and staggered exits so parallel branches never stack.
+ * - Adjacent-row non-tree moves route directly through the shared inter-row bus instead of detouring to the page
+ *   margin; long moves label both ends so context stays readable when part of the chart is out of view.
+ * - Distant multi-row jumps (2+ rows apart) render as paired portal chips (`[step] → S#` at departure,
+ *   `S# → [step]` at arrival) that stay readable when scrolled/zoomed and can be clicked on the page to jump.
  *
  * Phases (named stretches of steps) are drawn as a bracket over the boxes they reach first, with the phase's
  * name and how many steps and screens it takes.
@@ -42,8 +51,8 @@ export interface PathwayFigureInput {
   /** A screen to mark as selected on the page; left out of files. */
   highlight?: string | null;
   /**
-   * On the page: mark the step numbers under each screen, so that resting the pointer on one can show that step's
-   * screenshot in the box (see PathwayPanel). Left out of files.
+   * On the page: mark the step numbers under each screen, moves, and jump chips so the browser can preview steps,
+   * spotlight connected paths, and click to jump across rows (see PathwayPanel / PathwayCanvas). Left out of files.
    */
   peek?: boolean;
   /** Address of a step's screenshot: a URL on the page, a data URI in a file that has to stand alone. */
@@ -55,25 +64,48 @@ export interface PathwayFigure {
   svg: string;
   width: number;
   height: number;
+  /** Summary of visual encodings present in this figure, for the interactive sticky key. */
+  encodings: {
+    hasBranch: boolean;
+    hasReturn: boolean;
+    hasPortal: boolean;
+    hasPopup: boolean;
+  };
 }
+
+type MoveRole = 'main' | 'branch' | 'return';
 
 const FONT = "Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif";
 const INK = '#111';
 const SUB = '#6b6b66';
 const NOTE = '#333';
+/** Semantic path colours: dark ink for main flow, muted terracotta for branches/detours, slate-blue for returns. */
+const BRANCH_COLOR = '#a44d10';
+const RETURN_COLOR = '#2c5f8a';
 const MARGIN = 48;
-const GAP_X = 140;
-const ROW_GAP = 30;
+const GAP_X = 148;
+const ROW_GAP = 34;
 /** Screenshot size: the side of a square with the same area, as for the step cards. */
 const FRAME_SIZE = 220;
 const FRAME_MIN_WIDTH = 120;
 /** Columns are added until the figure would be wider than this. */
 const TARGET_WIDTH = 1700;
-const TRACK = 9;
+/** Horizontal bus track pitch (> 19px portal chip & 15px step pill height so parallel tracks never collide). */
+const BUS_TRACK = 22;
+/** Vertical margin corridor pitch (wires only, no pills). */
+const SIDE_TRACK = 14;
+/** Spacing between parallel vertical branch trunks inside a column gutter. */
+const GUTTER_TRACK = 12;
 /** Line height of a phase's name and counts above its bracket. */
 const PHASE_LINE = 13;
 const STACK = 5;
 const MAX_PILLS = 4;
+
+const ROLE_COLOR: Record<MoveRole, string> = {
+  main: INK,
+  branch: BRANCH_COLOR,
+  return: RETURN_COLOR,
+};
 
 let canvasContext: CanvasRenderingContext2D | null | undefined;
 
@@ -123,22 +155,24 @@ function text(x: number, y: number, content: string, style: TextStyle = {}): str
   return `<text ${attrs.join(' ')}>${style.raw ? content : esc(content)}</text>`;
 }
 
-function wrapText(content: string, width: number, size: number, bold: boolean, measure: TextMeasurer): string[] {
+function wrapText(content: string, width: number, size: number, bold: boolean, measure: TextMeasurer, firstWidth = width): string[] {
   const lines: string[] = [];
+  const limit = () => (lines.length === 0 ? firstWidth : width);
   for (const paragraph of content.split(/\r?\n/)) {
     let line = '';
     for (let word of paragraph.split(/\s+/).filter(Boolean)) {
       // A word wider than the line (a URL) is cut into pieces that fit.
-      while (measure(word, size, bold) > width && word.length > 1) {
+      while (measure(word, size, bold) > limit() && word.length > 1) {
+        const cap = limit();
         let cut = word.length - 1;
-        while (cut > 1 && measure(word.slice(0, cut), size, bold) > width) cut -= 1;
+        while (cut > 1 && measure(word.slice(0, cut), size, bold) > cap) cut -= 1;
         if (line) lines.push(line);
         lines.push(word.slice(0, cut));
         line = '';
         word = word.slice(cut);
       }
       const next = line ? `${line} ${word}` : word;
-      if (line && measure(next, size, bold) > width) {
+      if (line && measure(next, size, bold) > limit()) {
         lines.push(line);
         line = word;
       } else {
@@ -152,25 +186,105 @@ function wrapText(content: string, width: number, size: number, bold: boolean, m
 
 const pillWidth = (label: string): number => (label.length === 1 ? 15 : label.length * 6.2 + 10);
 
-function pill(x: number, cy: number, label: string): string {
+function pill(x: number, cy: number, label: string, fill = INK): string {
   const width = pillWidth(label);
   return (
-    `<rect x="${n1(x)}" y="${n1(cy - 7.5)}" width="${n1(width)}" height="15" rx="7.5" fill="${INK}"/>` +
+    `<rect x="${n1(x)}" y="${n1(cy - 7.5)}" width="${n1(width)}" height="15" rx="7.5" fill="${fill}"/>` +
     text(x + width / 2, cy + 3.3, label, { size: 9.5, bold: true, fill: '#fff', anchor: 'middle' })
   );
 }
 
+function compactPasses(labels: string[]): string[] {
+  return labels.length > MAX_PILLS ? [...labels.slice(0, MAX_PILLS - 1), `+${labels.length - MAX_PILLS + 1}`] : labels;
+}
+
 /** Step numbers side by side, centred on a point of a line. */
-function pillRow(cx: number, cy: number, labels: string[]): string {
-  const shown = labels.length > MAX_PILLS ? [...labels.slice(0, MAX_PILLS - 1), `+${labels.length - MAX_PILLS + 1}`] : labels;
+function pillRow(cx: number, cy: number, labels: string[], fill = INK): string {
+  const shown = compactPasses(labels);
   const total = shown.reduce((sum, label) => sum + pillWidth(label), 0) + 2 * (shown.length - 1);
   let x = cx - total / 2;
   let out = '';
   for (const label of shown) {
-    out += pill(x, cy, label);
+    out += pill(x, cy, label, fill);
     x += pillWidth(label) + 2;
   }
   return out;
+}
+
+function miniPillWidth(label: string): number {
+  return label.length === 1 ? 13 : label.length * 5.6 + 8;
+}
+
+function measurePortalChip(
+  labels: string[],
+  tagText: string,
+  measure: TextMeasurer,
+): { width: number; pillsWidth: number; tagWidth: number; shown: string[] } {
+  const shown = compactPasses(labels);
+  const pillsWidth = shown.reduce((sum, label) => sum + miniPillWidth(label), 0) + Math.max(0, shown.length - 1) * 2;
+  const tagWidth = measure(tagText, 9.5, true);
+  // 4px outer padding + pills + 5px gap + tagText + 6px outer padding
+  const width = 4 + pillsWidth + 5 + tagWidth + 6;
+  return { width, pillsWidth, tagWidth, shown };
+}
+
+/**
+ * Compact rounded chip drawn at one end of a distant jump, wrap, or long cross-row move.
+ * - `side === 'departure'`: `[pills] → S7` (shows where the move goes)
+ * - `side === 'arrival'`: `S2 → [pills]` (shows where the move came from)
+ * On the page (`peek: true`), carries `data-jump-to` so clicking scrolls directly to the other screen.
+ */
+function renderPortalChip(params: {
+  x: number;
+  cy: number;
+  labels: string[];
+  tagText: string;
+  side: 'departure' | 'arrival';
+  role: MoveRole;
+  measure: TextMeasurer;
+  targetScreen: PathwayScreen;
+  peek: boolean;
+}): { svg: string; width: number } {
+  const { x, cy, labels, tagText, side, role, measure, targetScreen, peek } = params;
+  const color = ROLE_COLOR[role];
+  const { width, pillsWidth, shown } = measurePortalChip(labels, tagText, measure);
+  const dashed = role === 'return' ? ' stroke-dasharray="3.5 2.5"' : '';
+  const height = 19;
+  let inner =
+    `<rect x="${n1(x)}" y="${n1(cy - height / 2)}" width="${n1(width)}" height="${height}" rx="9.5" fill="#fff" stroke="${color}" stroke-width="1.1"${dashed}/>`;
+
+  const drawPills = (startX: number): void => {
+    let px = startX;
+    for (const label of shown) {
+      const pw = miniPillWidth(label);
+      inner +=
+        `<rect x="${n1(px)}" y="${n1(cy - 6.5)}" width="${n1(pw)}" height="13" rx="6.5" fill="${color}"/>` +
+        text(px + pw / 2, cy + 3.1, label, { size: 8.8, bold: true, fill: '#fff', anchor: 'middle' });
+      px += pw + 2;
+    }
+  };
+
+  if (side === 'departure') {
+    drawPills(x + 3.5);
+    inner += text(x + 3.5 + pillsWidth + 4.5, cy + 3.2, tagText, { size: 9.5, bold: true, fill: color });
+  } else {
+    const tagStart = x + 6;
+    inner += text(tagStart, cy + 3.2, tagText, { size: 9.5, bold: true, fill: color });
+    drawPills(x + width - 3.5 - pillsWidth);
+  }
+
+  if (!peek) {
+    return { svg: inner, width };
+  }
+  const targetLabel =
+    targetScreen.title === `Screen ${targetScreen.index}`
+      ? `Screen ${targetScreen.index}`
+      : `Screen ${targetScreen.index}, ${targetScreen.title}`;
+  const titleText = side === 'departure' ? `Jump to ${targetLabel}` : `Jump back to ${targetLabel}`;
+  const svg =
+    `<g class="pathway-jump-chip" data-jump-to="${esc(targetScreen.id)}" role="button" tabindex="0" aria-label="${esc(titleText)}">` +
+    `<title>${esc(titleText)}</title>${inner}</g>`;
+  return { svg, width };
 }
 
 // ── where the screens sit ──────────────────────────────────────────────────────────────────────
@@ -246,10 +360,10 @@ function placeScreens(screens: PathwayScreen[], maxCols: number): { placed: Map<
   return { placed, rows: nextRow + 1, cols };
 }
 
-/** Lines that would overlap get different tracks: the lowest track where `[from, to]` is free. */
-function takeTrack(tracks: Array<Array<[number, number]>>, from: number, to: number): number {
-  const lo = Math.min(from, to);
-  const hi = Math.max(from, to);
+/** Lines that would overlap get different tracks: the lowest track where `[from, to]` (with optional padding) is free. */
+function takeTrack(tracks: Array<Array<[number, number]>>, from: number, to: number, pad = 0): number {
+  const lo = Math.min(from, to) - pad;
+  const hi = Math.max(from, to) + pad;
   for (let index = 0; ; index += 1) {
     const used = (tracks[index] ??= []);
     if (used.every(([a, b]) => hi < a || lo > b)) {
@@ -286,11 +400,32 @@ function buildCard(
   let svg = '';
 
   // The title and the notes are shown in full, however long: the row grows to fit them (see buildPathwayFigure).
-  const titleLines = wrapText(screen.title, width, 12, true, measure);
+  // When a screen has a custom title (so "Screen N" is no longer the title), pair it with a compact `S#` badge
+  // so every box stays traceable to jump chips (`→ S#`), menus, and the status bar.
+  const trimmedTitle = screen.title.trim();
+  const screenBadge = `S${screen.index}`;
+  const showScreenBadge = !new RegExp(`^screen\\s+${screen.index}\\b`, 'i').test(trimmedTitle);
+  const badgeW = showScreenBadge ? Math.max(22, Math.ceil(measure(screenBadge, 9, true) + 10)) : 0;
+  const firstWord = trimmedTitle.split(/\s+/)[0] ?? '';
+  const inlineGap = 5;
+  const inlineFirstWidth = width - badgeW - inlineGap;
+  const badgeInline =
+    showScreenBadge &&
+    inlineFirstWidth >= 48 &&
+    (measure(firstWord, 12, true) <= inlineFirstWidth || measure(firstWord, 12, true) > width);
+  const titleLines = wrapText(screen.title, width, 12, true, measure, badgeInline ? inlineFirstWidth : width);
+  const firstLineY = -9 - (titleLines.length - 1) * 15;
+  if (showScreenBadge) {
+    const badgeCy = badgeInline ? firstLineY - 4 : firstLineY - 19;
+    svg +=
+      `<rect x="0" y="${n1(badgeCy - 7)}" width="${n1(badgeW)}" height="14" rx="7" fill="#f3f3ef" stroke="#c8c8c2" stroke-width="0.9"/>` +
+      text(badgeW / 2, badgeCy + 3, screenBadge, { size: 9, bold: true, fill: '#444', anchor: 'middle' });
+  }
   titleLines.forEach((line, index) => {
-    svg += text(0, -9 - (titleLines.length - 1 - index) * 15, line, { size: 12, bold: true, halo: true });
+    const lineX = badgeInline && index === 0 ? badgeW + inlineGap : 0;
+    svg += text(lineX, -9 - (titleLines.length - 1 - index) * 15, line, { size: 12, bold: true, halo: true });
   });
-  const above = 6 + titleLines.length * 15;
+  const above = 6 + titleLines.length * 15 + (showScreenBadge && !badgeInline ? 17 : 0);
 
   if (stack) svg += `<rect x="${stack}" y="${stack}" width="${width}" height="${height}" fill="#fff" stroke="${INK}" stroke-width="0.75"/>`;
   svg += `<rect width="${width}" height="${height}" fill="#f3f3f0"/>`;
@@ -362,11 +497,13 @@ function buildCard(
 
 // ── the figure ─────────────────────────────────────────────────────────────────────────────────
 
-interface Route {
+interface RenderedMove {
   transition: PathwayTransition;
-  path: string;
-  pillX: number;
-  pillY: number;
+  role: MoveRole;
+  /** Painter's order: lower layers render first so main flow and branches sit cleanly on top of background buses. */
+  layer: number;
+  /** SVG fragments inside `<g id="move-...">`. */
+  svg: string;
 }
 
 /** A path through points, with the corners rounded. Consecutive points share an x or a y. */
@@ -393,9 +530,22 @@ function roundedPath(points: Array<[number, number]>, radius = 8): string {
   return d;
 }
 
+/** Draws a routed line with a white crossing halo underneath (and a wider transparent hit path on screen). */
+function strokePath(d: string, role: MoveRole, peek: boolean, withArrow = true): string {
+  const color = ROLE_COLOR[role];
+  const width = role === 'return' ? 1.15 : 1.25;
+  const dash = role === 'return' ? ' stroke-dasharray="5 3.5"' : '';
+  const marker = withArrow ? ` marker-end="url(#pathway-arrow-${role})"` : '';
+  const hit = peek ? `<path class="pathway-move-hit" d="${d}" fill="none" stroke="transparent" stroke-width="12"/>` : '';
+  const halo = `<path class="pathway-move-halo" d="${d}" fill="none" stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>`;
+  const line = `<path class="pathway-move-line" d="${d}" fill="none" stroke="${color}" stroke-width="${width}"${dash}${marker}/>`;
+  return hit + halo + line;
+}
+
 export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   const { pathway, options, imageFor } = input;
   const measure = input.measure ?? measureText;
+  const peek = Boolean(input.peek);
   const aspect = input.aspect > 0 ? input.aspect : 16 / 10;
   const width = Math.max(FRAME_MIN_WIDTH, Math.round(FRAME_SIZE * Math.sqrt(aspect)));
   const height = Math.round(width / aspect);
@@ -405,38 +555,66 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   const steps = new Map(pathway.steps.map((step) => [step.step_id, step]));
   const { placed, rows, cols } = placeScreens(pathway.screens, maxCols);
   const cards = new Map<string, Card>();
-  for (const screen of pathway.screens) cards.set(screen.id, buildCard(screen, steps, width, height, options, imageFor, measure, Boolean(input.peek)));
+  for (const screen of pathway.screens) cards.set(screen.id, buildCard(screen, steps, width, height, options, imageFor, measure, peek));
 
-  // Moves that do not follow the tree run over the top of a row, and between rows through a margin. Their
-  // tracks are found first, in columns and rows, because the tracks decide how much room the figure needs.
-  type Kind = 'straight' | 'elbow' | 'wrap' | 'over';
+  // Route planning: allocate horizontal bus tracks, vertical gutter tracks, and portal slots first,
+  // because the allocated tracks decide row heights and outer margins.
+  type Kind = 'straight' | 'elbow' | 'wrap' | 'wrap-portal' | 'over' | 'adjacent' | 'portal';
   interface Plan {
     transition: PathwayTransition;
     from: Placed;
     to: Placed;
     kind: Kind;
+    role: MoveRole;
     /** Drawn against the direction of the tree link it follows (a move back to the screen it came from). */
     reversed: boolean;
     busFrom?: number;
     busTo?: number;
-    side?: 'left' | 'right';
     sideTrack?: number;
-    /** For a wrap: the track in the other margin. */
     otherTrack?: number;
+    /** Gutter column index (`0..cols-2` between cols, `-1` left of col 0, `cols-1` right of last col). */
+    gutterCol?: number;
+    gutterTrack?: number;
+    /** Stagger index for side attachments on a screen. */
+    sideExitIndex?: number;
     slotFrom?: number;
     slotTo?: number;
   }
+
   const busTracks: Array<Array<Array<[number, number]>>> = Array.from({ length: rows }, () => []);
   const sideTracks: Record<'left' | 'right', Array<Array<[number, number]>>> = { left: [], right: [] };
-  const slots = new Map<string, number>();
-  const takeSlot = (id: string): number => {
-    const slot = slots.get(id) ?? 0;
-    slots.set(id, slot + 1);
+  const gutterTracks = new Map<number, Array<Array<[number, number]>>>();
+  const takeGutter = (col: number, r1: number, r2: number): number => {
+    let tracks = gutterTracks.get(col);
+    if (!tracks) {
+      tracks = [];
+      gutterTracks.set(col, tracks);
+    }
+    return takeTrack(tracks, r1, r2, 0.05);
+  };
+  const topSlots = new Map<string, number>();
+  const takeTopSlot = (id: string): number => {
+    const slot = topSlots.get(id) ?? 0;
+    topSlots.set(id, slot + 1);
     return slot;
   };
+  const sideExits = new Map<string, number>();
+  const takeSideExit = (key: string): number => {
+    const slot = sideExits.get(key) ?? 0;
+    sideExits.set(key, slot + 1);
+    return slot;
+  };
+
+  let wrapLeftExtra = 0;
+  let wrapRightExtra = 0;
+  let wrapRightChipMax = 0;
+  let hasBranch = false;
+  let hasReturn = false;
+  let hasPortal = false;
   const LEFT = -1;
   const RIGHT = cols;
   const plans: Plan[] = [];
+
   for (const transition of pathway.transitions) {
     const from = placed.get(transition.from_screen);
     const to = placed.get(transition.to_screen);
@@ -445,34 +623,114 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
     const back = from.screen.reached_from === to.screen.id;
     const parent = forward ? from : to;
     const child = forward ? to : from;
-    const plan: Plan = { transition, from, to, kind: 'over', reversed: back };
+    const isReturn = transition.kind === 'return' || back;
+    const passLabels = transition.passes.map((pass) => String(pass.step_index));
+    const rowDelta = Math.abs(from.row - to.row);
+
+    const plan: Plan = {
+      transition,
+      from,
+      to,
+      kind: 'over',
+      role: isReturn ? 'return' : 'main',
+      reversed: back,
+    };
+
     if (forward || back) {
       if (child.wrapped) {
-        plan.kind = 'wrap';
-        plan.busTo = takeTrack(busTracks[child.row] ?? [], LEFT, RIGHT);
-        plan.sideTrack = takeTrack(sideTracks.right, parent.row, child.row);
-        plan.otherTrack = takeTrack(sideTracks.left, child.row - 0.5, child.row);
+        if (child.row - parent.row >= 2) {
+          plan.kind = 'wrap-portal';
+          plan.role = isReturn ? 'return' : 'main';
+          hasPortal = true;
+          const depW = measurePortalChip(passLabels, `→ S${to.screen.index}`, measure).width;
+          const arrW = measurePortalChip(passLabels, `S${from.screen.index} →`, measure).width;
+          if (back) {
+            wrapLeftExtra = Math.max(wrapLeftExtra, depW + 24);
+            wrapRightExtra = Math.max(wrapRightExtra, arrW + 24);
+          } else {
+            wrapRightExtra = Math.max(wrapRightExtra, depW + 24);
+            wrapLeftExtra = Math.max(wrapLeftExtra, arrW + 24);
+          }
+        } else {
+          plan.kind = 'wrap';
+          plan.role = isReturn ? 'return' : 'main';
+          plan.busTo = takeTrack(busTracks[child.row] ?? [], LEFT, RIGHT);
+          plan.sideTrack = takeTrack(sideTracks.right, parent.row, child.row);
+          plan.otherTrack = takeTrack(sideTracks.left, child.row - 0.5, child.row);
+          const rightTag = back ? `S${from.screen.index} →` : `→ S${to.screen.index}`;
+          const rightChipW = measurePortalChip(passLabels, rightTag, measure).width;
+          wrapRightChipMax = Math.max(wrapRightChipMax, rightChipW);
+        }
+      } else if (child.row === parent.row) {
+        plan.kind = 'straight';
+        plan.role = isReturn ? 'return' : 'main';
       } else {
-        plan.kind = child.row === parent.row ? 'straight' : 'elbow';
+        plan.kind = 'elbow';
+        plan.role = isReturn ? 'return' : 'branch';
+        plan.gutterCol = parent.col;
+        plan.gutterTrack = takeGutter(parent.col, parent.row, child.row);
+        plan.sideExitIndex = takeSideExit(`${parent.screen.id}:right:${back ? 'back' : 'fwd'}`);
+      }
+    } else if (rowDelta === 0) {
+      plan.kind = 'over';
+      plan.role = isReturn ? 'return' : 'branch';
+      plan.slotFrom = takeTopSlot(from.screen.id);
+      plan.slotTo = takeTopSlot(to.screen.id);
+      plan.busTo = takeTrack(busTracks[to.row] ?? [], from.col, to.col, 0.08);
+    } else if (rowDelta === 1) {
+      // Adjacent-row non-tree move: route directly through the shared inter-row bus instead of the outer margin.
+      plan.kind = 'adjacent';
+      plan.role = isReturn ? 'return' : 'branch';
+      const lowerRow = Math.max(from.row, to.row);
+      const goingDown = to.row > from.row;
+      const sideScreen = goingDown ? from : to;
+      const otherScreen = goingDown ? to : from;
+      // Pick the gutter on the side facing the other screen (falling back when at the outer edge).
+      const useRightGutter =
+        otherScreen.col > sideScreen.col
+          ? true
+          : otherScreen.col < sideScreen.col
+            ? false
+            : sideScreen.col < cols - 1;
+      const gCol = useRightGutter ? sideScreen.col : sideScreen.col - 1;
+      plan.gutterCol = gCol;
+      plan.gutterTrack = takeGutter(gCol, from.row, to.row);
+      plan.sideExitIndex = takeSideExit(`${sideScreen.screen.id}:${useRightGutter ? 'right' : 'left'}:adj`);
+      if (goingDown) {
+        plan.slotTo = takeTopSlot(to.screen.id);
+        plan.busTo = takeTrack(busTracks[lowerRow] ?? [], gCol + 0.5, to.col, 0.12);
+      } else {
+        plan.slotFrom = takeTopSlot(from.screen.id);
+        plan.busFrom = takeTrack(busTracks[lowerRow] ?? [], from.col, gCol + 0.5, 0.12);
+      }
+      if (gCol < 0) {
+        sideTracks.left[0] ??= [];
+      } else if (gCol >= cols - 1) {
+        sideTracks.right[0] ??= [];
       }
     } else {
-      plan.slotFrom = takeSlot(from.screen.id);
-      plan.slotTo = takeSlot(to.screen.id);
-      if (from.row === to.row) {
-        plan.busTo = takeTrack(busTracks[to.row] ?? [], from.col, to.col);
-      } else {
-        plan.side = from.col + to.col + 1 < cols ? 'left' : 'right';
-        const edge = plan.side === 'left' ? LEFT : RIGHT;
-        plan.busFrom = takeTrack(busTracks[from.row] ?? [], from.col, edge);
-        plan.busTo = takeTrack(busTracks[to.row] ?? [], to.col, edge);
-        plan.sideTrack = takeTrack(sideTracks[plan.side], from.row, to.row);
-      }
+      // Distant multi-row jump (2+ rows apart): paired portal chips directly above departure & arrival cards.
+      plan.kind = 'portal';
+      plan.role = isReturn ? 'return' : 'branch';
+      hasPortal = true;
+      plan.slotFrom = takeTopSlot(from.screen.id);
+      plan.slotTo = takeTopSlot(to.screen.id);
+      const depSpan = Math.max(0.45, (measurePortalChip(passLabels, `→ S${to.screen.index}`, measure).width + 20) / pitch);
+      const arrSpan = Math.max(0.45, (measurePortalChip(passLabels, `S${from.screen.index} →`, measure).width + 20) / pitch);
+      plan.busFrom = takeTrack(busTracks[from.row] ?? [], from.col - 0.05, from.col + depSpan, 0.04);
+      plan.busTo = takeTrack(busTracks[to.row] ?? [], to.col - 0.05, to.col + arrSpan, 0.04);
     }
+
+    if (plan.role === 'branch') hasBranch = true;
+    if (plan.role === 'return') hasReturn = true;
     plans.push(plan);
   }
 
-  const leftMargin = MARGIN + (sideTracks.left.length ? 12 + sideTracks.left.length * TRACK : 0);
-  const rightMargin = MARGIN + (sideTracks.right.length ? 12 + sideTracks.right.length * TRACK : 0);
+  const leftSideSpace = sideTracks.left.length ? 16 + sideTracks.left.length * SIDE_TRACK : 0;
+  const rightSidePad = wrapRightChipMax > 0 ? wrapRightChipMax + 24 : 16;
+  const rightSideSpace = sideTracks.right.length ? rightSidePad + sideTracks.right.length * SIDE_TRACK : 0;
+  const leftMargin = MARGIN + Math.max(leftSideSpace, wrapLeftExtra);
+  const rightMargin = MARGIN + Math.max(rightSideSpace, wrapRightExtra);
   const figureWidth = Math.max(520, leftMargin + cols * width + (cols - 1) * GAP_X + STACK + rightMargin);
   const titleLines = wrapText(input.title, figureWidth - 2 * MARGIN, 17, true, measure);
   const subtitleLines = wrapText(input.subtitle, figureWidth - 2 * MARGIN, 10.5, false, measure);
@@ -549,8 +807,8 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   let y = options.caption ? headerBottom + 28 : MARGIN;
   for (let row = 0; row < rows; row += 1) {
     const tracks = busTracks[row]?.length ?? 0;
-    if (tracks) y += 10 + tracks * TRACK;
-    busBase[row] = y - 6;
+    if (tracks) y += 22 + tracks * BUS_TRACK;
+    busBase[row] = y - 18;
     phaseTop[row] = y;
     y += Math.max(0, ...brackets.filter((bracket) => bracket.row === row).map(bracketHeight));
     y += Math.max(0, ...inRow(row).map((card) => card.above));
@@ -562,50 +820,66 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   const left = (item: Placed): number => leftMargin + item.col * pitch;
   const right = (item: Placed): number => left(item) + width + (cards.get(item.screen.id)?.stack ?? 0);
   const top = (item: Placed): number => rowTop[item.row] ?? 0;
-  const busY = (row: number, track: number): number => (busBase[row] ?? 0) - track * TRACK;
+  const busY = (row: number, track: number): number => (busBase[row] ?? 0) - track * BUS_TRACK;
   const sideX = (side: 'left' | 'right', track: number): number =>
-    side === 'left' ? leftMargin - 14 - track * TRACK : figureWidth - rightMargin + 14 + track * TRACK;
-  const slotX = (item: Placed, slot: number): number => left(item) + width - 14 - (slot % Math.max(1, Math.floor((width - 28) / 10))) * 10;
+    side === 'left' ? leftMargin - 16 - track * SIDE_TRACK : figureWidth - rightMargin + rightSidePad + track * SIDE_TRACK;
+  const gutterX = (col: number, track: number): number => {
+    if (col < 0) return leftMargin - 18 - track * GUTTER_TRACK;
+    const base = leftMargin + col * pitch + width + STACK + 20;
+    const maxInGap = col < cols - 1 ? leftMargin + (col + 1) * pitch - 18 : figureWidth - 16;
+    return Math.min(maxInGap, base + track * GUTTER_TRACK);
+  };
+  const slotX = (item: Placed, slot: number): number =>
+    left(item) + width - 16 - (slot % Math.max(1, Math.floor((width - 32) / 14))) * 14;
 
-  const routes: Route[] = [];
+  const renderedMoves: RenderedMove[] = [];
   for (const plan of plans) {
-    const { from, to, transition } = plan;
-    let points: Array<[number, number]> = [];
-    let pillX = 0;
-    let pillY = 0;
+    const { from, to, transition, role } = plan;
+    const color = ROLE_COLOR[role];
+    const passLabels = transition.passes.map((pass) => String(pass.step_index));
+    let svg = '';
+    let layer = 1;
+
     if (plan.kind === 'straight') {
+      layer = 4;
       const parent = plan.reversed ? to : from;
       const child = plan.reversed ? from : to;
       const lineY = top(parent) + height * (plan.reversed ? 0.52 : 0.32);
-      points = plan.reversed ? [[left(child), lineY], [right(parent) + 2, lineY]] : [[right(parent), lineY], [left(child) - 2, lineY]];
-      pillX = (right(parent) + left(child)) / 2;
-      pillY = lineY;
+      const pts: Array<[number, number]> = plan.reversed
+        ? [[left(child), lineY], [right(parent) + 2, lineY]]
+        : [[right(parent), lineY], [left(child) - 2, lineY]];
+      svg += strokePath(roundedPath(pts), role, peek);
+      svg += pillRow((right(parent) + left(child)) / 2, lineY, passLabels, color);
     } else if (plan.kind === 'elbow') {
+      layer = 3;
       const parent = plan.reversed ? to : from;
       const child = plan.reversed ? from : to;
+      const trunk = gutterX(plan.gutterCol ?? parent.col, plan.gutterTrack ?? 0);
+      const stagger = (plan.sideExitIndex ?? 0) * 14;
       if (plan.reversed) {
-        const trunk = right(parent) + 17;
         const childY = top(child) + height * 0.52;
-        const parentY = top(parent) + height * 0.76 + 12;
-        points = [[left(child), childY], [trunk, childY], [trunk, parentY], [right(parent) + 2, parentY]];
-        pillX = (trunk + left(child)) / 2;
-        pillY = childY;
+        const parentY = Math.min(top(parent) + height - 10, top(parent) + height * 0.72 + stagger);
+        const pts: Array<[number, number]> = [[left(child), childY], [trunk, childY], [trunk, parentY], [right(parent) + 2, parentY]];
+        svg += strokePath(roundedPath(pts), role, peek);
+        const pillX = Math.max(trunk + 20, (trunk + left(child)) / 2);
+        svg += pillRow(pillX, childY, passLabels, color);
       } else {
-        const trunk = right(parent) + 26;
         const childY = top(child) + height * 0.32;
-        const parentY = top(parent) + height * 0.76;
-        points = [[right(parent), parentY], [trunk, parentY], [trunk, childY], [left(child) - 2, childY]];
-        pillX = (trunk + left(child)) / 2;
-        pillY = childY;
+        const parentY = Math.min(top(parent) + height - 14, top(parent) + height * 0.64 + stagger);
+        const pts: Array<[number, number]> = [[right(parent), parentY], [trunk, parentY], [trunk, childY], [left(child) - 2, childY]];
+        svg += strokePath(roundedPath(pts), role, peek);
+        const pillX = Math.max(trunk + 20, (trunk + left(child)) / 2);
+        svg += pillRow(pillX, childY, passLabels, color);
       }
     } else if (plan.kind === 'wrap') {
+      layer = 1;
       const parent = plan.reversed ? to : from;
       const child = plan.reversed ? from : to;
       const offset = plan.reversed ? 0.52 : 0.32;
       const rightX = sideX('right', plan.sideTrack ?? 0);
       const leftX = sideX('left', plan.otherTrack ?? 0);
       const channel = busY(child.row, plan.busTo ?? 0);
-      const forward: Array<[number, number]> = [
+      const forwardPts: Array<[number, number]> = [
         [right(parent), top(parent) + height * offset],
         [rightX, top(parent) + height * offset],
         [rightX, channel],
@@ -613,31 +887,327 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
         [leftX, top(child) + height * offset],
         [left(child), top(child) + height * offset],
       ];
-      points = plan.reversed ? forward.reverse() : forward;
-      const end = points[points.length - 1] as [number, number];
-      points[points.length - 1] = [end[0] + (plan.reversed ? 2 : -2), end[1]];
-      // On the long run between the rows, above the screen the move arrives at (or leaves, going back).
-      pillX = plan.reversed ? Math.min(rightX - 40, left(parent) + width / 2) : left(child) + width / 2;
-      pillY = channel;
-    } else {
+      const pts = plan.reversed ? forwardPts.reverse() : forwardPts;
+      const end = pts[pts.length - 1] as [number, number];
+      pts[pts.length - 1] = [end[0] + (plan.reversed ? 2 : -2), end[1]];
+      svg += strokePath(roundedPath(pts), role, peek);
+
+      // Label BOTH ends of a wrap: parent-side chip sits directly on parent's right edge (never hovering over
+      // the unrelated screen on the next row); child-side chip sits on the inter-row channel above child.
+      const arrTag = `S${from.screen.index} →`;
+      const depTag = `→ S${to.screen.index}`;
+      const parentY = top(parent) + height * offset;
+      const rightChipX = right(parent) + 12;
+      const leftChipX = left(child) + 4;
+      if (plan.reversed) {
+        svg += renderPortalChip({
+          x: leftChipX,
+          cy: channel,
+          labels: passLabels,
+          tagText: depTag,
+          side: 'departure',
+          role,
+          measure,
+          targetScreen: to.screen,
+          peek,
+        }).svg;
+        svg += renderPortalChip({
+          x: rightChipX,
+          cy: parentY,
+          labels: passLabels,
+          tagText: arrTag,
+          side: 'arrival',
+          role,
+          measure,
+          targetScreen: from.screen,
+          peek,
+        }).svg;
+      } else {
+        svg += renderPortalChip({
+          x: leftChipX,
+          cy: channel,
+          labels: passLabels,
+          tagText: arrTag,
+          side: 'arrival',
+          role,
+          measure,
+          targetScreen: from.screen,
+          peek,
+        }).svg;
+        svg += renderPortalChip({
+          x: rightChipX,
+          cy: parentY,
+          labels: passLabels,
+          tagText: depTag,
+          side: 'departure',
+          role,
+          measure,
+          targetScreen: to.screen,
+          peek,
+        }).svg;
+      }
+    } else if (plan.kind === 'wrap-portal') {
+      layer = 2;
+      const parent = plan.reversed ? to : from;
+      const child = plan.reversed ? from : to;
+      const offset = plan.reversed ? 0.52 : 0.32;
+      const depTag = `→ S${to.screen.index}`;
+      const arrTag = `S${from.screen.index} →`;
+      const depW = measurePortalChip(passLabels, depTag, measure).width;
+      const arrW = measurePortalChip(passLabels, arrTag, measure).width;
+      const parentY = top(parent) + height * offset;
+      const childY = top(child) + height * offset;
+
+      if (plan.reversed) {
+        // Departing left edge of child -> arriving right edge of parent
+        const depChipX = left(child) - 16 - depW;
+        svg += strokePath(roundedPath([[left(child), childY], [depChipX + depW + 2, childY]]), role, peek);
+        svg += renderPortalChip({
+          x: depChipX,
+          cy: childY,
+          labels: passLabels,
+          tagText: depTag,
+          side: 'departure',
+          role,
+          measure,
+          targetScreen: to.screen,
+          peek,
+        }).svg;
+
+        const arrChipX = right(parent) + 16;
+        svg += strokePath(roundedPath([[arrChipX, parentY], [right(parent) + 2, parentY]]), role, peek);
+        svg += renderPortalChip({
+          x: arrChipX,
+          cy: parentY,
+          labels: passLabels,
+          tagText: arrTag,
+          side: 'arrival',
+          role,
+          measure,
+          targetScreen: from.screen,
+          peek,
+        }).svg;
+      } else {
+        // Departing right edge of parent -> arriving left edge of child
+        const depChipX = right(parent) + 16;
+        svg += strokePath(roundedPath([[right(parent), parentY], [depChipX - 2, parentY]]), role, peek);
+        svg += renderPortalChip({
+          x: depChipX,
+          cy: parentY,
+          labels: passLabels,
+          tagText: depTag,
+          side: 'departure',
+          role,
+          measure,
+          targetScreen: to.screen,
+          peek,
+        }).svg;
+
+        const arrChipX = left(child) - 16 - arrW;
+        svg += strokePath(roundedPath([[arrChipX + arrW, childY], [left(child) - 2, childY]]), role, peek);
+        svg += renderPortalChip({
+          x: arrChipX,
+          cy: childY,
+          labels: passLabels,
+          tagText: arrTag,
+          side: 'arrival',
+          role,
+          measure,
+          targetScreen: from.screen,
+          peek,
+        }).svg;
+      }
+    } else if (plan.kind === 'over') {
+      layer = 2;
       const fromX = slotX(from, plan.slotFrom ?? 0);
       const toX = slotX(to, plan.slotTo ?? 0);
       const toBus = busY(to.row, plan.busTo ?? 0);
-      let comesFrom = fromX;
-      if (from.row === to.row) {
-        points = [[fromX, top(from)], [fromX, toBus], [toX, toBus], [toX, top(to) - 2]];
+      const pts: Array<[number, number]> = [[fromX, top(from)], [fromX, toBus], [toX, toBus], [toX, top(to) - 2]];
+      svg += strokePath(roundedPath(pts), role, peek);
+
+      const span = Math.abs(fromX - toX);
+      if (Math.abs(from.col - to.col) >= 3 && span >= 260) {
+        // Long horizontal jump: label both ends so scrolling horizontally never loses the source/target.
+        const depTag = `→ S${to.screen.index}`;
+        const arrTag = `S${from.screen.index} →`;
+        const depW = measurePortalChip(passLabels, depTag, measure).width;
+        const arrW = measurePortalChip(passLabels, arrTag, measure).width;
+        const goingRight = toX > fromX;
+        const depX = goingRight ? fromX + 12 : fromX - 12 - depW;
+        const arrX = goingRight ? toX - 12 - arrW : toX + 12;
+        svg += renderPortalChip({
+          x: depX,
+          cy: toBus,
+          labels: passLabels,
+          tagText: depTag,
+          side: 'departure',
+          role,
+          measure,
+          targetScreen: to.screen,
+          peek,
+        }).svg;
+        svg += renderPortalChip({
+          x: arrX,
+          cy: toBus,
+          labels: passLabels,
+          tagText: arrTag,
+          side: 'arrival',
+          role,
+          measure,
+          targetScreen: from.screen,
+          peek,
+        }).svg;
       } else {
-        const corridor = sideX(plan.side ?? 'left', plan.sideTrack ?? 0);
-        const fromBus = busY(from.row, plan.busFrom ?? 0);
-        points = [[fromX, top(from)], [fromX, fromBus], [corridor, fromBus], [corridor, toBus], [toX, toBus], [toX, top(to) - 2]];
-        comesFrom = corridor;
+        const pillX = span < 60 ? (fromX + toX) / 2 : toX + Math.sign(fromX - toX) * 32;
+        svg += pillRow(pillX, toBus, passLabels, color);
       }
-      const run = Math.abs(comesFrom - toX);
-      pillX = run < 60 ? (comesFrom + toX) / 2 : toX + Math.sign(comesFrom - toX) * 30;
-      pillY = toBus;
+    } else if (plan.kind === 'adjacent') {
+      layer = 1;
+      const goingDown = to.row > from.row;
+      const gCol = plan.gutterCol ?? from.col;
+      const gX = gutterX(gCol, plan.gutterTrack ?? 0);
+      const stagger = (plan.sideExitIndex ?? 0) * 14;
+      let channelY = 0;
+      let startX = 0;
+      let endX = 0;
+
+      if (goingDown) {
+        const useRight = gCol === from.col;
+        const fromEdge = useRight ? right(from) : left(from);
+        const sideY = Math.min(top(from) + height - 12, top(from) + height * 0.62 + stagger);
+        const toX = slotX(to, plan.slotTo ?? 0);
+        channelY = busY(to.row, plan.busTo ?? 0);
+        const pts: Array<[number, number]> = [
+          [fromEdge, sideY],
+          [gX, sideY],
+          [gX, channelY],
+          [toX, channelY],
+          [toX, top(to) - 2],
+        ];
+        svg += strokePath(roundedPath(pts), role, peek);
+        startX = gX;
+        endX = toX;
+      } else {
+        const useRight = gCol === to.col;
+        const toEdge = useRight ? right(to) + 2 : left(to) - 2;
+        const sideY = Math.min(top(to) + height - 12, top(to) + height * 0.56 + stagger);
+        const fromX = slotX(from, plan.slotFrom ?? 0);
+        channelY = busY(from.row, plan.busFrom ?? 0);
+        const pts: Array<[number, number]> = [
+          [fromX, top(from)],
+          [fromX, channelY],
+          [gX, channelY],
+          [gX, sideY],
+          [toEdge, sideY],
+        ];
+        svg += strokePath(roundedPath(pts), role, peek);
+        startX = fromX;
+        endX = gX;
+      }
+
+      const span = Math.abs(endX - startX);
+      const depTag = `→ S${to.screen.index}`;
+      const arrTag = `S${from.screen.index} →`;
+      const depW = measurePortalChip(passLabels, depTag, measure).width;
+      const arrW = measurePortalChip(passLabels, arrTag, measure).width;
+      if (span >= depW + arrW + 36) {
+        const goingRight = endX > startX;
+        const depX = goingRight ? startX + 10 : startX - 10 - depW;
+        const arrX = goingRight ? endX - 10 - arrW : endX + 10;
+        svg += renderPortalChip({
+          x: depX,
+          cy: channelY,
+          labels: passLabels,
+          tagText: depTag,
+          side: 'departure',
+          role,
+          measure,
+          targetScreen: to.screen,
+          peek,
+        }).svg;
+        svg += renderPortalChip({
+          x: arrX,
+          cy: channelY,
+          labels: passLabels,
+          tagText: arrTag,
+          side: 'arrival',
+          role,
+          measure,
+          targetScreen: from.screen,
+          peek,
+        }).svg;
+      } else {
+        const midX = (startX + endX) / 2;
+        svg += renderPortalChip({
+          x: Math.max(8, Math.min(figureWidth - depW - 8, midX - depW / 2)),
+          cy: channelY,
+          labels: passLabels,
+          tagText: depTag,
+          side: 'departure',
+          role,
+          measure,
+          targetScreen: to.screen,
+          peek,
+        }).svg;
+      }
+    } else {
+      // Distant multi-row jump (`portal`): paired departure & arrival chips right above each screen.
+      layer = 2;
+      const fromX = slotX(from, plan.slotFrom ?? 0);
+      const toX = slotX(to, plan.slotTo ?? 0);
+      const depY = busY(from.row, plan.busFrom ?? 0);
+      const arrY = busY(to.row, plan.busTo ?? 0);
+      const depTag = `→ S${to.screen.index}`;
+      const arrTag = `S${from.screen.index} →`;
+      const depW = measurePortalChip(passLabels, depTag, measure).width;
+      const arrW = measurePortalChip(passLabels, arrTag, measure).width;
+
+      // Departure stem rising from `from` into departure chip
+      const depChipX = Math.max(8, Math.min(figureWidth - depW - 8, left(from)));
+      const depTargetX = fromX >= depChipX + depW ? depChipX + depW + 2 : fromX <= depChipX ? depChipX - 2 : fromX;
+      const depPts: Array<[number, number]> =
+        depTargetX === fromX
+          ? [[fromX, top(from)], [fromX, depY + 9.5]]
+          : [[fromX, top(from)], [fromX, depY], [depTargetX, depY]];
+      svg += strokePath(roundedPath(depPts), role, peek, false);
+      svg += renderPortalChip({
+        x: depChipX,
+        cy: depY,
+        labels: passLabels,
+        tagText: depTag,
+        side: 'departure',
+        role,
+        measure,
+        targetScreen: to.screen,
+        peek,
+      }).svg;
+
+      // Arrival chip dropping straight down into `to`
+      const arrChipX = Math.max(8, Math.min(figureWidth - arrW - 8, left(to)));
+      const arrStartX = toX >= arrChipX + arrW ? arrChipX + arrW : toX <= arrChipX ? arrChipX : toX;
+      const arrPts: Array<[number, number]> =
+        arrStartX === toX
+          ? [[toX, arrY + 9.5], [toX, top(to) - 2]]
+          : [[arrStartX, arrY], [toX, arrY], [toX, top(to) - 2]];
+      svg += strokePath(roundedPath(arrPts), role, peek, true);
+      svg += renderPortalChip({
+        x: arrChipX,
+        cy: arrY,
+        labels: passLabels,
+        tagText: arrTag,
+        side: 'arrival',
+        role,
+        measure,
+        targetScreen: from.screen,
+        peek,
+      }).svg;
     }
-    routes.push({ transition, path: roundedPath(points), pillX, pillY });
+
+    renderedMoves.push({ transition, role, layer, svg });
   }
+
+  // Paint background routes before foreground branches and main flow so white crossing halos layer cleanly.
+  renderedMoves.sort((a, b) => a.layer - b.layer);
 
   // ── markup ──
   let body = '';
@@ -648,13 +1218,18 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
     body += '</g>';
   }
   body += '<g id="moves">';
-  for (const route of routes) {
-    const { transition } = route;
-    body +=
-      `<g id="move-${esc(transition.from_screen)}-${esc(transition.to_screen)}">` +
-      `<path d="${route.path}" fill="none" stroke="${INK}" stroke-width="1.1"${transition.kind === 'return' ? ' stroke-dasharray="5 4"' : ''} marker-end="url(#pathway-arrow)"/>` +
-      pillRow(route.pillX, route.pillY, transition.passes.map((pass) => String(pass.step_index))) +
-      '</g>';
+  const seenMoveIds = new Map<string, number>();
+  for (const move of renderedMoves) {
+    const { transition, role } = move;
+    const baseId = `move-${transition.from_screen}-${transition.to_screen}${role === 'return' ? '-ret' : ''}`;
+    const count = seenMoveIds.get(baseId) ?? 0;
+    seenMoveIds.set(baseId, count + 1);
+    const moveId = count === 0 ? baseId : `${baseId}-${count + 1}`;
+    const stepList = transition.passes.map((pass) => pass.step_index).join(', ');
+    const interactive = peek
+      ? ` data-move="" data-from="${esc(transition.from_screen)}" data-to="${esc(transition.to_screen)}" data-role="${role}" data-steps="${esc(stepList)}"`
+      : '';
+    body += `<g id="${esc(moveId)}"${interactive}>${move.svg}</g>`;
   }
   body += '</g>';
   if (brackets.length) {
@@ -662,22 +1237,22 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
     for (const bracket of brackets) {
       const x1 = left(bracket.first);
       const x2 = right(bracket.last);
-      const top = phaseTop[bracket.row] ?? 0;
+      const topY = phaseTop[bracket.row] ?? 0;
       bracket.lines.forEach((line, index) => {
-        body += text(x1, top + 10 + index * PHASE_LINE, line.text, line.bold
+        body += text(x1, topY + 10 + index * PHASE_LINE, line.text, line.bold
           ? { size: 10.5, bold: true, halo: true }
           : { size: 10, fill: SUB, halo: true });
       });
-      const lineY = top + bracket.lines.length * PHASE_LINE + 4;
+      const lineY = topY + bracket.lines.length * PHASE_LINE + 4;
       // A closed end turns down; an open end runs on as a short dashed line, where the phase continues.
       const start = bracket.continues ? `M${n1(x1)} ${n1(lineY)}` : `M${n1(x1)} ${n1(lineY + 5)} V${n1(lineY)}`;
       const end = bracket.goesOn ? '' : ` V${n1(lineY + 5)}`;
       body += `<path d="${start} H${n1(x2)}${end}" fill="none" stroke="${INK}" stroke-width="0.9"/>`;
       if (bracket.continues) body += `<path d="M${n1(x1 - 12)} ${n1(lineY)} H${n1(x1 - 2)}" fill="none" stroke="${INK}" stroke-width="0.9" stroke-dasharray="2 2"/>`;
       if (bracket.goesOn) body += `<path d="M${n1(x2 + 2)} ${n1(lineY)} H${n1(x2 + 12)}" fill="none" stroke="${INK}" stroke-width="0.9" stroke-dasharray="2 2"/>`;
-      if (input.peek) {
+      if (peek) {
         // on the page, the bracket can be clicked to change its phase
-        body += `<rect data-phase="${bracket.phase}" x="${n1(x1)}" y="${n1(top)}" width="${n1(Math.max(1, x2 - x1))}" height="${n1(lineY + 6 - top)}" fill="transparent"/>`;
+        body += `<rect data-phase="${bracket.phase}" x="${n1(x1)}" y="${n1(topY)}" width="${n1(Math.max(1, x2 - x1))}" height="${n1(lineY + 6 - topY)}" fill="transparent"/>`;
       }
     }
     body += '</g>';
@@ -691,7 +1266,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
         ? `<rect x="-5" y="-5" width="${width + card.stack + 10}" height="${height + card.stack + 10}" fill="none" stroke="#cd6d1e" stroke-width="2.5"/>`
         : '';
     // On the page a box can be reached with the keyboard: Enter selects it, the menu key opens its actions.
-    const reachable = input.peek
+    const reachable = peek
       ? ` tabindex="0" role="button" aria-label="${esc(`Screen ${item.screen.index}${item.screen.title !== `Screen ${item.screen.index}` ? `, ${item.screen.title}` : ''}`)}"`
       : '';
     body += `<g id="${esc(item.screen.id)}" data-screen="${esc(item.screen.id)}"${reachable} transform="translate(${n1(left(item))} ${n1(top(item))})">${card.svg}${selected}</g>`;
@@ -741,14 +1316,25 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
     }
   }
 
+  const hasPopup = pathway.screens.some((screen) => screen.kind === 'popup');
   if (options.caption) {
-    const arrow = (dashed: boolean) => (x: number, cy: number): string =>
-      `<line x1="${n1(x)}" y1="${n1(cy)}" x2="${n1(x + 26)}" y2="${n1(cy)}" stroke="${INK}" stroke-width="1.1"${dashed ? ' stroke-dasharray="5 4"' : ''} marker-end="url(#pathway-arrow)"/>`;
+    const arrow = (role: MoveRole) => (x: number, cy: number): string =>
+      `<line x1="${n1(x)}" y1="${n1(cy)}" x2="${n1(x + 26)}" y2="${n1(cy)}" stroke="${ROLE_COLOR[role]}" stroke-width="${role === 'return' ? 1.15 : 1.25}"${role === 'return' ? ' stroke-dasharray="5 3.5"' : ''} marker-end="url(#pathway-arrow-${role})"/>`;
     const items: Array<[(x: number, cy: number) => string, number, string]> = [
       [(x, cy) => pill(x, cy, '2'), 15, 'step number, as in steps.csv'],
-      [arrow(false), 28, 'move to another screen, numbered by the step it leads to'],
+      [arrow('main'), 28, 'move to another screen, numbered by the step it leads to'],
     ];
-    if (pathway.transitions.some((transition) => transition.kind === 'return')) items.push([arrow(true), 28, 'return to an earlier screen']);
+    if (hasBranch) items.push([arrow('branch'), 28, 'branch or detour to another path']);
+    if (hasReturn) items.push([arrow('return'), 28, 'return to an earlier screen']);
+    if (hasPortal) {
+      items.push([
+        (x, cy) =>
+          `<rect x="${n1(x)}" y="${n1(cy - 8)}" width="34" height="16" rx="8" fill="#fff" stroke="${BRANCH_COLOR}" stroke-width="1.1"/>` +
+          text(x + 17, cy + 3, '→ S7', { size: 8.5, bold: true, fill: BRANCH_COLOR, anchor: 'middle' }),
+        34,
+        'jump across rows (screen number at each end)',
+      ]);
+    }
     if (brackets.length) {
       items.push([
         (x, cy) => `<path d="M${n1(x)} ${n1(cy + 4)} V${n1(cy - 2)} H${n1(x + 24)} V${n1(cy + 4)}" fill="none" stroke="${INK}" stroke-width="0.9"/>`,
@@ -756,7 +1342,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
         'phase of the walkthrough, with how many steps and screens it takes',
       ]);
     }
-    if (pathway.screens.some((screen) => screen.kind === 'popup')) {
+    if (hasPopup) {
       items.push([(x, cy) => `<rect x="${n1(x)}" y="${n1(cy - 7)}" width="10" height="14" fill="none" stroke="${INK}" stroke-width="0.75" stroke-dasharray="3 2"/>`, 10, 'pop-up']);
     }
     if ([...cards.values()].some((card) => card.stack)) {
@@ -796,12 +1382,19 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   body += `<g transform="translate(${n1(badgeLeft)} ${n1(badgeTop)})">${buildPathwayBadge({ date: input.date, version: input.version })}</g>`;
   const figureHeight = Math.max(leftBottom, badgeTop + BADGE_HEIGHT) + 30;
 
+  const arrowDef = (role: MoveRole) =>
+    `<marker id="pathway-arrow-${role}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5 L9 5 L1 8.5 Z" fill="${ROLE_COLOR[role]}"/></marker>`;
   const w = Math.ceil(figureWidth);
   const h = Math.ceil(figureHeight);
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" font-family="${esc(FONT)}" fill="${INK}">` +
     `<title>${esc(input.title)}</title>` +
-    `<defs><marker id="pathway-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M1 1.5 L9 5 L1 8.5 Z" fill="${INK}"/></marker></defs>` +
+    `<defs>${arrowDef('main')}${arrowDef('branch')}${arrowDef('return')}</defs>` +
     `<rect width="100%" height="100%" fill="#fff"/>${body}</svg>`;
-  return { svg, width: w, height: h };
+  return {
+    svg,
+    width: w,
+    height: h,
+    encodings: { hasBranch, hasReturn, hasPortal, hasPopup },
+  };
 }

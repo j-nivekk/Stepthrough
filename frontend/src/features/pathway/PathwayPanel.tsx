@@ -300,160 +300,164 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   else if (!pathway) barNotes.push('loading the pathway…');
   if (downloadError) barNotes.push(downloadError);
   if (mergeMutation.isError) barNotes.push(`could not merge the screens: ${mergeMutation.error.message}`);
-  return (
-    <div className="pathway-panel">
-      {invitation}
-      {tutorial}
-      {whatsNew && !tutorialOpen ? <WhatsNewTour onClose={() => setWhatsNew(false)} /> : null}
-      <div className="pathway-bar" ref={areaRef}>
-        {/* The step and screen counts are in the figure's subtitle; this line is only for what needs saying. */}
-        {barNotes.length ? (
-          <span className="candidate-view-note">
-            {barNotes.map((note, index) => (
-              <span key={index}>
-                {index > 0 ? ' · ' : ''}
-                {note}
-              </span>
-            ))}
-          </span>
-        ) : null}
-        <div className="pathway-controls">
-          {/* what the figure shows on the left; its size on the page and the download on the right */}
-          <div className="pathway-controls-group">
-            <div aria-label="view of the pathway" className="pathway-control" role="group">
-              <span className="pathway-control-label" title={DETAILS.find(([value]) => value === view.detail)?.[3]}>
-                view
-              </span>
-              {DETAILS.map(([value, label, hint]) => (
-                <button
-                  aria-pressed={view.detail === value}
-                  className={`candidate-filter-tab ${view.detail === value ? 'active' : ''}`}
-                  key={value}
-                  onClick={() => {
-                    if (view.detail !== value) track({ kind: 'boxes_switched', to: value });
-                    setView((current) => ({ ...current, detail: value }));
-                  }}
-                  title={hint}
-                  type="button"
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div aria-label="where notes go" className="pathway-control" role="group">
-              <span className="pathway-control-label">notes</span>
-              {NOTES.map(([value, label, hint]) => (
-                <button
-                  aria-pressed={view.notes === value}
-                  className={`candidate-filter-tab ${view.notes === value ? 'active' : ''}`}
-                  key={value}
-                  onClick={() => setView((current) => ({ ...current, notes: value }))}
-                  title={hint}
-                  type="button"
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div aria-label="what else to show" className="pathway-control" role="group">
-              <span className="pathway-control-label">show</span>
+  const controlsBar = (
+    <div className="pathway-bar">
+      {/* The step and screen counts are in the figure's subtitle; this line is only for what needs saying. */}
+      {barNotes.length ? (
+        <span className="candidate-view-note">
+          {barNotes.map((note, index) => (
+            <span key={index}>
+              {index > 0 ? ' · ' : ''}
+              {note}
+            </span>
+          ))}
+        </span>
+      ) : null}
+      <div className="pathway-controls">
+        {/* what the figure shows on the left; its size on the page and the download on the right */}
+        <div className="pathway-controls-group">
+          <div aria-label="view of the pathway" className="pathway-control" role="group">
+            <span className="pathway-control-label" title={DETAILS.find(([value]) => value === view.detail)?.[3]}>
+              view
+            </span>
+            {DETAILS.map(([value, label, hint]) => (
               <button
-                aria-pressed={view.times}
-                className={`candidate-filter-tab ${view.times ? 'active' : ''}`}
-                onClick={() => setView((current) => ({ ...current, times: !current.times }))}
-                title="the time of each visit, next to its step number"
-                type="button"
-              >
-                times
-              </button>
-              <button
-                aria-pressed={view.caption}
-                className={`candidate-filter-tab ${view.caption ? 'active' : ''}`}
-                onClick={() => setView((current) => ({ ...current, caption: !current.caption }))}
-                title="the title above the chart and the legend below it"
-                type="button"
-              >
-                title and legend
-              </button>
-            </div>
-            <div aria-label="phases of the walkthrough" className="pathway-control" role="group">
-              <span className="pathway-control-label">phases</span>
-              <button
-                aria-expanded={phases !== null}
-                className={`candidate-filter-tab ${phases !== null ? 'active' : ''}`}
-                data-phases-toggle=""
-                disabled={!pathway}
-                onClick={(event) => {
-                  const button = event.currentTarget.getBoundingClientRect();
-                  setPhases((current) => (current ? null : { list: true, at: { x: button.left, y: button.bottom + 6 } }));
+                aria-pressed={view.detail === value}
+                className={`candidate-filter-tab ${view.detail === value ? 'active' : ''}`}
+                key={value}
+                onClick={() => {
+                  if (view.detail !== value) track({ kind: 'boxes_switched', to: value });
+                  setView((current) => ({ ...current, detail: value }));
                 }}
-                title="named stretches of steps, such as sign up: drawn over the boxes, and in the export"
+                title={hint}
                 type="button"
               >
-                {pathway?.phases?.length ? `${pathway.phases.length} named` : 'none yet'}
+                {label}
               </button>
-            </div>
+            ))}
           </div>
-          <div className="pathway-controls-group pathway-controls-end">
-            <div className="candidate-size-control">
-              <label className="candidate-size-slider" title={`size of the figure on the page: ${zoomPercent}%`}>
-                <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
-                  <rect height="6" rx="1" width="6" x="4" y="4" />
-                </svg>
-                <input
-                  aria-label="size of the figure on the page"
-                  max={PATHWAY_ZOOM_MAX * 100}
-                  min={PATHWAY_ZOOM_MIN * 100}
-                  onChange={(event) => setView((current) => ({ ...current, zoom: clampPathwayZoom(Number(event.target.value) / 100) }))}
-                  step={5}
-                  style={rangeFillStyle(zoomPercent, PATHWAY_ZOOM_MIN * 100, PATHWAY_ZOOM_MAX * 100)}
-                  type="range"
-                  value={Math.min(PATHWAY_ZOOM_MAX * 100, Math.max(PATHWAY_ZOOM_MIN * 100, zoomPercent))}
-                />
-                <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
-                  <rect height="12" rx="1" width="12" x="1" y="1" />
-                </svg>
-              </label>
+          <div aria-label="where notes go" className="pathway-control" role="group">
+            <span className="pathway-control-label">notes</span>
+            {NOTES.map(([value, label, hint]) => (
               <button
-                aria-pressed={view.zoom === null}
-                className={`candidate-filter-tab ${view.zoom === null ? 'active' : ''}`}
-                onClick={() => setView((current) => ({ ...current, zoom: null }))}
-                title="size the figure to fill the width of the page"
+                aria-pressed={view.notes === value}
+                className={`candidate-filter-tab ${view.notes === value ? 'active' : ''}`}
+                key={value}
+                onClick={() => setView((current) => ({ ...current, notes: value }))}
+                title={hint}
                 type="button"
               >
-                fit
+                {label}
               </button>
-            </div>
-            <div aria-label="download the figure" className="pathway-control pathway-download" role="group">
-              {/* "preparing…" takes the place of the label, which keeps room for it, so nothing moves while it works */}
-              <span aria-live="polite" className="pathway-control-label pathway-download-label">
-                <span>{downloading ? 'preparing…' : 'download'}</span>
-                <span aria-hidden="true" className="pathway-download-room">
-                  preparing…
-                </span>
+            ))}
+          </div>
+          <div aria-label="what else to show" className="pathway-control" role="group">
+            <span className="pathway-control-label">show</span>
+            <button
+              aria-pressed={view.times}
+              className={`candidate-filter-tab ${view.times ? 'active' : ''}`}
+              onClick={() => setView((current) => ({ ...current, times: !current.times }))}
+              title="the time of each visit, next to its step number"
+              type="button"
+            >
+              times
+            </button>
+            <button
+              aria-pressed={view.caption}
+              className={`candidate-filter-tab ${view.caption ? 'active' : ''}`}
+              onClick={() => setView((current) => ({ ...current, caption: !current.caption }))}
+              title="the title above the chart and the legend below it"
+              type="button"
+            >
+              title and legend
+            </button>
+          </div>
+          <div aria-label="phases of the walkthrough" className="pathway-control" role="group">
+            <span className="pathway-control-label">phases</span>
+            <button
+              aria-expanded={phases !== null}
+              className={`candidate-filter-tab ${phases !== null ? 'active' : ''}`}
+              data-phases-toggle=""
+              disabled={!pathway}
+              onClick={(event) => {
+                const button = event.currentTarget.getBoundingClientRect();
+                setPhases((current) => (current ? null : { list: true, at: { x: button.left, y: button.bottom + 6 } }));
+              }}
+              title="named stretches of steps, such as sign up: drawn over the boxes, and in the export"
+              type="button"
+            >
+              {pathway?.phases?.length ? `${pathway.phases.length} named` : 'none yet'}
+            </button>
+          </div>
+        </div>
+        <div className="pathway-controls-group pathway-controls-end">
+          <div className="candidate-size-control">
+            <label className="candidate-size-slider" title={`size of the figure on the page: ${zoomPercent}%`}>
+              <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
+                <rect height="6" rx="1" width="6" x="4" y="4" />
+              </svg>
+              <input
+                aria-label="size of the figure on the page"
+                max={PATHWAY_ZOOM_MAX * 100}
+                min={PATHWAY_ZOOM_MIN * 100}
+                onChange={(event) => setView((current) => ({ ...current, zoom: clampPathwayZoom(Number(event.target.value) / 100) }))}
+                step={5}
+                style={rangeFillStyle(zoomPercent, PATHWAY_ZOOM_MIN * 100, PATHWAY_ZOOM_MAX * 100)}
+                type="range"
+                value={Math.min(PATHWAY_ZOOM_MAX * 100, Math.max(PATHWAY_ZOOM_MIN * 100, zoomPercent))}
+              />
+              <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
+                <rect height="12" rx="1" width="12" x="1" y="1" />
+              </svg>
+            </label>
+            <button
+              aria-pressed={view.zoom === null}
+              className={`candidate-filter-tab ${view.zoom === null ? 'active' : ''}`}
+              onClick={() => setView((current) => ({ ...current, zoom: null }))}
+              title="size the figure to fill the width of the page"
+              type="button"
+            >
+              fit
+            </button>
+          </div>
+          <div aria-label="download the figure" className="pathway-control pathway-download" role="group">
+            {/* "preparing…" takes the place of the label, which keeps room for it, so nothing moves while it works */}
+            <span aria-live="polite" className="pathway-control-label pathway-download-label">
+              <span>{downloading ? 'preparing…' : 'download'}</span>
+              <span aria-hidden="true" className="pathway-download-room">
+                preparing…
               </span>
-              {FORMATS.map(([format, hint]) => (
-                <button
-                  aria-busy={downloading === format}
-                  className="analysis-pill success"
-                  disabled={!figure || downloading !== null || updating}
-                  key={format}
-                  onClick={() => void handleDownload(format)}
-                  title={hint}
-                  type="button"
-                >
-                  {format}
-                </button>
-              ))}
-            </div>
+            </span>
+            {FORMATS.map(([format, hint]) => (
+              <button
+                aria-busy={downloading === format}
+                className="analysis-pill success"
+                disabled={!figure || downloading !== null || updating}
+                key={format}
+                onClick={() => void handleDownload(format)}
+                title={hint}
+                type="button"
+              >
+                {format}
+              </button>
+            ))}
           </div>
         </div>
       </div>
+    </div>
+  );
+
+  return (
+    <div className="pathway-panel" ref={areaRef}>
+      {invitation}
+      {tutorial}
+      {whatsNew && !tutorialOpen ? <WhatsNewTour onClose={() => setWhatsNew(false)} /> : null}
       {pathway && figure && figureMarkup ? (
         <PathwayCanvas
           ariaLabel={`pathway of ${filename}: select a box or a step number to change it`}
           busy={updating}
           candidates={run.candidates}
+          encodings={figure.encodings}
           markup={figureMarkup}
           onMerge={async (sourceId, targetId) => (await mergeMutation.mutateAsync({ sourceId, targetId })).changed}
           onPhaseRequest={setPhases}
@@ -483,9 +487,12 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
           onUpdateCandidate={onUpdateCandidate}
           pathway={pathway}
           runId={runId}
+          stickyHeader={controlsBar}
           width={Math.round(figure.width * scale)}
         />
-      ) : null}
+      ) : (
+        controlsBar
+      )}
     </div>
   );
 }

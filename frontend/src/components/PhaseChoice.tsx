@@ -1,11 +1,15 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 import { setRunPhase } from '../api';
 import { formatPathwayTime } from '../lib/pathwayFigure';
 import type { CandidateFrame } from '../types';
 
 type Boundary = { start_ms: number; name: string };
+
+const POPOVER_WIDTH = 236;
+const POPOVER_ROOM = 280;
 
 /** The phase a moment of the recording is in: the name of the last phase that starts at or before it. */
 export function phaseAt(boundaries: Boundary[] | undefined, ms: number): string {
@@ -18,32 +22,99 @@ export function phaseAt(boundaries: Boundary[] | undefined, ms: number): string 
 }
 
 /**
- * Which phase of the walkthrough an accepted step is in, in the step review: one of the phases named so far, a new
- * one, or none. It names this one step, as the pathway's phases panel names a stretch of them; a phase with the same
- * name next to it takes it in.
+ * Which phase an accepted step is in, in the step review: one of the phases named so far, a new one, or none.
+ * Uses the same inline trigger and floating popover as ScreenChoice so both controls read uniformly on step cards
+ * and list rows.
  */
 export function PhaseChoice({
   candidate,
   runId,
   phases,
   prefix,
+  icon,
 }: {
   candidate: CandidateFrame;
   runId: string;
   phases: Boundary[] | undefined;
   /** Before the choice in a tight row, such as "phase: ". */
   prefix?: string;
+  /** Compact icon shown in narrow cards when the text heading collapses. */
+  icon?: ReactNode;
 }) {
   const queryClient = useQueryClient();
   const current = phaseAt(phases, candidate.timestamp_ms);
   const names = [...new Set((phases ?? []).map((boundary) => boundary.name).filter(Boolean))];
+  const [open, setOpen] = useState(false);
+  const [place, setPlace] = useState<CSSProperties>({});
   const [naming, setNaming] = useState(false);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const inside = (node: Node | null) => Boolean(node && (shellRef.current?.contains(node) || popoverRef.current?.contains(node)));
+    function closeOutside(event: PointerEvent) {
+      if (!inside(event.target as Node | null)) {
+        setOpen(false);
+        setNaming(false);
+      }
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false);
+        setNaming(false);
+        triggerRef.current?.focus();
+      }
+    }
+    function closeOnScroll(event: Event) {
+      if (!(event.target instanceof Node) || !inside(event.target)) {
+        setOpen(false);
+        setNaming(false);
+      }
+    }
+    const close = () => {
+      setOpen(false);
+      setNaming(false);
+    };
+    document.addEventListener('pointerdown', closeOutside, true);
+    document.addEventListener('keydown', closeOnEscape);
+    window.addEventListener('scroll', closeOnScroll, true);
+    window.addEventListener('resize', close);
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside, true);
+      document.removeEventListener('keydown', closeOnEscape);
+      window.removeEventListener('scroll', closeOnScroll, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  function toggle() {
+    if (!open && shellRef.current) {
+      const link = shellRef.current.getBoundingClientRect();
+      const left = Math.max(16, Math.min(link.left, window.innerWidth - POPOVER_WIDTH - 16));
+      const below = window.innerHeight - link.bottom;
+      setPlace(
+        below >= POPOVER_ROOM || below >= link.top
+          ? { left, top: link.bottom + 6, maxHeight: Math.max(140, below - 22) }
+          : { left, bottom: window.innerHeight - link.top + 6, maxHeight: Math.max(140, link.top - 22) },
+      );
+      setNaming(false);
+      setError('');
+    }
+    setOpen((was) => !was);
+  }
 
   async function choose(name: string) {
-    if (name === current) return;
+    if (name === current) {
+      setOpen(false);
+      setNaming(false);
+      triggerRef.current?.focus();
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -54,6 +125,8 @@ export function PhaseChoice({
       ]);
       setNaming(false);
       setDraft('');
+      setOpen(false);
+      triggerRef.current?.focus();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message.toLocaleLowerCase() : 'could not save the phase.');
     } finally {
@@ -61,53 +134,108 @@ export function PhaseChoice({
     }
   }
 
-  if (naming) {
-    return (
-      <span className="phase-choice" onClick={(event) => event.stopPropagation()}>
-        {prefix ? <span className="phase-choice-prefix">{prefix}</span> : null}
-        <input
-          aria-label="name of the new phase"
-          autoFocus
-          className="candidate-field phase-choice-input"
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  const valueText = saving ? 'saving…' : current || 'no phase';
+
+  const popover = open ? (
+    <div
+      aria-label={`phase of step ${candidate.detector_index}`}
+      className="screen-choice-popover phase-choice-popover"
+      onClick={stop}
+      onPointerDown={stop}
+      ref={popoverRef}
+      role="dialog"
+      style={place}
+    >
+      <p className="screen-choice-heading">phase for this step</p>
+      <button
+        aria-pressed={!current}
+        className={`screen-choice-option ${!current ? 'active' : ''}`}
+        disabled={saving}
+        onClick={() => void choose('')}
+        type="button"
+      >
+        <span>no phase</span>
+        <small>outside every phase</small>
+      </button>
+      {names.map((name) => (
+        <button
+          aria-pressed={current === name}
+          className={`screen-choice-option ${current === name ? 'active' : ''}`}
           disabled={saving}
-          maxLength={80}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && draft.trim()) void choose(draft.trim());
-            if (event.key === 'Escape') setNaming(false);
-          }}
-          placeholder="sign up"
-          value={draft}
-        />
-        {error ? <span className="editable-name-error">{error}</span> : null}
-      </span>
-    );
-  }
+          key={name}
+          onClick={() => void choose(name)}
+          type="button"
+        >
+          <span>{name}</span>
+        </button>
+      ))}
+      <div className="phase-choice-new">
+        {naming ? (
+          <form
+            className="phase-choice-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (draft.trim()) void choose(draft.trim());
+            }}
+          >
+            <input
+              aria-label="name of the new phase"
+              autoFocus
+              className="candidate-field phase-choice-input"
+              disabled={saving}
+              maxLength={80}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.stopPropagation();
+                  setNaming(false);
+                }
+              }}
+              placeholder="sign up"
+              value={draft}
+            />
+            <button className="analysis-pill success phase-choice-save" disabled={saving || !draft.trim()} type="submit">
+              add
+            </button>
+          </form>
+        ) : (
+          <button
+            className="screen-choice-option"
+            disabled={saving}
+            onClick={() => {
+              setDraft('');
+              setNaming(true);
+            }}
+            type="button"
+          >
+            <span>new phase…</span>
+          </button>
+        )}
+      </div>
+      {error ? <span className="editable-name-error">{error}</span> : null}
+    </div>
+  ) : null;
 
   return (
-    <span className="phase-choice" onClick={(event) => event.stopPropagation()}>
-      {prefix ? <span className="phase-choice-prefix">{prefix}</span> : null}
-      <select
-        aria-label={`phase of step ${candidate.detector_index}`}
-        className="phase-choice-select"
+    <div className="screen-choice phase-choice" onClick={stop} onPointerDown={stop} ref={shellRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-label={`phase: ${current || 'no phase'}`}
+        className={`inline-link-button screen-choice-trigger ${current ? 'chosen' : ''}`}
         disabled={saving}
-        onChange={(event) => {
-          if (event.target.value === '\u0000new') setNaming(true);
-          else void choose(event.target.value);
-        }}
-        title="the phase of the walkthrough this step is in: drawn over its box in the pathway, and in the export"
-        value={current}
+        onClick={toggle}
+        ref={triggerRef}
+        title={`phase: ${current || 'no phase'}`}
+        type="button"
       >
-        <option value="">no phase</option>
-        {names.map((name) => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-        <option value={'\u0000new'}>new phase…</option>
-      </select>
-      {error ? <span className="editable-name-error">{error}</span> : null}
-    </span>
+        {icon ? <span className="candidate-choice-icon" aria-hidden="true">{icon}</span> : null}
+        {prefix ? <span className="screen-choice-prefix">{prefix}</span> : null}
+        <span className="screen-choice-value">{valueText}</span>
+      </button>
+      {popover && typeof document !== 'undefined' ? createPortal(popover, document.body) : popover}
+    </div>
   );
 }
 
@@ -157,7 +285,7 @@ function PhaseHeader({ name, start, end, accepted, list }: { name: string; start
           <>
             <b>{name}</b>
             <span className="step-phase-header-note">
-              phase of the walkthrough, {when}, {accepted === 1 ? '1 accepted step' : `${accepted} accepted steps`}
+              phase, {when}, {accepted === 1 ? '1 accepted step' : `${accepted} accepted steps`}
             </span>
           </>
         ) : (

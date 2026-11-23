@@ -541,7 +541,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
         </button>
         {choices[chosenStep]?.link !== undefined ? (
           <button className="pathway-tool" onClick={() => choose(chosenStep, 'auto')} type="button">
-            back where it was found
+            stack automatically
           </button>
         ) : null}
       </>
