@@ -149,14 +149,18 @@ def test_corrections_and_time_per_stage_reach_the_usage_report(server) -> None: 
         ok(member.post("/me/usage", json={"events": [event]}))
 
     # Twenty minutes in one browser: ten on the projects, then the pathway; five of them making changes.
-    start = datetime.now(timezone.utc).replace(second=0, microsecond=0) - timedelta(hours=2)
+    # Place the reader's local time around midday so `now - 2h` and `now` always share one local day, even near
+    # midnight UTC when `days=1` at UTC+0 would cut off events from two hours earlier.
+    now = datetime.now(timezone.utc)
+    tz = (12 - now.hour) * 60
+    start = now.replace(second=0, microsecond=0) - timedelta(hours=2)
     start -= timedelta(minutes=start.minute % 5)
     rows = [((start + timedelta(minutes=minute)).isoformat(), group["id"], "b9", "open", None) for minute in range(0, 20, 5)]
     rows.append(((start + timedelta(minutes=9)).isoformat(), group["id"], "b9", "page", '{"name":"pathway"}'))
     rows.append(((start + timedelta(minutes=10)).isoformat(), group["id"], "b9", "working", None))
     insert_usage_events(rows)
 
-    report = ok(teacher.get("/admin/usage", params={"days": 1}))
+    report = ok(teacher.get("/admin/usage", params={"days": 1, "tz": tz}))
     totals = report["totals"]
     assert totals["corrections"] == 4
     assert totals["corrections_by_choice"] == {"same_screen": 1, "new_screen": 1, "popup": 1, "automatic": 1}
@@ -169,6 +173,6 @@ def test_corrections_and_time_per_stage_reach_the_usage_report(server) -> None: 
     # five minutes from the inserted browser, and the slot(s) of the corrections made above
     assert sum(row["worked"]) >= 10 and len(row["worked"]) == len(report["days_list"])
     assert "long" not in report
-    long = ok(teacher.get("/admin/usage", params={"days": 1, "long": True}))["long"]
+    long = ok(teacher.get("/admin/usage", params={"days": 1, "tz": tz, "long": True}))["long"]
     measures = {measure: value for name, _date, measure, value in long if name == "group"}
     assert measures["pathway corrections"] == 4 and measures["minutes in the app"] >= 20 and measures["comparisons"] == 1
