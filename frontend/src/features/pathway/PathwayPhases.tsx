@@ -9,6 +9,8 @@ interface PathwayPhasesProps {
   pathway: Pathway;
   /** What the panel opens with (the list, a stretch of steps for a new phase, or a phase), and where. */
   request: PhaseRequest;
+  /** Where it goes now, when that is no longer where it was opened (under the toolbox, which has moved). */
+  at?: { x: number; y: number };
   onClose: () => void;
   disabled: boolean;
   /** Name the steps from `first_step` to `last_step` (candidate ids) as a phase; '' takes them out of every phase.
@@ -36,7 +38,7 @@ const stepsLabel = (phase: Pick<PathwayPhase, 'first_step_index' | 'last_step_in
  * step after its last, so a step added by hand in between belongs to it. Opened from the toolbar's phases, from
  * the toolbox or menu of a selection (with its steps), or from a phase's bracket in the chart.
  */
-export function PathwayPhases({ pathway, request, onClose, disabled, onSet }: PathwayPhasesProps) {
+export function PathwayPhases({ pathway, request, at, onClose, disabled, onSet }: PathwayPhasesProps) {
   const phases = pathway.phases ?? [];
   const steps = pathway.steps;
   const byIndex = useMemo(() => new Map(steps.map((step) => [step.step_index, step])), [steps]);
@@ -73,14 +75,16 @@ export function PathwayPhases({ pathway, request, onClose, disabled, onSet }: Pa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request]);
 
-  // It floats where it was opened, inside the window.
+  // It floats where it was opened (or, opened from the toolbox, under it as it moves), inside the window.
+  const x = at?.x ?? request.at?.x ?? 16;
+  const y = at?.y ?? request.at?.y ?? 16;
   useLayoutEffect(() => {
     const box = ref.current?.getBoundingClientRect();
     if (!box) return;
-    const left = Math.max(8, Math.min(request.at?.x ?? 16, window.innerWidth - box.width - 8));
-    const top = Math.max(8, Math.min(request.at?.y ?? 16, window.innerHeight - box.height - 8));
+    const left = Math.max(8, Math.min(x, window.innerWidth - box.width - 8));
+    const top = Math.max(8, Math.min(y, window.innerHeight - box.height - 8));
     setPlace({ left, top });
-  }, [request, draft, phases.length]);
+  }, [x, y, draft, phases.length]);
 
   // Escape, or a click elsewhere (but on the phases button, which opens and closes it), closes it.
   useEffect(() => {
@@ -201,11 +205,11 @@ export function PathwayPhases({ pathway, request, onClose, disabled, onSet }: Pa
             disabled={disabled || saving}
             key={`${phase.first_step_id}-${phase.name}`}
             onClick={() => start(phase)}
-            title={`${phase.step_count} ${phase.step_count === 1 ? 'step' : 'steps'} on ${phase.screen_count} ${phase.screen_count === 1 ? 'screen' : 'screens'}; click to change it`}
+            title={`${phase.name}: ${phase.step_count} ${phase.step_count === 1 ? 'step' : 'steps'} on ${phase.screen_count} ${phase.screen_count === 1 ? 'screen' : 'screens'}; click to change it`}
             type="button"
           >
-            {phase.name}
-            <span>{stepsLabel(phase)}</span>
+            <span className="pathway-chip-name">{phase.name}</span>
+            <span className="pathway-chip-steps">{stepsLabel(phase)}</span>
           </button>
         ))}
         {draft?.phase === null ? null : (

@@ -10,7 +10,11 @@ import { PathwayPhases } from './PathwayPhases';
 
 /** What the phases panel opens with (a stretch of steps for a new phase, a phase to change, or the list), and where
  *  in the window. */
-export type PhaseRequest = ({ from: number; to: number } | { phase: PathwayPhase } | { list: true }) & { at?: { x: number; y: number } };
+export type PhaseRequest = ({ from: number; to: number } | { phase: PathwayPhase } | { list: true }) & {
+  at?: { x: number; y: number };
+  /** Opened from the toolbox, under which it stays when the toolbox moves (a phase added above the box moves both). */
+  underToolbox?: boolean;
+};
 
 /** A phase change, remembered as every phase before and after it: phases are the run's, not a step's. */
 interface PhaseEntry {
@@ -97,6 +101,19 @@ function typing(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
 }
 
+/** A key pressed on a box, a button or a panel of the figure's tools is theirs: Enter there presses it. */
+function onControl(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest('[data-screen], button, a, select, .pathway-toolbox, .pathway-menu, .pathway-phases'));
+}
+
+/** How much of a title the status line, the menus and the labels show; the box itself shows all of it. */
+const TITLE_IN_LABELS = 40;
+
+function shorten(text: string, length = TITLE_IN_LABELS): string {
+  const trimmed = text.trim();
+  return trimmed.length > length ? `${trimmed.slice(0, length - 1).trimEnd()}…` : trimmed;
+}
+
 /**
  * The pathway figure on the page, and everything done to it with the pointer and the keyboard. What is selected is
  * what changes: a box (click it), several boxes (shift-click), or the steps under one number (click the number).
@@ -152,7 +169,7 @@ export function PathwayCanvas({
     [stepByCandidate, screenById],
   );
   const name = (screen: PathwayScreen): string =>
-    screen.title === `Screen ${screen.index}` ? `Screen ${screen.index}` : `Screen ${screen.index}, ${screen.title}`;
+    screen.title === `Screen ${screen.index}` ? `Screen ${screen.index}` : `Screen ${screen.index}, ${shorten(screen.title)}`;
   const stepsOf = (screen: PathwayScreen): PathwayStep[] =>
     screen.visits.flatMap((visit) => visit.step_ids).map((id) => stepById.get(id)).filter((step): step is PathwayStep => Boolean(step));
   const numbersOf = (steps: PathwayStep[]): string => {
@@ -241,8 +258,18 @@ export function PathwayCanvas({
   /** The phases panel, beside what asked for it: the toolbox, or where the pointer chose. */
   function openPhases(request: PhaseRequest) {
     const toolbox = toolboxRef.current?.getBoundingClientRect();
-    onPhaseRequest({ ...request, at: request.at ?? (toolbox ? { x: toolbox.left, y: toolbox.bottom + 8 } : lastPoint.current) });
+    const underToolbox = !request.at && Boolean(toolbox);
+    onPhaseRequest({ ...request, underToolbox, at: request.at ?? (toolbox ? { x: toolbox.left, y: toolbox.bottom + 8 } : lastPoint.current) });
   }
+  /** Where the phases panel opened from the toolbox is now: under the toolbox, wherever that has moved to. */
+  const [underToolbox, setUnderToolbox] = useState<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!phaseRequest?.underToolbox) return;
+    const toolbox = toolboxRef.current?.getBoundingClientRect();
+    if (!toolbox) return;
+    const at = { x: toolbox.left, y: toolbox.bottom + 8 };
+    setUnderToolbox((was) => (was && Math.abs(was.x - at.x) < 0.5 && Math.abs(was.y - at.y) < 0.5 ? was : at));
+  });
 
   const togglePopup = (candidateId: string, label: string) => {
     const candidate = candidateById.get(candidateId);
@@ -290,8 +317,15 @@ export function PathwayCanvas({
   };
   const stepMenuLabel = (step: PathwayStep): string => {
     const customTitle = candidateById.get(step.source_candidate_id)?.title?.trim();
-    const detail = customTitle || formatPathwayTime(step.timestamp_ms);
-    return `step ${step.step_index} · ${detail}`;
+    return customTitle ? `step ${step.step_index}: ${shorten(customTitle)}` : `step ${step.step_index}, at ${formatPathwayTime(step.timestamp_ms)}`;
+  };
+  /** The steps of a box whose screen was chosen (stacked, unstacked or given a screen of its own), not left automatic. */
+  const chosenScreens = (screen: PathwayScreen): PathwayStep[] =>
+    stepsOf(screen).filter((step) => Boolean(candidateById.get(step.source_candidate_id)?.screen_link));
+  const stackAutomatically = (screen: PathwayScreen) => {
+    const changes = chosenScreens(screen).map((step): [string, CandidateChanges] => [step.source_candidate_id, { screen_link: 'auto' }]);
+    if (!changes.length) return;
+    void act(`stacked ${name(screen)} automatically`, changes);
   };
   const unstackAll = (screen: PathwayScreen) => {
     const steps = stepsOf(screen);
@@ -331,7 +365,7 @@ export function PathwayCanvas({
     const titleStep = stepById.get(screen.title_step_id ?? screen.image_step_id);
     const saved = screen.title_step_id ? screen.title : '';
     if (!titleStep || next === saved) return;
-    void act(next ? `renamed ${name(screen)} to ${next}` : `took the title of ${name(screen)} away`, [[titleStep.source_candidate_id, { title: next }]]);
+    void act(next ? `renamed ${name(screen)} to ${shorten(next)}` : `took the title of ${name(screen)} away`, [[titleStep.source_candidate_id, { title: next }]]);
   };
   const phaseOfStep = (index: number): PathwayPhase | undefined =>
     (pathway.phases ?? []).find((phase) => index >= phase.first_step_index && index <= phase.last_step_index);
@@ -341,24 +375,25 @@ export function PathwayCanvas({
     openPhases({ from: Math.min(...numbers), to: Math.max(...numbers) });
   };
 
-  function unstackMenuItems(box: PathwayScreen, includeEditSteps = false): MenuItem[] {
+  /** The ways to take a box's steps apart. The toolbox's menu also has stack automatically and edit steps; the
+   *  right-click menu has those beside its unstack. */
+  function unstackMenuItems(box: PathwayScreen, inToolbox = false): MenuItem[] {
     const steps = stepsOf(box);
-    if (steps.length < 2) return [];
-    const list: MenuItem[] = [
-      { label: `unstack all (${steps.length} steps)`, run: () => unstackAll(box) },
-    ];
-    if (box.visits.length > 1 && steps.length > box.visits.length) {
-      list.push({ label: `by visit (${box.visits.length} visits)`, run: () => unstackByVisit(box) });
-    }
-    steps.forEach((step, index) => {
-      list.push({
-        label: stepMenuLabel(step),
-        divider: index === 0,
-        run: () => unstackOneStep(box, step),
+    const list: MenuItem[] = [];
+    if (steps.length > 1) {
+      list.push({ label: `unstack all (${steps.length} steps)`, run: () => unstackAll(box) });
+      if (box.visits.length > 1 && steps.length > box.visits.length) {
+        list.push({ label: `by visit (${box.visits.length} visits)`, run: () => unstackByVisit(box) });
+      }
+      steps.forEach((step, index) => {
+        list.push({ label: stepMenuLabel(step), divider: index === 0, run: () => unstackOneStep(box, step) });
       });
-    });
-    if (includeEditSteps) {
-      list.push({ label: 'edit steps…', divider: true, run: () => editStepsOf(box) });
+    }
+    if (inToolbox) {
+      const rest: MenuItem[] = [];
+      if (chosenScreens(box).length) rest.push({ label: 'stack automatically', run: () => stackAutomatically(box) });
+      if (steps.length > 1) rest.push({ label: 'edit steps…', run: () => editStepsOf(box) });
+      rest.forEach((item, index) => list.push({ ...item, divider: index === 0 && list.length > 0 }));
     }
     return list;
   }
@@ -379,10 +414,9 @@ export function PathwayCanvas({
       items.push({ label: 'rename', hint: 'Enter', run: () => titleRef.current?.focus() });
       if (first) items.push({ label: isPopupStep(first) ? 'not a pop-up' : 'a pop-up', hint: 'P', run: () => togglePopup(first.id, name(box)) });
       items.push({ label: 'stack onto', items: others([box]).map(({ label, screen }) => ({ label, run: () => stackBox(box, screen) })) });
-      if (steps.length > 1) {
-        items.push({ label: 'unstack', items: unstackMenuItems(box) });
-        items.push({ label: 'edit steps…', run: () => editStepsOf(box) });
-      }
+      if (steps.length > 1) items.push({ label: 'unstack', items: unstackMenuItems(box) });
+      if (chosenScreens(box).length) items.push({ label: 'stack automatically', run: () => stackAutomatically(box) });
+      if (steps.length > 1) items.push({ label: 'edit steps…', run: () => editStepsOf(box) });
       if (parent) {
         items.push({
           label: 'row',
@@ -458,10 +492,20 @@ export function PathwayCanvas({
     setRects({ selected, target, source });
   }, [selectedBoxes, selectedSteps, drag, rectOf, imageOf, numberOf, screenOf, stepByCandidate]);
   useLayoutEffect(measure, [measure, markup, width]);
+  // While boxes glide to a new place (below), what is measured is where they are on the way, not where they land: a
+  // phase added above them makes the figure taller, and the outline was left where the box set off. So the outline
+  // is measured when they have landed.
+  const glidingRef = useRef(0);
+  const measureRef = useRef(measure);
+  useLayoutEffect(() => {
+    measureRef.current = measure;
+  }, [measure]);
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => measure());
+    const observer = new ResizeObserver(() => {
+      if (!glidingRef.current) measure();
+    });
     observer.observe(stage);
     return () => observer.disconnect();
   }, [measure]);
@@ -482,10 +526,17 @@ export function PathwayCanvas({
       next.set(key, at);
       const was = previous.get(key);
       if (!still && was && (was[0] !== at[0] || was[1] !== at[1]) && typeof (group as SVGGElement).animate === 'function') {
-        (group as SVGGElement).animate(
+        const glide = (group as SVGGElement).animate(
           [{ transform: `translate(${was[0]}px, ${was[1]}px)` }, { transform: `translate(${at[0]}px, ${at[1]}px)` }],
           { duration: 200, easing: 'ease-out' },
         );
+        glidingRef.current += 1;
+        glide.finished
+          .catch(() => undefined)
+          .then(() => {
+            glidingRef.current -= 1;
+            if (!glidingRef.current) measureRef.current();
+          });
       }
     }
     placesRef.current = next;
@@ -673,11 +724,11 @@ export function PathwayCanvas({
         else setSelection(null);
         return;
       }
-      if (!selection) return;
+      if (!selection || (event.target instanceof Element && event.target.closest('.pathway-phases'))) return;
       if (event.key.toLowerCase() === 'p') {
         const first = selectedBoxes.length === 1 ? firstOf(selectedBoxes[0]) : selectedSteps[0]?.source_candidate_id;
         if (first) togglePopup(first, selectedBoxes.length === 1 ? name(selectedBoxes[0]) : numbersOf(selectedSteps));
-      } else if (event.key === 'Enter' && selectedBoxes.length === 1 && !(event.target instanceof Element && event.target.closest('[data-screen]'))) {
+      } else if (event.key === 'Enter' && selectedBoxes.length === 1 && !onControl(event.target)) {
         event.preventDefault();
         titleRef.current?.focus();
       } else if ((event.key === 'ArrowRight' || event.key === 'ArrowLeft') && selectedBoxes.length === 1) {
@@ -830,7 +881,7 @@ export function PathwayCanvas({
               </option>
             ))}
           </select>
-          {steps.length > 1 ? (
+          {steps.length > 1 || chosenScreens(box).length ? (
             <button
               aria-expanded={menu?.kind === 'unstack'}
               aria-haspopup="menu"
@@ -844,13 +895,22 @@ export function PathwayCanvas({
                 const button = event.currentTarget.getBoundingClientRect();
                 openMenuAt(button.left, button.bottom + 4, 'unstack');
               }}
-              title="unstack all steps, pop out one step, or open the step editor"
+              title={
+                steps.length > 1
+                  ? 'unstack all its steps or one of them, or edit its steps'
+                  : 'stack this box automatically again, as it was found'
+              }
               type="button"
             >
-              unstack…
+              {steps.length > 1 ? 'unstack…' : 'stack…'}
             </button>
           ) : null}
-          <button className="pathway-tool" onClick={() => (phase ? openPhases({ phase }) : phaseFor(steps))} title={phase ? `the phase ${phase.name}` : 'make a phase from this box'} type="button">
+          <button
+            className="pathway-tool pathway-tool-phase"
+            onClick={() => (phase ? openPhases({ phase }) : phaseFor(steps))}
+            title={phase ? `the phase ${phase.name}` : 'make a phase from this box'}
+            type="button"
+          >
             {phase ? `phase: ${phase.name}` : 'phase…'}
           </button>
           {more}
@@ -962,7 +1022,14 @@ export function PathwayCanvas({
         </div>
       </div>
       {phaseRequest ? (
-        <PathwayPhases disabled={busy} onClose={() => onPhaseRequest(null)} onSet={setPhase} pathway={pathway} request={phaseRequest} />
+        <PathwayPhases
+          at={phaseRequest.underToolbox ? underToolbox ?? undefined : undefined}
+          disabled={busy}
+          onClose={() => onPhaseRequest(null)}
+          onSet={setPhase}
+          pathway={pathway}
+          request={phaseRequest}
+        />
       ) : null}
       <div className="pathway-scroll">
         <div className={`pathway-stage ${drag ? 'is-dragging' : ''}`} ref={stageRef} style={{ width: `${width}px` }}>
@@ -1025,24 +1092,32 @@ function PathwayMenu({ items, x, y, onClose }: { items: MenuItem[]; x: number; y
       y: box.bottom > window.innerHeight - 8 ? -(box.bottom - window.innerHeight + 8) : 0,
     });
   }, [x, y]);
+  /** Whether the open submenu was opened with the keyboard, and so takes the focus. */
+  const [byKey, setByKey] = useState(false);
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>('button')?.focus();
   }, []);
 
   function onKey(event: KeyboardEvent<HTMLDivElement>) {
-    const buttons = [...(ref.current?.querySelectorAll<HTMLButtonElement>(':scope > div > button') ?? [])];
+    // Keys pressed in the menu stay in it: the figure's own (P, Enter, the arrows) would act on the selection behind it.
+    event.stopPropagation();
+    const submenu = document.activeElement instanceof Element ? document.activeElement.closest('.pathway-submenu') : null;
+    const scope = submenu ?? ref.current;
+    const buttons = [...(scope?.querySelectorAll<HTMLButtonElement>(':scope > div > button') ?? [])];
     const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       const next = buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length];
       next?.focus();
-    } else if (event.key === 'ArrowRight' && index >= 0 && items[index]?.items) {
+    } else if (event.key === 'ArrowRight' && !submenu && index >= 0 && items[index]?.items) {
       event.preventDefault();
+      setByKey(true);
       setOpen(index);
-    } else if (event.key === 'ArrowLeft') {
+    } else if (event.key === 'ArrowLeft' && submenu) {
+      event.preventDefault();
+      submenu.parentElement?.querySelector<HTMLButtonElement>(':scope > button')?.focus();
       setOpen(null);
     } else if (event.key === 'Escape') {
-      event.stopPropagation();
       onClose();
     }
   }
@@ -1057,14 +1132,23 @@ function PathwayMenu({ items, x, y, onClose }: { items: MenuItem[]; x: number; y
       style={{ left: x + shift.x, top: y + shift.y }}
     >
       {items.map((item, index) => (
-        <div className="pathway-menu-row" key={item.label} onPointerEnter={() => setOpen(item.items ? index : null)}>
+        <div
+          className="pathway-menu-row"
+          key={item.label}
+          onPointerEnter={() => {
+            setByKey(false);
+            setOpen(item.items ? index : null);
+          }}
+        >
           {item.divider ? <div aria-hidden="true" className="pathway-menu-divider" /> : null}
           <button
             aria-expanded={item.items ? open === index : undefined}
             aria-haspopup={item.items ? 'menu' : undefined}
             className={`pathway-menu-item ${item.danger ? 'is-danger' : ''}`}
-            onClick={() => {
+            onClick={(event) => {
               if (item.items) {
+                // Enter or Space (a click with no pointer) opens it with its first item in focus.
+                setByKey(event.detail === 0);
                 setOpen(open === index ? null : index);
                 return;
               }
@@ -1072,28 +1156,40 @@ function PathwayMenu({ items, x, y, onClose }: { items: MenuItem[]; x: number; y
               item.run?.();
             }}
             role="menuitem"
+            title={item.label}
             type="button"
           >
             <span>{item.label}</span>
             <span className="pathway-menu-hint">{item.items ? '▸' : item.hint ?? ''}</span>
           </button>
-          {item.items && open === index ? <PathwaySubmenu items={item.items} onClose={onClose} /> : null}
+          {item.items && open === index ? <PathwaySubmenu focusFirst={byKey} items={item.items} onClose={onClose} /> : null}
         </div>
       ))}
     </div>
   );
 }
 
-/** The items of a menu item, beside it: to the right, or to the left where the window ends. */
-function PathwaySubmenu({ items, onClose }: { items: MenuItem[]; onClose: () => void }) {
+/** The items of a menu item, beside it: to the right, or to the left where the window ends, and moved up where it
+ *  would run past the bottom. */
+function PathwaySubmenu({ focusFirst, items, onClose }: { focusFirst: boolean; items: MenuItem[]; onClose: () => void }) {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [toLeft, setToLeft] = useState(false);
+  const [place, setPlace] = useState({ toLeft: false, up: 0 });
   useLayoutEffect(() => {
     const box = ref.current?.getBoundingClientRect();
-    if (box && box.right > window.innerWidth - 8) setToLeft(true);
+    if (!box) return;
+    const over = box.bottom - (window.innerHeight - 8);
+    setPlace({ toLeft: box.right > window.innerWidth - 8, up: over > 0 ? Math.min(over, Math.max(0, box.top - 8)) : 0 });
   }, []);
+  useEffect(() => {
+    if (focusFirst) ref.current?.querySelector<HTMLButtonElement>('button')?.focus();
+  }, [focusFirst]);
   return (
-    <div className={`pathway-menu pathway-submenu ${toLeft ? 'to-left' : ''}`} ref={ref} role="menu">
+    <div
+      className={`pathway-menu pathway-submenu ${place.toLeft ? 'to-left' : ''}`}
+      ref={ref}
+      role="menu"
+      style={place.up ? { top: -4 - place.up } : undefined}
+    >
       {items.map((child) => (
         <div className="pathway-menu-row" key={child.label}>
           {child.divider ? <div aria-hidden="true" className="pathway-menu-divider" /> : null}

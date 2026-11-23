@@ -519,25 +519,29 @@ select is what changes:
 
 - **click a box** to select it, with **shift** for several boxes;
 - **click the number under a box** to select that step. A number such as "4–5" stands for several steps in a
-  row: pick one of them in the toolbox;
+  row; the toolbox lists every step of the box, to pick another;
 - **right-click** a box or a number for every action as a menu; with the keyboard, **Tab** goes from box to box,
   **Enter** selects one and the menu key opens its actions.
 
-A small toolbox opens beside what you selected. For a box: its **title** (a box is named after its first step
-that has a title, so this is that step's title, and the step list shows it too), **pop-up**, **stack onto…**
-another box, and **phase…**. For a step: **own screen**, **put it on…** another box, and **pop-up**. Under
-**⋯** (and in the right-click menu) are the rarer ones: **unstack**, which gives each visit of a box a screen of
-its own, and **row**, which says where the box goes in the figure: **next to** the screen it was reached from, or
-**on a row below**. Without a say, the first screen reached from a screen goes next to it and the others go
-below; use it to keep the main way through on one line and put detours underneath. The screens and the moves stay
-the same.
+A small toolbox opens beside what you selected. For a box: its **title** (a box is named after its first step that
+has a title, so this is that step's title, and the step list shows it too), **pop-up**, **stack onto…** another
+box, **unstack…** for a box of several steps, and **phase…**. **unstack…** gives every step of the box a screen of
+its own, or each visit, or just the one step you pick; **stack automatically** puts the box's steps back where they
+were found, undoing the stacking and unstacking done to them (a box of one step has it under **stack…**, once its
+steps have been moved); and **edit steps…** selects the box's first step. For a step: **own screen**, which takes
+just that step out of its box, **put it on…** another box, and **pop-up**. Under **⋯** (and in the right-click
+menu) are the rarer ones as well, such as **row**, which says where the box goes in the figure: **next to** the
+screen it was reached from, or **on a row below**. Without a say, the first screen reached from a screen goes next
+to it and the others go below; use it to keep the main way through on one line and put detours underneath. The
+screens and the moves stay the same.
 
 The two most common corrections can also be dragged:
 
 - **drag a box onto another box** to stack it there: all its steps move together, for two boxes that show one
   screen;
 - **drag a step number onto a box** to put that step there, or **off the boxes** to give it a screen of its own,
-  for one step in the wrong box. Steps that follow it by scrolling or typing move with it.
+  for one step in the wrong box. Onto a box, the steps that follow it by scrolling or typing go with it; off the
+  boxes, only that step leaves.
 
 A dotted outline shows where a drop would go, and the line above the chart says what it would do. Every change can
 be taken back with **⌘Z** (Ctrl+Z on Windows) or **undo** on that line. The undo is your own: in a shared account,

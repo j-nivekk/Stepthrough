@@ -6522,6 +6522,7 @@ button:disabled {
 .pathway-status-text {
   flex: 1 1 auto;
   min-width: 0;
+  overflow-wrap: anywhere;
   border-radius: 4px;
   animation: pathway-status-in 600ms ease-out;
 }
@@ -6717,6 +6718,13 @@ button:disabled {
   background: rgba(255, 255, 255, 0.68);
 }
 
+/* The phase a box is in, by name: a long one is cut short, the whole name in its tooltip. */
+.pathway-tool.pathway-tool-phase {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .pathway-tool-title:focus {
   outline: 2px solid rgba(205, 109, 30, 0.6);
   outline-offset: 0;
@@ -6755,6 +6763,7 @@ button:disabled {
   position: fixed;
   z-index: 40;
   min-width: 230px;
+  max-width: min(360px, calc(100vw - 16px));
   padding: 4px;
   background: #d9d9d9;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
@@ -6846,7 +6855,16 @@ button:disabled {
 }
 
 .pathway-menu-hint {
+  flex: 0 0 auto;
   color: rgba(0, 0, 0, 0.42);
+}
+
+/* A long label (a title, a phase, an undo) is cut short on one line; the whole of it is in its tooltip. */
+.pathway-menu-item > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pathway-submenu {
@@ -6863,12 +6881,6 @@ button:disabled {
   right: calc(100% + 2px);
 }
 
-.pathway-submenu .pathway-menu-item span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* The phases, in a floating panel like the toolbox and the menu (PathwayPhases.tsx). */
 .pathway-phases {
   position: fixed;
@@ -6876,6 +6888,8 @@ button:disabled {
   width: min(430px, calc(100vw - 16px));
   padding: 10px 12px 12px;
   display: grid;
+  /* one column no wider than the panel: a long phase name is cut short in its chip, not let push the panel out */
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   background: #d9d9d9;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
@@ -6896,6 +6910,7 @@ button:disabled {
   color: rgba(0, 0, 0, 0.46);
   font-size: 11px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .pathway-phases-hint.is-error {
@@ -6923,13 +6938,16 @@ button:disabled {
   gap: 4px;
 }
 
-/* A phase: its name, and its steps in grey. */
+/* A phase: its name, and its steps in grey, on one line; a long name is cut short. */
 .pathway-chip {
   display: inline-flex;
   align-items: baseline;
   gap: 6px;
+  max-width: 100%;
+  min-width: 0;
   height: 26px;
   padding: 5px 9px 0;
+  white-space: nowrap;
   border: none;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.68);
@@ -6939,7 +6957,14 @@ button:disabled {
   cursor: pointer;
 }
 
-.pathway-chip span {
+.pathway-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pathway-chip-steps {
+  flex: 0 0 auto;
   color: rgba(0, 0, 0, 0.45);
   font-size: 11px;
 }
