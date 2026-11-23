@@ -58,6 +58,11 @@ export interface PathwayFigureInput {
   /** Address of a step's screenshot: a URL on the page, a data URI in a file that has to stand alone. */
   imageFor: (step: PathwayStep) => string;
   measure?: TextMeasurer;
+  /**
+   * The most boxes a row takes. On the page, as many as fit the space there with little shrinking
+   * (pathwayColumnsFor), so the labels stay readable; left out (files), as many as fit the usual width (TARGET_WIDTH).
+   */
+  columns?: number;
 }
 
 export interface PathwayFigure {
@@ -79,6 +84,8 @@ const FONT = "Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif";
 const INK = '#111';
 const SUB = '#6b6b66';
 const NOTE = '#333';
+/** The times under the screens: darker than the other grey text, as they are small and read often. */
+const TIME = '#4a4a45';
 /** Semantic path colours: dark ink for main flow, muted terracotta for branches/detours, slate-blue for returns. */
 const BRANCH_COLOR = '#a44d10';
 const RETURN_COLOR = '#2c5f8a';
@@ -90,6 +97,10 @@ const FRAME_SIZE = 220;
 const FRAME_MIN_WIDTH = 120;
 /** Columns are added until the figure would be wider than this. */
 const TARGET_WIDTH = 1700;
+/** Room at each side for the chips of rows that wrap, when working out how many columns fit a width. */
+const EDGE_ROOM = 104;
+/** On the page, a figure is shrunk to fit at most this much: its labels stay at least this share of their size. */
+const PAGE_MIN_SCALE = 0.85;
 /** Horizontal bus track pitch (> 19px portal chip & 15px step pill height so parallel tracks never collide). */
 const BUS_TRACK = 22;
 /** Vertical margin corridor pitch (wires only, no pills). */
@@ -295,6 +306,8 @@ interface Placed {
   row: number;
   /** Starts a row at the left because the row it continues was full. */
   wrapped: boolean;
+  /** Starts a row at the left as a branch of a box at the end of the row above (not that row going on). */
+  branch: boolean;
 }
 
 function placeScreens(screens: PathwayScreen[], maxCols: number): { placed: Map<string, Placed>; rows: number; cols: number } {
@@ -313,50 +326,67 @@ function placeScreens(screens: PathwayScreen[], maxCols: number): { placed: Map<
     const first = kids.get(parent.id)?.[0];
     return first && first.row_choice !== 'below' ? first : undefined;
   };
+  /** How many boxes hang from `screen`, itself included: a side trip is small, the rest of the walkthrough large. */
+  const sizes = new Map<string, number>();
+  const sizeOf = (screen: PathwayScreen): number => {
+    const known = sizes.get(screen.id);
+    if (known !== undefined) return known;
+    sizes.set(screen.id, 1); // a loop in the data would otherwise never end
+    const size = 1 + (kids.get(screen.id) ?? []).reduce((sum, kid) => sum + sizeOf(kid), 0);
+    sizes.set(screen.id, size);
+    return size;
+  };
   const placed = new Map<string, Placed>();
   let nextRow = 0;
   let cols = 1;
-  const placeRow = (start: PathwayScreen, startCol: number, row: number, wrapped: boolean): void => {
+  interface Below {
+    start: PathwayScreen;
+    col: number;
+    wrapped: boolean;
+    branch: boolean;
+  }
+  const placeRow = (start: PathwayScreen, startCol: number, row: number, wrapped: boolean, branch: boolean): void => {
     const inRow: PathwayScreen[] = [];
-    const wraps: PathwayScreen[] = [];
+    const below: Below[] = [];
     let screen: PathwayScreen | undefined = start;
     let col = startCol;
     let isWrapped = wrapped;
+    let isBranch = branch;
     while (screen) {
-      placed.set(screen.id, { screen, col, row, wrapped: isWrapped });
+      placed.set(screen.id, { screen, col, row, wrapped: isWrapped, branch: isBranch });
       cols = Math.max(cols, col + 1);
       isWrapped = false;
+      isBranch = false;
       inRow.push(screen);
       const next = onRow(screen);
       if (!next) break;
       if (col + 1 >= maxCols) {
-        wraps.push(next);
+        below.push({ start: next, col: 0, wrapped: true, branch: false });
         break;
       }
       screen = next;
       col += 1;
     }
-    // Branches of this row come directly below it, before the row it wraps onto.
+    // The branches of this row, and the row it wraps onto, come below it; a branch of a box at the end of the row
+    // starts at the left.
     for (const parent of inRow) {
       const at = placed.get(parent.id);
       if (!at) continue;
       const next = onRow(parent);
       for (const child of (kids.get(parent.id) ?? []).filter((kid) => kid !== next)) {
-        if (at.col + 1 >= maxCols) {
-          wraps.push(child);
-        } else {
-          nextRow += 1;
-          placeRow(child, at.col + 1, nextRow, false);
-        }
+        below.push(at.col + 1 >= maxCols ? { start: child, col: 0, wrapped: true, branch: true } : { start: child, col: at.col + 1, wrapped: false, branch: false });
       }
     }
-    for (const child of wraps) {
+    // Smallest first: each is placed with everything that hangs from it, so a short side trip stays right below the
+    // box it leaves, and the long way on (often most of the walkthrough) carries on after it. Ties keep their order.
+    below.sort((a, b) => sizeOf(a.start) - sizeOf(b.start));
+    for (const item of below) {
       nextRow += 1;
-      placeRow(child, 0, nextRow, true);
+      placeRow(item.start, item.col, nextRow, item.wrapped, item.branch);
     }
   };
   const root = screens.find((screen) => !screen.reached_from) ?? screens[0];
-  if (root) placeRow(root, 0, 0, false);
+  if (root) placeRow(root, 0, 0, false, false);
   return { placed, rows: nextRow + 1, cols };
 }
 
@@ -452,13 +482,13 @@ function buildCard(
     if (!first || !last) continue;
     const label = first === last ? String(first.step_index) : `${first.step_index}–${last.step_index}`;
     const time = options.times ? formatPathwayTime(first.timestamp_ms) : '';
-    const timeWidth = time ? 4 + measure(time, 10) : 0;
+    const timeWidth = time ? 4 + measure(time, 11) : 0;
     const pillW = pillWidth(label);
     if (x > 0 && x + pillW + timeWidth > width) {
       x = 0;
       cy += 20;
     }
-    const number = pill(x, cy, label) + (time ? text(x + pillW + 4, cy + 3.5, time, { size: 10, fill: SUB }) : '');
+    const number = pill(x, cy, label) + (time ? text(x + pillW + 4, cy + 3.8, time, { size: 11, fill: TIME }) : '');
     // The steps of the visit, for the pointer preview. A transparent rect makes the gaps between the pill and its
     // time part of the target.
     svg += peek
@@ -467,11 +497,11 @@ function buildCard(
     x += pillW + timeWidth + (time ? 9 : 3);
   }
   if (screen.kind === 'popup') {
-    if (x > 0 && x + measure('pop-up', 10) > width) {
+    if (x > 0 && x + measure('pop-up', 11) > width) {
       x = 0;
       cy += 20;
     }
-    svg += text(x + (options.times || x === 0 ? 0 : 4), cy + 3.5, 'pop-up', { size: 10, fill: SUB, italic: true });
+    svg += text(x + (options.times || x === 0 ? 0 : 4), cy + 3.8, 'pop-up', { size: 11, fill: TIME, italic: true });
   }
   let y = cy + 11.5;
 
@@ -542,15 +572,29 @@ function strokePath(d: string, role: MoveRole, peek: boolean, withArrow = true):
   return hit + halo + line;
 }
 
+/** The width of a screenshot's box for a recording of this width / height. */
+function frameWidth(aspect: number): number {
+  return Math.max(FRAME_MIN_WIDTH, Math.round(FRAME_SIZE * Math.sqrt(aspect > 0 ? aspect : 16 / 10)));
+}
+
+/**
+ * How many boxes a row can take for the figure to fit `space` (pixels on the page) shrunk no further than
+ * PAGE_MIN_SCALE, at least two: wide enough to use the space, never so wide that its labels become hard to read.
+ */
+export function pathwayColumnsFor(space: number, aspect: number): number {
+  const pitch = frameWidth(aspect) + GAP_X;
+  return Math.max(2, Math.floor((space / PAGE_MIN_SCALE - 2 * MARGIN - 2 * EDGE_ROOM + GAP_X) / pitch));
+}
+
 export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   const { pathway, options, imageFor } = input;
   const measure = input.measure ?? measureText;
   const peek = Boolean(input.peek);
   const aspect = input.aspect > 0 ? input.aspect : 16 / 10;
-  const width = Math.max(FRAME_MIN_WIDTH, Math.round(FRAME_SIZE * Math.sqrt(aspect)));
+  const width = frameWidth(aspect);
   const height = Math.round(width / aspect);
   const pitch = width + GAP_X;
-  const maxCols = Math.max(2, Math.floor((TARGET_WIDTH - 2 * MARGIN + GAP_X) / pitch));
+  const maxCols = input.columns && input.columns >= 2 ? Math.floor(input.columns) : Math.max(2, Math.floor((TARGET_WIDTH - 2 * MARGIN + GAP_X) / pitch));
 
   const steps = new Map(pathway.steps.map((step) => [step.step_id, step]));
   const { placed, rows, cols } = placeScreens(pathway.screens, maxCols);
@@ -640,7 +684,8 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
       if (child.wrapped) {
         if (child.row - parent.row >= 2) {
           plan.kind = 'wrap-portal';
-          plan.role = isReturn ? 'return' : 'main';
+          // A branch that had to start a row of its own is still a branch: its line and chips say so.
+          plan.role = isReturn ? 'return' : child.branch ? 'branch' : 'main';
           hasPortal = true;
           const depW = measurePortalChip(passLabels, `→ S${to.screen.index}`, measure).width;
           const arrW = measurePortalChip(passLabels, `S${from.screen.index} →`, measure).width;
@@ -653,7 +698,8 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           }
         } else {
           plan.kind = 'wrap';
-          plan.role = isReturn ? 'return' : 'main';
+          plan.role = isReturn ? 'return' : child.branch ? 'branch' : 'main';
+          hasPortal = true; // its two ends are labelled with chips as well
           plan.busTo = takeTrack(busTracks[child.row] ?? [], LEFT, RIGHT);
           plan.sideTrack = takeTrack(sideTracks.right, parent.row, child.row);
           plan.otherTrack = takeTrack(sideTracks.left, child.row - 0.5, child.row);
@@ -1329,10 +1375,10 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
     if (hasPortal) {
       items.push([
         (x, cy) =>
-          `<rect x="${n1(x)}" y="${n1(cy - 8)}" width="34" height="16" rx="8" fill="#fff" stroke="${BRANCH_COLOR}" stroke-width="1.1"/>` +
-          text(x + 17, cy + 3, '→ S7', { size: 8.5, bold: true, fill: BRANCH_COLOR, anchor: 'middle' }),
+          `<rect x="${n1(x)}" y="${n1(cy - 8)}" width="34" height="16" rx="8" fill="#fff" stroke="${INK}" stroke-width="1.1"/>` +
+          text(x + 17, cy + 3, '→ S7', { size: 8.5, bold: true, fill: INK, anchor: 'middle' }),
         34,
-        'jump across rows (screen number at each end)',
+        'jump across rows, in the colour of its line (screen number at each end)',
       ]);
     }
     if (brackets.length) {

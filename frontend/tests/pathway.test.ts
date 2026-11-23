@@ -3,7 +3,7 @@ import test from 'node:test';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { BADGE_HEIGHT, BADGE_WIDTH } from '../src/lib/pathwayBadge';
 import { BADGE_QR } from '../src/lib/pathwayBadgeData';
-import { buildPathwayFigure, type PathwayFigureInput } from '../src/lib/pathwayFigure';
+import { buildPathwayFigure, pathwayColumnsFor, type PathwayFigureInput } from '../src/lib/pathwayFigure';
 import { pathwayQueryOptions } from '../src/lib/pathwayQuery';
 import { fitStepGrid, galleryLayoutSizing, STEP_SIZE_MAX, STEP_SIZE_MIN } from '../src/lib/stepLayout';
 import type { Pathway, PathwayScreen, PathwayStep, RunDetail } from '../src/types';
@@ -529,4 +529,69 @@ test('gallery layout sizing adapts cleanly to fit mode, slider range, and portra
   assert.ok(parseInt(maxDesktop.stageHeightCss, 10) > parseInt(minDesktop.stageHeightCss, 10));
   assert.ok(maxDesktop.thumbHeight > minDesktop.thumbHeight);
   assert.ok(maxDesktop.thumbWidth <= 184);
+});
+
+/** A pathway of screens `[index, reached from]` (a tree), with a forward move along each edge. */
+function treePathway(tree: Array<[number, number | null]>): Pathway {
+  const [base] = pathway.steps as [PathwayStep];
+  const [first] = pathway.screens as [PathwayScreen];
+  const id = (index: number) => `screen-${String(index).padStart(2, '0')}`;
+  const steps = tree.map(([index]): PathwayStep => ({
+    ...base, step_id: `step-${index}`, step_index: index, screen_id: id(index), timestamp_ms: index * 1000,
+    title: `Screen ${index}`, notes: '', source_candidate_id: `c${index}`,
+  }));
+  const screens = tree.map(([index, from]): PathwayScreen => ({
+    ...first, id: id(index), index, title: `Screen ${index}`, title_step_id: null, reached_from: from === null ? null : id(from),
+    image_step_id: `step-${index}`, row_choice: 'automatic',
+    visits: [{ visit: 1, step_ids: [`step-${index}`], arrived_ms: index * 1000, time_on_screen_ms: 1000 }],
+  }));
+  const transitions = tree
+    .filter(([, from]) => from !== null)
+    .map(([index, from]) => ({
+      from_screen: id(from as number), to_screen: id(index), kind: 'forward' as const,
+      passes: [{ step_id: `step-${index}`, step_index: index, timestamp_ms: index * 1000, transition_type: 'tap' }],
+    }));
+  return { ...pathway, step_count: steps.length, screen_count: screens.length, steps, screens, transitions, phases: [] };
+}
+
+test('a short side trip stays right below the row it leaves, before the long way on', () => {
+  // Row 0: S1 S2 S3; S3 goes on to a short trip (S4 only), S2 branches into the long rest (S5 to S9).
+  const draw = treePathway([[1, null], [2, 1], [3, 2], [4, 3], [5, 2], [6, 5], [7, 6], [8, 7], [9, 8]]);
+  const rows = rowOf(buildPathwayFigure({ ...input, pathway: draw, columns: 3, options: { notes: 'hidden', caption: false, times: true } }).svg);
+  const row = (index: number) => rows.get(`screen-${String(index).padStart(2, '0')}`) ?? 0;
+  assert.ok(row(4) > row(1), 'the side trip is below the first row');
+  assert.ok(row(4) < row(5), 'the side trip comes before the long branch, not after all of it');
+  assert.ok(row(9) > row(5));
+});
+
+test('a branch of a box at the end of a row starts a row of its own, drawn as a branch', () => {
+  // Two columns: S2 ends the row; S3 carries the main path on (S3 to S6), S7 is a branch of S2.
+  const draw = treePathway([[1, null], [2, 1], [3, 2], [4, 3], [5, 4], [6, 5], [7, 2]]);
+  const figure = buildPathwayFigure({ ...input, pathway: draw, columns: 2, options: { notes: 'hidden', caption: false, times: true } });
+  const rows = rowOf(figure.svg);
+  assert.ok((rows.get('screen-07') ?? 0) < (rows.get('screen-03') ?? 0), 'the short branch comes first');
+  const branch = moveGroup(figure.svg, 'move-screen-02-screen-07');
+  const main = moveGroup(figure.svg, 'move-screen-02-screen-03');
+  assert.ok(branch.includes('#a44d10'), 'the branch line and its chips are in the branch colour');
+  assert.ok(!main.includes('#a44d10'), 'the row going on stays in ink');
+  assert.ok(figure.encodings.hasPortal && figure.encodings.hasBranch);
+});
+
+test('on the page a row takes as many boxes as fit the space with little shrinking; a file keeps the usual width', () => {
+  const draw = treePathway(Array.from({ length: 12 }, (_, index): [number, number | null] => [index + 1, index ? index : null]));
+  const desktop = 3248 / 2122;
+  const file = buildPathwayFigure({ ...input, pathway: draw, aspect: desktop });
+  for (const space of [1000, 1340, 1600, 2400]) {
+    const columns = pathwayColumnsFor(space, desktop);
+    assert.ok(columns >= 2);
+    const page = buildPathwayFigure({ ...input, pathway: draw, aspect: desktop, columns, peek: true });
+    assert.ok(space / page.width >= 0.84, `${space}: the figure is ${page.width} wide, shrunk below 85%`);
+    // and it uses the space: one more column would not fit
+    const wider = buildPathwayFigure({ ...input, pathway: draw, aspect: desktop, columns: columns + 1, peek: true });
+    assert.ok(space / wider.width < 0.85 || columns + 1 > 12, `${space}: room for ${columns + 1} columns`);
+  }
+  assert.ok(pathwayColumnsFor(1340, desktop) < pathwayColumnsFor(2400, desktop));
+  assert.equal(file.width, buildPathwayFigure({ ...input, pathway: draw, aspect: desktop }).width);
+  // the times under the screens are a size up from the other small labels
+  assert.ok(file.svg.includes('font-size="11" fill="#4a4a45"'));
 });

@@ -8,7 +8,7 @@ import { markPathwayTutorialSeen, PathwayTutorial, pathwayTutorialSeen } from '.
 import { markWhatsNewSeen, WhatsNewTour, whatsNewSeen } from '../../components/WhatsNewTour';
 import { downloadBlob, downloadText } from '../../lib/accountLinks';
 import { APP_VERSION } from '../../lib/buildInfo';
-import { buildPathwayFigure, formatPathwayTime, type PathwayFigureOptions, type PathwayNotesPlacement } from '../../lib/pathwayFigure';
+import { buildPathwayFigure, formatPathwayTime, pathwayColumnsFor, type PathwayFigureOptions, type PathwayNotesPlacement } from '../../lib/pathwayFigure';
 import { renderPathwayPng } from '../../lib/pathwayPng';
 import {
   clampPathwayZoom,
@@ -149,8 +149,12 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   );
   const filename = recording?.filename ?? run.summary.recording_id;
 
+  // On the page, a row takes as many boxes as fit the space at full size, so its labels are not shrunk to fit; a
+  // downloaded figure keeps the usual width. Rebuilt only when that number changes, not with every pixel of a resize.
+  const columns = areaWidth > 0 ? pathwayColumnsFor(areaWidth, aspect) : undefined;
+
   /** The figure of a pathway: on the page, its boxes and step numbers ready to be selected, dragged and previewed. */
-  function figureFor(source: Pathway, imageFor: (step: PathwayStep) => string, page?: { highlight: string | null }) {
+  function figureFor(source: Pathway, imageFor: (step: PathwayStep) => string, page?: { highlight: string | null; columns?: number }) {
     const counts = `${plural(source.step_count, 'step', 'steps')} on ${plural(source.screen_count, 'screen', 'screens')}`;
     const parts = [projectName, counts, recording ? formatPathwayTime(recording.duration_ms) : ''].filter(Boolean);
     return buildPathwayFigure({
@@ -164,16 +168,17 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
       imageFor,
       highlight: page?.highlight ?? null,
       peek: Boolean(page),
+      columns: page?.columns,
     });
   }
 
   const figure = useMemo(
     () =>
       pathway && pathway.screens.length
-        ? figureFor(pathway, (step) => absoluteApiUrl(step.image_url), { highlight: null })
+        ? figureFor(pathway, (step) => absoluteApiUrl(step.image_url), { highlight: null, columns })
         : null,
     // figureFor reads only what is listed here; the selection is drawn over the figure (PathwayCanvas)
-    [pathway, options, aspect, filename, projectName, recording?.duration_ms],
+    [pathway, options, aspect, filename, projectName, recording?.duration_ms, columns],
   );
   const peek = usePathwayPeek(pathway, figure?.svg);
   // One object per figure: React sets the markup again whenever it gets a new object, even with the same text, and
