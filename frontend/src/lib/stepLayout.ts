@@ -1,6 +1,6 @@
 /** How the steps of a run are laid out for review; kept per browser. */
 
-export type StepView = 'grid' | 'list';
+export type StepView = 'grid' | 'list' | 'gallery';
 
 export interface StepLayout {
   view: StepView;
@@ -42,7 +42,8 @@ function readStored(key: string): (Partial<StepLayout> & { showAccepted?: boolea
 export function loadStepLayout(): StepLayout {
   try {
     const stored = readStored(STORAGE_KEY);
-    const view = (stored ?? readStored(LEGACY_STORAGE_KEY))?.view === 'list' ? 'list' : 'grid';
+    const rawView = (stored ?? readStored(LEGACY_STORAGE_KEY))?.view;
+    const view: StepView = rawView === 'list' || rawView === 'gallery' ? rawView : 'grid';
     const size = typeof stored?.size === 'number' && Number.isFinite(stored.size) ? clampStepSize(stored.size) : null;
     return { view, size, hideAccepted: stored?.showAccepted !== true };
   } catch {
@@ -79,6 +80,26 @@ export function stepThumbBox(size: number, aspect: number): { width: number; hei
   const side = size * LIST_THUMB_SCALE;
   const width = Math.round(side * Math.sqrt(aspect));
   return { width, height: Math.round(width / aspect) };
+}
+
+export interface GalleryLayoutSizing {
+  /** CSS height expression for the gallery stage + inspector row. */
+  stageHeightCss: string;
+  /** Filmstrip thumbnail height and width, px. */
+  thumbHeight: number;
+  thumbWidth: number;
+}
+
+/**
+ * Sizing for the Finder-style gallery view: `fit` (size === null) keeps the stage, inspector and filmstrip together
+ * in one viewport; dragging the size slider scales both the close-up stage and the filmstrip thumbnails smoothly.
+ */
+export function galleryLayoutSizing(size: number | null, aspect: number): GalleryLayoutSizing {
+  const t = size === null ? null : (clampStepSize(size) - STEP_SIZE_MIN) / (STEP_SIZE_MAX - STEP_SIZE_MIN);
+  const stageHeightCss = t === null ? 'clamp(360px, calc(100vh - 300px), 640px)' : `${Math.round(320 + t * 440)}px`;
+  const thumbHeight = t === null ? 76 : Math.round(60 + t * 46);
+  const thumbWidth = Math.max(42, Math.min(184, Math.round(thumbHeight * aspect)));
+  return { stageHeightCss, thumbHeight, thumbWidth };
 }
 
 export interface FittedStepGrid {

@@ -58,8 +58,10 @@ def outlines(path: Path, characters: str, *, slash_zero: bool) -> tuple[dict[str
 
 
 def qr_rows(text: str) -> list[str]:
-    code = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=0, box_size=1)
-    code.add_data(text)
+    # Uppercase alphanumeric + Level L fits the GitHub URL (which is case-insensitive) into Version 2 (25x25)
+    # instead of Version 3 (29x29), keeping the smaller badge's QR squares larger and easier to scan.
+    code = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L, border=0, box_size=1)
+    code.add_data(text.upper())
     code.make(fit=True)
     return ["".join("1" if dark else "0" for dark in row) for row in code.get_matrix()]
 

@@ -2,10 +2,11 @@ import type { CandidateFrame, CandidateStatus, RecordingSummary, RunSummary } fr
 
 export type SimilarLink = { targetId: string; label: string };
 export type AnalysisTaskFilter = 'all' | 'active' | 'completed' | 'failed';
-export type AnalysisPopoverKey = 'export' | 'load' | 'preset' | 'presets';
+export type AnalysisPopoverKey = 'export' | 'load' | 'preset' | 'presets' | 'reset';
 export type CandidateFilter = CandidateStatus | 'all';
 export type AnalysisHintKey =
   | 'presets'
+  | 'reset'
   | 'run'
   | 'stable_advanced'
   | 'stable_group_typing'

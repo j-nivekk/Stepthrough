@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { BADGE_HEIGHT, BADGE_WIDTH } from '../src/lib/pathwayBadge';
+import { BADGE_QR } from '../src/lib/pathwayBadgeData';
 import { buildPathwayFigure, type PathwayFigureInput } from '../src/lib/pathwayFigure';
 import { pathwayQueryOptions } from '../src/lib/pathwayQuery';
-import { fitStepGrid } from '../src/lib/stepLayout';
+import { fitStepGrid, galleryLayoutSizing, STEP_SIZE_MAX, STEP_SIZE_MIN } from '../src/lib/stepLayout';
 import type { Pathway, PathwayScreen, PathwayStep, RunDetail } from '../src/types';
 
 const measure = (text: string, size: number) => text.length * size * 0.6;
@@ -508,4 +510,23 @@ test('renamed screens display a compact S# badge with their title while untitled
   assert.ok(titleLine, 'screen-02 title text missing');
   assert.ok(titleLine.x >= 25, `expected title line indented after S2 badge, got x=${titleLine.x}`);
   assert.ok(titleLine.x + measure(titleLine.content, 12) <= cardWidth + 0.1, 'title line overflows card width');
+});
+
+test('the pathway badge uses a compact 72px height and simpler Version 2 (25x25) QR matrix', () => {
+  assert.equal(BADGE_HEIGHT, 72);
+  assert.ok(BADGE_WIDTH > 150 && BADGE_WIDTH < 210, `unexpected badge width: ${BADGE_WIDTH}`);
+  assert.equal(BADGE_QR.length, 25);
+  assert.ok(BADGE_QR.every((row) => row.length === 25));
+});
+
+test('gallery layout sizing adapts cleanly to fit mode, slider range, and portrait/landscape aspects', () => {
+  const fitPhone = galleryLayoutSizing(null, 390 / 844);
+  assert.match(fitPhone.stageHeightCss, /^clamp\(/);
+  assert.ok(fitPhone.thumbWidth >= 42 && fitPhone.thumbHeight >= 60);
+
+  const minDesktop = galleryLayoutSizing(STEP_SIZE_MIN, 16 / 9);
+  const maxDesktop = galleryLayoutSizing(STEP_SIZE_MAX, 16 / 9);
+  assert.ok(parseInt(maxDesktop.stageHeightCss, 10) > parseInt(minDesktop.stageHeightCss, 10));
+  assert.ok(maxDesktop.thumbHeight > minDesktop.thumbHeight);
+  assert.ok(maxDesktop.thumbWidth <= 184);
 });

@@ -189,6 +189,8 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   // Lesson 5 ("correct it"), as in the app: the step whose number was clicked, a step being dragged (and the box it
   // would go to, or 'new' off the boxes), and the choices before each change, for the undo.
   const [chosenStep, setChosenStep] = useState<number | null>(null);
+  const [putMenuOpen, setPutMenuOpen] = useState(false);
+  const putMenuRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<{ n: number; x: number; y: number; moved: boolean; target: number | 'new' | null } | null>(null);
   const [history, setHistory] = useState<Choices[]>([]);
   // The choices as they are now, for the undo of a change made later ("show me" makes its changes on a timer).
@@ -266,6 +268,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     setVerdicts({});
     setSelected(null);
     setChosenStep(null);
+    setPutMenuOpen(false);
     setDrag(null);
     setHistory([]);
     if (index === 5) setDecision(null);
@@ -274,6 +277,19 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     setCaption(index === 6);
     setDownloadNote(null);
   }
+
+  useEffect(() => {
+    setPutMenuOpen(false);
+  }, [chosenStep, lesson]);
+
+  useEffect(() => {
+    if (!putMenuOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!putMenuRef.current?.contains(event.target as Node)) setPutMenuOpen(false);
+    }
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [putMenuOpen]);
 
   useEffect(() => () => clearTimers(), []);
 
@@ -458,7 +474,8 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     if (event.key === 'Escape') {
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (drag) setDrag(null);
+      if (putMenuOpen) setPutMenuOpen(false);
+      else if (drag) setDrag(null);
       else if (chosenStep !== null) setChosenStep(null);
       else onClose();
       return;
@@ -505,32 +522,64 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   // ── the parts of each lesson ───────────────────────────────────────────────────────────────────
 
   const story = current ? mockStep(current) : null;
-  // The toolbox of the step whose number was clicked, as in the app: own screen, put it on, pop-up.
+  // The toolbox of the step whose number was clicked, matching the app: own screen (only on stacked boxes),
+  // put it on… (custom menu with screen thumbnails), pop-up, and stack automatically when overridden.
   const ownBox = chosenStep !== null ? pathway.screenOf.get(chosenStep) : undefined;
+  const ownScreen = ownBox !== undefined ? pathway.screens.find((screen) => screen.id === ownBox) : undefined;
+  const canSplitOwn = Boolean(ownScreen && ownScreen.steps.length > 1);
   const stepTool =
     lesson === 4 && chosenStep !== null ? (
       <>
         <span className="pathway-tool-label">step {chosenStep}</span>
-        <button className={`pathway-tool${shade('tool:own')}`} onClick={() => choose(chosenStep, 'new')} type="button">
-          own screen
-        </button>
-        <select
-          aria-label="put it on another box"
-          className="pathway-tool-select"
-          onChange={(event) => {
-            if (event.target.value) choose(chosenStep, Number(event.target.value));
-          }}
-          value=""
-        >
-          <option value="">put it on…</option>
-          {pathway.screens
-            .filter((screen) => screen.id !== ownBox)
-            .map((screen) => (
-              <option key={screen.id} value={screen.id}>
-                box {screen.index}, {screen.title}
-              </option>
-            ))}
-        </select>
+        {canSplitOwn ? (
+          <button className={`pathway-tool${shade('tool:own')}`} onClick={() => choose(chosenStep, 'new')} type="button">
+            own screen
+          </button>
+        ) : null}
+        <div className="pt-put-shell" ref={putMenuRef}>
+          <button
+            aria-expanded={putMenuOpen}
+            aria-haspopup="menu"
+            className={`pathway-tool ${putMenuOpen ? 'is-on' : ''}`}
+            onClick={() => setPutMenuOpen((open) => !open)}
+            type="button"
+          >
+            put it on…
+          </button>
+          {putMenuOpen ? (
+            <div className="pathway-menu is-compact pt-put-menu" role="menu">
+              {pathway.screens
+                .filter((screen) => screen.id !== ownBox)
+                .map((screen) => {
+                  const previewStep = screen.steps[0];
+                  return (
+                    <div className="pathway-menu-row" key={screen.id}>
+                      <button
+                        className="pathway-menu-item"
+                        onClick={() => {
+                          setPutMenuOpen(false);
+                          choose(chosenStep, screen.id);
+                        }}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <span className="pathway-menu-item-body">
+                          <span aria-hidden="true" className="pathway-menu-thumb pt-menu-thumb">
+                            <svg viewBox={`0 0 ${ART_WIDTH} ${ART_HEIGHT}`}>
+                              <MockArt art={mockStep(previewStep).art} />
+                            </svg>
+                          </span>
+                          <span>
+                            S{screen.index} · {screen.title}
+                          </span>
+                        </span>
+                      </button>
+                    </div>
+                  );
+                })}
+            </div>
+          ) : null}
+        </div>
         <button
           aria-pressed={isPopup(mockStep(chosenStep), choices)}
           className={`pathway-tool ${isPopup(mockStep(chosenStep), choices) ? 'is-on' : ''}`}
@@ -574,12 +623,17 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     );
   } else if (lesson === 1) {
     body = (
-      <ul className="pt-points">
-        <li>the black numbers are step numbers, as in the step list and in <code>steps.csv</code>.</li>
-        <li>an arrow carries the number of the step it leads to, so the journey can be read from 1 onwards.</li>
-        <li>a solid arrow goes onwards; a <b>dashed</b> arrow goes back to a screen seen earlier.</li>
-        <li>a stack means several steps on one screen; a <b>dashed frame</b> is a pop-up.</li>
-      </ul>
+      <>
+        <p>
+          the black numbers are step numbers, as in the step list and <code>steps.csv</code>. each arrow carries the
+          number of the step it leads to, so you can read the journey straight through from 1 onwards.
+        </p>
+        <p>
+          solid arrows move onwards (<b>amber</b> on a branch or detour), while <b>dashed blue</b> arrows return to a
+          screen seen earlier. stacked cards hold several steps on one screen, a <b>dashed frame</b> marks a pop-up,
+          and renamed screens keep a small <b>S#</b> tag.
+        </p>
+      </>
     );
     tools = (
       <div className="pt-walk">
@@ -617,8 +671,8 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
       </>
     );
     tools = (
-      <div aria-label="boxes" className="pt-switch" role="group">
-        <span className="pathway-control-label">boxes</span>
+      <div aria-label="view" className="pt-switch" role="group">
+        <span className="pathway-control-label">view</span>
         {(['screens', 'steps'] as const).map((value) => (
           <button
             aria-pressed={mode === value}
@@ -659,8 +713,8 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
       </>
     );
     tools = (
-      <div aria-label="boxes" className="pt-switch" role="group">
-        <span className="pathway-control-label">boxes</span>
+      <div aria-label="view" className="pt-switch" role="group">
+        <span className="pathway-control-label">view</span>
         {(['screens', 'steps'] as const).map((value) => (
           <button
             aria-pressed={mode === value}
@@ -698,7 +752,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
         <p className="pt-inside-title">
           {picked !== null ? `step ${picked} is in ` : 'inside '}box {inside.index}, <b>{inside.title}</b>
           {inside.steps.length === 1 ? ': one step' : `: steps ${inside.steps.join(', ')}`}
-          {picked !== null ? ' (when boxes are screens)' : ''}
+          {picked !== null ? ' (in screens view)' : ''}
         </p>
         <div className="pt-inside">
           {inside.steps.map((n) => (
@@ -742,16 +796,16 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
         </p>
         <ul className="pt-points">
           <li>
-            <b>own screen</b>: the step gets a box of its own;
+            <b>put it on…</b> another box (with screen thumbnails);
           </li>
           <li>
-            <b>put it on</b> another box.
+            <b>own screen</b> (on a stacked box): the step gets a box of its own.
           </li>
         </ul>
         <p>
-          or drag the number: onto a box to put the step there, or off the boxes for a screen of its own. every
-          change can be taken back with <b>⌘Z</b>. a whole box is dragged the same way, onto another, to stack all its
-          steps there.
+          or drag the number: onto a box to put the step there, or off the boxes for a screen of its own. in a real
+          pathway, clicking a box opens <b>stacking…</b>, <b>phase…</b> and <b>⋯</b>, and dragging a box onto another
+          stacks all its steps. every change can be taken back with <b>⌘Z</b>.
         </p>
       </>
     );
@@ -779,7 +833,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     if (done.has(4))
       after = (
         <p className="pt-feedback">
-          both fixed. each choice is stored on its step: the step list shows <code>screen: same as 1</code>, and{' '}
+          both fixed. each choice is stored on its step: the step list shows <code>stacking: same as 1</code>, and{' '}
           <code>pathway.json</code> marks the grouping as <code>researcher</code>.
         </p>
       );
@@ -919,7 +973,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
       <div aria-labelledby="pt-title" aria-modal="true" className="demo-panel pt-panel" ref={panelRef} role="dialog" tabIndex={-1}>
         <header className="demo-header">
           <div>
-            <p className="demo-eyebrow">pathway tutorial</p>
+            <p className="demo-eyebrow">tutorial</p>
             <h2 id="pt-title">working with pathways</h2>
           </div>
           <button aria-label="close" className="demo-icon-button" onClick={close} title="close (esc)" type="button">

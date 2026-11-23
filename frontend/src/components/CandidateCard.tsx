@@ -16,7 +16,7 @@ export interface StepHoverProps {
   onPlayFromHere: () => void;
 }
 
-function PlayFromHereButton({ iconOnly, onClick }: { iconOnly: boolean; onClick: () => void }) {
+export function PlayFromHereButton({ iconOnly, onClick }: { iconOnly: boolean; onClick: () => void }) {
   return (
     <button
       aria-label="play from here"
@@ -38,7 +38,7 @@ function PlayFromHereButton({ iconOnly, onClick }: { iconOnly: boolean; onClick:
 }
 
 /** Two offset closed screen cards (front card + matching back card tucked cleanly behind its edges). */
-function StackingIcon() {
+export function StackingIcon() {
   return (
     <svg aria-hidden="true" fill="none" height="13" viewBox="0 0 16 16" width="13">
       <rect height="10.25" rx="1" stroke="currentColor" strokeWidth="1.3" width="8.5" x="2" y="1.5" />
@@ -53,7 +53,7 @@ function StackingIcon() {
 }
 
 /** Three-stage moon phase sequence (new -> half -> full) for walkthrough phases. */
-function PhasesIcon() {
+export function PhasesIcon() {
   return (
     <svg aria-hidden="true" fill="none" height="13" viewBox="0 0 22 16" width="18">
       <circle cx="3.75" cy="8" r="2.35" stroke="currentColor" strokeWidth="1.25" />
@@ -66,7 +66,7 @@ function PhasesIcon() {
 
 // Mouse rather than pointer events: browsers send mouse enter and leave when the page scrolls under a
 // still pointer. Moving within a screenshot restarts the wait after a scroll cancelled it.
-function hoverHandlers(hover: StepHoverProps | undefined, slot: { current: HTMLElement | null }) {
+export function hoverHandlers(hover: StepHoverProps | undefined, slot: { current: HTMLElement | null }) {
   if (!hover) return {};
   return {
     onMouseEnter: () => hover.onEnter(slot.current),
@@ -77,20 +77,20 @@ function hoverHandlers(hover: StepHoverProps | undefined, slot: { current: HTMLE
   };
 }
 
-function hasFiniteNumber(value: number | null | undefined): value is number {
+export function hasFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
-function formatSigned(value: number): string {
+export function formatSigned(value: number): string {
   return `${value > 0 ? '+' : ''}${value.toFixed(1)}`;
 }
 
-function formatSeconds(ms: number): string {
+export function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`;
 }
 
 /** The step's label with its legend colour, plus how many screens a typing step grouped. */
-function CandidateLabel({ candidate }: { candidate: CandidateFrame }) {
+export function CandidateLabel({ candidate }: { candidate: CandidateFrame }) {
   const type = candidateLabelType(candidate);
   if (!type) {
     return null;
@@ -112,7 +112,7 @@ type TextField = 'title' | 'notes';
  * or this one's own save) is taken in, but never over typing that is not saved yet. A change is sent with the
  * text it began from, so that in a shared account it is refused rather than written over text saved elsewhere.
  */
-function useAnnotationDrafts(candidate: CandidateFrame, onUpdate: CandidateCardProps['onUpdate'], locked: boolean) {
+export function useAnnotationDrafts(candidate: CandidateFrame, onUpdate: CandidateCardProps['onUpdate'], locked: boolean) {
   const saved = { title: candidate.title ?? '', notes: candidate.notes ?? '' };
   const [drafts, setDrafts] = useState(saved);
   const base = useRef(saved);
@@ -170,7 +170,7 @@ function useAnnotationDrafts(candidate: CandidateFrame, onUpdate: CandidateCardP
  * In a shared account, who is typing a step's title and notes: this browser claims the step while one of its text
  * fields has the focus, and while another browser holds it, the fields here are read-only.
  */
-function useStepEditing(candidate: CandidateFrame) {
+export function useStepEditing(candidate: CandidateFrame) {
   const { enabled, clientId, presence, setPresence } = useLive();
   const key = `editing:${candidate.id}`;
   const editor = enabled ? stepEditor(presence, candidate.run_id, candidate.id) : null;
@@ -185,7 +185,7 @@ function useStepEditing(candidate: CandidateFrame) {
   };
 }
 
-const EDITED_ELSEWHERE = 'being edited in another browser';
+export const EDITED_ELSEWHERE = 'being edited in another browser';
 
 interface CandidateDecisionButtonProps {
   intent: CandidateStatus;
@@ -249,7 +249,7 @@ function CandidateDecisionButton({
   );
 }
 
-function CandidateDecisionButtons({
+export function CandidateDecisionButtons({
   candidate,
   onSetStatus,
 }: {

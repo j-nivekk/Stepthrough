@@ -1,4 +1,5 @@
 import { useEffect, useRef, type Dispatch, type HTMLAttributes, type KeyboardEvent, type RefObject, type SetStateAction } from 'react';
+import { AnalysisStarResetButton } from '../../../components/AnalysisControls';
 import type { AnalysisHintKey, AnalysisPopoverKey } from '../../../lib/analysis';
 import type { AnalysisMetadata, RecordingSummary, RunSettings } from '../../../types';
 import { StableParametersSection } from './StableParametersSection';
@@ -34,6 +35,7 @@ export interface AnalysisParametersPanelProps {
   presetImportError: string;
   presetMenuRef: RefObject<HTMLDivElement | null>;
   projectDefaultSettings: RunSettings;
+  resetMenuRef: RefObject<HTMLDivElement | null>;
   runSettings: RunSettings;
   selectedRecordingId: string | null;
   selectedRecordingSummary: RecordingSummary | null;
@@ -71,6 +73,7 @@ export function AnalysisParametersPanel({
   presetImportError,
   presetMenuRef,
   projectDefaultSettings,
+  resetMenuRef,
   runSettings,
   selectedRecordingId,
   selectedRecordingSummary,
@@ -95,7 +98,7 @@ export function AnalysisParametersPanel({
       </div>
       <div className="analysis-divider" />
 
-      {/* Presets: one menu, as a run's in the tasks list, for saving, resetting and sharing the parameters as text. */}
+      {/* Presets on the left (save and share as text), and the signature purple star reset menu on the right. */}
       <div className="analysis-param-actions">
         <div className="analysis-toolbar-shell" ref={presetMenuRef} {...bindHint('presets')}>
           <button
@@ -113,16 +116,6 @@ export function AnalysisParametersPanel({
                 [
                   { label: 'save for this project', run: onSaveProjectPreset },
                   { label: 'save as universal defaults', run: onSaveUniversalPreset },
-                ],
-                [
-                  { label: 'reset to project defaults', run: onResetToProjectDefaults },
-                  { label: 'reset to universal defaults', run: onResetToUniversalDefaults },
-                  {
-                    label: 'restore factory settings…',
-                    danger: true,
-                    title: "forgets the saved universal defaults and this project's, and starts again from stepthrough's own",
-                    run: onRestoreFactorySettings,
-                  },
                 ],
                 [
                   { label: 'load preset text…', keepOpen: true, run: () => togglePopover('load') },
@@ -173,6 +166,55 @@ export function AnalysisParametersPanel({
               </div>
               <pre className="analysis-preset-preview">{showPresetText}</pre>
               {presetCopyFeedback ? <p className="analysis-toolbar-feedback">{presetCopyFeedback}</p> : null}
+            </div>
+          ) : null}
+        </div>
+        <div className="analysis-toolbar-shell analysis-toolbar-shell-right" ref={resetMenuRef} {...bindHint('reset')}>
+          <AnalysisStarResetButton expanded={openPopover === 'reset'} onClick={() => togglePopover('reset')} />
+          {openPopover === 'reset' ? (
+            <div className="analysis-toolbar-popover analysis-toolbar-popover-purple analysis-toolbar-popover-right">
+              <div className="analysis-toolbar-popover-head">
+                <span>reset</span>
+              </div>
+              <p className="analysis-toolbar-copy">choose which defaults should replace the active analysis parameters.</p>
+              <div className="analysis-toolbar-option-list">
+                <button
+                  className="analysis-task-link subtle"
+                  onClick={() => {
+                    onResetToProjectDefaults();
+                    closePopover();
+                  }}
+                  type="button"
+                >
+                  reset to project defaults
+                </button>
+                <button
+                  className="analysis-task-link subtle"
+                  onClick={() => {
+                    onResetToUniversalDefaults();
+                    closePopover();
+                  }}
+                  type="button"
+                >
+                  reset to universal defaults
+                </button>
+              </div>
+              <div className="analysis-toolbar-divider" />
+              <div className="analysis-toolbar-option-list">
+                <button
+                  className="analysis-task-link subtle"
+                  onClick={() => {
+                    closePopover();
+                    onRestoreFactorySettings();
+                  }}
+                  type="button"
+                >
+                  restore factory settings…
+                </button>
+              </div>
+              <p className="analysis-toolbar-copy">
+                forgets the saved universal defaults and this project's, and starts again from stepthrough's own.
+              </p>
             </div>
           ) : null}
         </div>

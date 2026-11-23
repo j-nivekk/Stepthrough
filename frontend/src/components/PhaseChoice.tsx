@@ -239,6 +239,36 @@ export function PhaseChoice({
   );
 }
 
+export interface PhaseSpanInfo {
+  name: string;
+  start: number;
+  end: number | null;
+  accepted: number;
+}
+
+/**
+ * Resolve the walkthrough phase stretch containing `timestampMs` (or null when the run defines no named phases).
+ * Returns `name: ''` when named phases exist elsewhere in the run but this step falls outside every phase.
+ */
+export function phaseInfoAt(
+  boundaries: Boundary[] | undefined,
+  timestampMs: number,
+  allSteps: Array<{ timestamp_ms: number; status: string }>,
+  durationMs: number | null | undefined,
+): PhaseSpanInfo | null {
+  const named = (boundaries ?? []).filter((boundary) => boundary.name);
+  if (!named.length) return null;
+  const ordered = [...(boundaries ?? [])].sort((a, b) => a.start_ms - b.start_ms);
+  const name = phaseAt(ordered, timestampMs);
+  const index = ordered.reduce((found, boundary, at) => (boundary.start_ms <= timestampMs ? at : found), -1);
+  const start = index >= 0 ? ordered[index].start_ms : 0;
+  const end = ordered[index + 1]?.start_ms ?? durationMs ?? null;
+  const accepted = allSteps.filter(
+    (item) => item.status === 'accepted' && item.timestamp_ms >= start && (end === null || item.timestamp_ms < end),
+  ).length;
+  return { name, start, end, accepted };
+}
+
 /**
  * The steps of the step review, with a header where a phase of the walkthrough starts (and where one ends, when the
  * steps after it are in none). Phases are stretches of the recording, so a header goes wherever the phase changes

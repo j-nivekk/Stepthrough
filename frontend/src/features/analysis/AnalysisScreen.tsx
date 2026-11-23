@@ -3,6 +3,7 @@ import { busyElsewhere, busyRunIds } from '../../lib/live';
 import { useLive } from '../live/LiveProvider';
 import { absoluteApiUrl } from '../../api';
 import { CandidateCard, CandidateRow, DecisionIcon } from '../../components/CandidateCard';
+import { CandidateGallery } from '../../components/CandidateGallery';
 import { EditableName } from '../../components/EditableName';
 import {
   activeRunStatuses,
@@ -67,6 +68,7 @@ import { defaultStableSettings, formatStableSummary } from '../../lib/stableSett
 import {
   clampStepSize,
   fitStepGrid,
+  galleryLayoutSizing,
   loadStepLayout,
   recordingAspect,
   saveStepLayout,
@@ -358,6 +360,7 @@ export function AnalysisScreen({
   const parameterColumnRef = useRef<HTMLElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const presetMenuRef = useRef<HTMLDivElement | null>(null);
+  const resetMenuRef = useRef<HTMLDivElement | null>(null);
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const activeManualMarkIdRef = useRef<string | null>(null);
   const creatingManualRuns = useRef(new Map<string, Promise<RunSummary>>());
@@ -366,7 +369,9 @@ export function AnalysisScreen({
   const previewVideoUrl = previewRecording ? absoluteApiUrl(previewRecording.source_url) : null;
   const hintCopy: Record<AnalysisHintKey, string> = {
     presets:
-      'save the current parameters for this project or as universal defaults, reset them to saved defaults, or load and share them as preset text.',
+      'save the current parameters for this project or as universal defaults, or load and share them as preset text.',
+    reset:
+      'reset the current analysis parameters to this project or universal defaults, or restore factory settings.',
     run: 'start a new analysis task for the selected video using the current parameter set.',
     stable_advanced:
       'expert settings. the defaults work for screen recordings; change them only when a specific recording needs it.',
@@ -520,6 +525,7 @@ export function AnalysisScreen({
   const stepSize = stepLayout.size ?? fittedStepGrid?.size ?? STEP_SIZE_DEFAULT;
   const stepCardWidth = fittedStepGrid?.cardWidth ?? stepImageBox(stepSize, stepAspect).width;
   const stepThumb = stepThumbBox(stepSize, stepAspect);
+  const gallerySizing = galleryLayoutSizing(stepLayout.size, stepAspect);
   const stepSliderValue = clampStepSize(stepSize);
   useEffect(() => {
     saveStepLayout(stepLayout);
@@ -705,6 +711,7 @@ export function AnalysisScreen({
       const target = event.target as Node;
       if (
         presetMenuRef.current?.contains(target) ||
+        resetMenuRef.current?.contains(target) ||
         exportMenuRef.current?.contains(target)
       ) {
         return;
@@ -826,6 +833,7 @@ export function AnalysisScreen({
       if (event.key === 'Escape') {
         if (selectedCandidateIds.length > 0) {
           event.preventDefault();
+          selectionAnchorRef.current = null;
           setSelectedCandidateIds([]);
         }
         return;
@@ -872,7 +880,7 @@ export function AnalysisScreen({
 
     window.addEventListener('keydown', handleReviewKeydown);
     return () => window.removeEventListener('keydown', handleReviewKeydown);
-  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedCandidateIds.length, selectedRun?.summary.id, showPathway]);
+  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedCandidateIds.length, selectedRun?.summary.id, showPathway, stepLayout.view]);
 
   useEffect(() => {
     if (!previewVideoUrl) {
@@ -1110,9 +1118,9 @@ export function AnalysisScreen({
     }
   }
 
-  /** A step's box: toggles it, or with shift every step from the one clicked last. */
+  /** A step's box: toggles it, or with shift every step from the last one clicked (or active step) to this one. */
   function toggleCandidateSelection(candidateId: string, shift = false) {
-    const anchor = selectionAnchorRef.current;
+    const anchor = selectionAnchorRef.current ?? (shift ? activeCandidateId : null);
     selectionAnchorRef.current = candidateId;
     setSelectedCandidateIds((current) => clickSelection(current, shownCandidateIds, candidateId, anchor, shift));
   }
@@ -1348,6 +1356,12 @@ export function AnalysisScreen({
       setPreviewPlaybackMs(candidate.timestamp_ms);
     }
 
+    if (stepLayout.view === 'gallery') {
+      if (options?.reveal) {
+        window.setTimeout(() => jumpToAnchor('analysis-candidate-review'), 0);
+      }
+      return;
+    }
     window.setTimeout(() => jumpToAnchor(`candidate-${candidate.id}`), 0);
   }
 
@@ -1367,7 +1381,9 @@ export function AnalysisScreen({
       return;
     }
     setActiveCandidateId(nextCandidateId);
-    window.setTimeout(() => jumpToAnchor(`candidate-${nextCandidateId}`), 0);
+    if (stepLayout.view !== 'gallery') {
+      window.setTimeout(() => jumpToAnchor(`candidate-${nextCandidateId}`), 0);
+    }
   }
 
   function handlePlayFromHere(candidate: CandidateFrame) {
@@ -1554,6 +1570,7 @@ export function AnalysisScreen({
             presetImportError={presetImportError}
             presetMenuRef={presetMenuRef}
             projectDefaultSettings={projectDefaultSettings}
+            resetMenuRef={resetMenuRef}
             runSettings={runSettings}
             selectedRecordingId={selectedRecordingId}
             selectedRecordingSummary={selectedRecordingSummary}
@@ -2346,7 +2363,10 @@ export function AnalysisScreen({
                           <button
                             className="analysis-task-link subtle"
                             disabled={shownSelectionState === 'none'}
-                            onClick={() => setSelectedCandidateIds([])}
+                            onClick={() => {
+                              selectionAnchorRef.current = null;
+                              setSelectedCandidateIds([]);
+                            }}
                             type="button"
                           >
                             none
@@ -2407,7 +2427,7 @@ export function AnalysisScreen({
 
                   <div className="candidate-view-controls">
                     <div aria-label="step layout" className="candidate-view-switch" role="group">
-                      {(['grid', 'list'] as const).map((view) => (
+                      {(['grid', 'list', 'gallery'] as const).map((view) => (
                         <button
                           aria-pressed={stepLayout.view === view}
                           className={`candidate-filter-tab ${stepLayout.view === view ? 'active' : ''}`}
@@ -2466,7 +2486,36 @@ export function AnalysisScreen({
                   </div>
                 ) : null}
 
-                {filteredCandidates.length && stepLayout.view === 'list' ? (
+                {filteredCandidates.length && stepLayout.view === 'gallery' ? (
+                  <CandidateGallery
+                    activeCandidateId={activeCandidateId}
+                    allSteps={selectedRun.candidates}
+                    aspect={stepAspect}
+                    candidates={filteredCandidates}
+                    durationMs={selectedRecordingSummary?.duration_ms}
+                    hoverFor={stepHover}
+                    hoveredCandidateId={hoveredCandidateId}
+                    onActivate={(candidateId) => setActiveCandidateId(candidateId)}
+                    onHoverChange={setHoveredCandidateId}
+                    onJumpToSimilar={(targetId) => {
+                      if (targetId.startsWith('candidate-')) {
+                        activateCandidate(targetId.slice('candidate-'.length), { reveal: true });
+                      } else {
+                        jumpToAnchor(targetId);
+                      }
+                    }}
+                    onPaintEnter={(candidateId) => continuePaintSelect(candidateId)}
+                    onPaintStart={(candidateId, currentlySelected) => startPaintSelect(candidateId, currentlySelected)}
+                    onSetStatus={handleCandidateStatusChange}
+                    onStep={handleStepCandidate}
+                    onToggleSelection={(candidateId, shift) => toggleCandidateSelection(candidateId, shift)}
+                    onUpdate={(candidateId, payload) => onUpdateCandidate(candidateId, payload)}
+                    phases={{ runId: selectedRun.summary.id, boundaries: selectedRun.phases }}
+                    selectedCandidateIds={selectedShownCandidateIds}
+                    similarityLinks={candidateSimilarityLinks}
+                    sizing={gallerySizing}
+                  />
+                ) : filteredCandidates.length && stepLayout.view === 'list' ? (
                   <div
                     aria-label="steps"
                     className="candidate-list"
@@ -2479,9 +2528,10 @@ export function AnalysisScreen({
                         <input
                           aria-label={shownSelectionState === 'all' ? 'select none of the steps shown' : 'select every step shown'}
                           checked={shownSelectionState === 'all'}
-                          onChange={() =>
-                            setSelectedCandidateIds(shownSelectionState === 'all' ? [] : shownCandidateIds)
-                          }
+                          onChange={() => {
+                            if (shownSelectionState === 'all') selectionAnchorRef.current = null;
+                            setSelectedCandidateIds(shownSelectionState === 'all' ? [] : shownCandidateIds);
+                          }}
                           ref={(box) => {
                             if (box) box.indeterminate = shownSelectionState === 'some';
                           }}

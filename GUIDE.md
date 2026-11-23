@@ -401,17 +401,18 @@ settings for a short explanation of each one.
 
 ### Saving and sharing settings
 
-**presets**, above the settings, opens a menu:
+**presets**, above the settings on the left, opens a menu for saving and sharing parameters:
 
 - **save for this project** keeps the current settings as your default for this project, and **save as universal
   defaults** uses them for every project you have not saved settings for.
 - Saved settings belong to your account, not to the browser: on a shared server they are there on any computer
   you log in from, and other people in a shared project keep their own.
-- **reset to project defaults** and **reset to universal defaults** go back to those. **restore factory
-  settings…** forgets the settings you saved, for this project and as universal defaults, and goes back to
-  Stepthrough's own.
 - **show preset text…** shows the settings as a short piece of text that you can copy, for example into a methods
   section or to share with others. **load preset text…** reads such a text back in.
+
+The purple **reset** button on the right opens the reset menu: **reset to project defaults** and **reset to
+universal defaults** go back to your saved defaults, and **restore factory settings…** forgets the settings you
+saved (for this project and as universal defaults) and goes back to Stepthrough's own.
 
 ## 7. Reviewing steps
 
@@ -432,15 +433,15 @@ While the video plays, the card of the step on screen is outlined, so you can se
 | go to the previous or next step | `←` `→`, or click the step |
 | see the clip that led to a step | rest the pointer on its screenshot for a moment |
 | play the video from a step | **play from here** on the screenshot, or `p` for the selected step |
-| add a title and notes | **annotate** on a card, or type directly in the list view |
+| add a title and notes | **annotate** on a card, or type directly in the list or gallery view |
 | show only some steps | **all**, **pending**, **accepted** or **rejected** above the steps |
 | show the strip of accepted steps | it starts folded away: click **accepted steps** above the timeline to show it, and again to fold it |
 | hide steps with a certain label | click the label in the legend above the timeline; click again to show them |
-| change the layout | **grid** or **list**; the slider sets the size of the images, and **fit** goes back to images sized to fill the width of the window |
-| select several steps | tick their boxes; shift-click a box to select every step from the one ticked last. **select: all**, **none** and **invert** above the steps act on the steps shown, as does the box above the list; `x` (and `shift+x`) does the same for the step in focus |
+| change the layout | **grid**, **list** or **gallery**; the slider sets the size of the images, and **fit** goes back to fitting the view to the window |
+| select several steps | tick or drag across their boxes; shift-click a box (or shift/⌘/ctrl-click thumbnails in gallery view) to select a range or toggle items. **select: all**, **none** and **invert** above the steps act on the steps shown, as does the box above the list; `x` (and `shift+x`) does the same for the step in focus |
 | accept, reject or reset many steps at once | select them, then **accept**, **reject** or **reset** next to how many are selected. Steps that are so already are left as they are, and the selection stays, so a mistaken choice can be put right at once |
 | go to an earlier visit of the same screen | **similar to candidate N** on a revisit |
-| say which screen a step shows in the pathway | **screen** under **annotate** on a card, or in the **label, screen** column of the list |
+| say which screen a step shows in the pathway | **stacking** under **annotate** on a card, in the **label, screen** column of the list, or in the gallery inspector |
 
 ### Comparing runs
 
@@ -524,16 +525,13 @@ select is what changes:
   **Enter** selects one and the menu key opens its actions.
 
 A small toolbox opens beside what you selected. For a box: its **title** (a box is named after its first step that
-has a title, so this is that step's title, and the step list shows it too), **pop-up**, **stack onto…** another
-box, **unstack…** for a box of several steps, and **phase…**. **unstack…** gives every step of the box a screen of
-its own, or each visit, or just the one step you pick; **stack automatically** puts the box's steps back where they
-were found, undoing the stacking and unstacking done to them (a box of one step has it under **stack…**, once its
-steps have been moved); and **edit steps…** selects the box's first step. For a step: **own screen**, which takes
-just that step out of its box, **put it on…** another box, and **pop-up**. Under **⋯** (and in the right-click
-menu) are the rarer ones as well, such as **row**, which says where the box goes in the figure: **next to** the
-screen it was reached from, or **on a row below**. Without a say, the first screen reached from a screen goes next
-to it and the others go below; use it to keep the main way through on one line and put detours underneath. The
-screens and the moves stay the same.
+has a title, so this is that step's title, and the step list shows it too), **pop-up**, **stacking…** (to stack
+onto another box, unstack all steps, unstack by visit, pop out a single step, **stack automatically** back where
+steps were found, or **edit steps…**), and **phase…**. For a step: **own screen** (on stacked boxes), **put it
+on…** another box, and **pop-up**. Under **⋯** (and in the right-click menu) are the rarer ones such as **row**
+(which says whether the box goes **next to** the screen it was reached from or **on a row below**). Without a say,
+the first screen reached from a screen goes next to it and the others go below; use it to keep the main way through
+on one line and put detours underneath. The screens and the moves stay the same.
 
 The two most common corrections can also be dragged:
 

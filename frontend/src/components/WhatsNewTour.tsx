@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { createPortal } from 'react-dom';
 
 /** The version whose changes the tour shows: it opens once per browser for each. */
-export const WHATS_NEW_VERSION = '1.4';
+export const WHATS_NEW_VERSION = '1.4.3';
 const SEEN_KEY = 'stepthrough.whats-new';
 
 export function whatsNewSeen(): boolean {
@@ -36,10 +36,11 @@ const boxes = () => all('.pathway-figure [data-screen] image');
 
 const STOPS: Stop[] = [
   {
-    title: 'view',
+    title: 'view, and sticky controls',
     text: (
       <>
-        was <b>boxes</b>. <b>screens</b>: one box per page. <b>steps</b>: one box per step.
+        <b>screens</b>: one box per page. <b>steps</b>: one box per step. the controls bar stays pinned at the top as
+        you scroll through tall charts.
       </>
     ),
     find: () => one('[aria-label="view of the pathway"]'),
@@ -48,7 +49,8 @@ const STOPS: Stop[] = [
     title: 'click a box',
     text: (
       <>
-        opens its toolbox: <b>title</b>, <b>pop-up</b>, <b>stacking</b> and <b>phase</b>. shift-click for several.
+        opens its toolbox: <b>title</b>, <b>pop-up</b>, <b>stacking…</b> (with screen thumbnails, unstacking and
+        automatic stacking), and <b>phase…</b>. renamed screens keep a compact <b>S#</b> tag. shift-click for several.
       </>
     ),
     find: () => boxes().slice(1, 2).concat(boxes().length === 1 ? boxes() : []),
@@ -57,13 +59,27 @@ const STOPS: Stop[] = [
     title: 'click a step number',
     text: (
       <>
-        selects one step: give it its <b>own</b> screen, or <b>put it on</b> another box. for 4–5, pick one in its toolbox.
+        selects one step: <b>put it on…</b> another box (with thumbnails), or give a stacked step its <b>own screen</b>.
+        for 4–5, pick a step in its toolbox.
       </>
     ),
     find: () => {
       const numbers = all('.pathway-figure [data-peek]');
       const several = numbers.find((number) => (number.getAttribute('data-peek') ?? '').includes(' '));
       return several ? [several] : numbers.slice(0, 1);
+    },
+  },
+  {
+    title: 'paths, hover and pan',
+    text: (
+      <>
+        branches are amber, returns are dashed blue, and distant jumps show clickable chips. hover any arrow to
+        spotlight its route, or drag empty space to pan the chart.
+      </>
+    ),
+    find: () => {
+      const legend = one('.pathway-status-legend');
+      return legend.length ? legend : one('.pathway-status');
     },
   },
   {
@@ -77,21 +93,21 @@ const STOPS: Stop[] = [
     find: () => boxes().slice(0, 2),
   },
   {
-    title: 'right-click, and undo',
+    title: 'right-click, ⋯ and undo',
     text: (
       <>
-        right-click for every action. this line shows what is selected; <b>undo</b> (⌘Z or Ctrl+Z) takes back only
-        your own changes.
+        right-click a box or step number for its menu (the toolbox steps out of the way). <b>⋯</b> holds rarer choices
+        like row placement. <b>undo</b> (⌘Z or Ctrl+Z) takes back only your own changes.
       </>
     ),
     find: () => one('.pathway-status'),
   },
   {
-    title: 'phases',
+    title: 'phases, and gallery view',
     text: (
       <>
-        name parts of the walkthrough, such as sign up: here, or <b>phase…</b> on selected boxes. this tour stays
-        under <b>about</b>.
+        name parts of the walkthrough here, or with <b>phase…</b> on selected boxes — and try <b>gallery</b> in steps
+        for close-up per-screen review. this tour stays under <b>about</b>.
       </>
     ),
     find: () => one('[data-phases-toggle]'),
@@ -144,17 +160,26 @@ export function WhatsNewTour({ onClose }: { onClose: () => void }) {
     onClose();
   }, [onClose]);
 
-  // Each stop brings what it points at into view, then follows it as the page scrolls or the window changes.
+  // Each stop brings what it points at into view (skipping scroll when already clearly visible, e.g. sticky bars),
+  // then follows it as the page scrolls or the window changes.
   useEffect(() => {
     const first = stop.find()[0];
-    first?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: stillPreferred() ? 'auto' : 'smooth' });
+    if (first) {
+      const rect = first.getBoundingClientRect();
+      const visible = rect.top >= 16 && rect.bottom <= window.innerHeight - 16;
+      if (!visible) {
+        first.scrollIntoView({ block: 'center', inline: 'nearest', behavior: stillPreferred() ? 'auto' : 'smooth' });
+      }
+    }
     const measure = () => setSpot(around(stop.find()));
     measure();
     const later = window.setTimeout(measure, 350); // once a smooth scroll has arrived
+    const settled = window.setTimeout(measure, 650);
     window.addEventListener('scroll', measure, true);
     window.addEventListener('resize', measure);
     return () => {
       window.clearTimeout(later);
+      window.clearTimeout(settled);
       window.removeEventListener('scroll', measure, true);
       window.removeEventListener('resize', measure);
     };

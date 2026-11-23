@@ -42,6 +42,8 @@ const LEFT = 22;
 const PITCH = 92;
 const PILL = 15;
 const INK = '#111';
+const BRANCH = '#a44d10';
+const RETURN = '#2c5f8a';
 const ORANGE = '#cd6d1e';
 const GREEN = '#48af7c';
 
@@ -206,7 +208,9 @@ export function MockPathway({
           px = tx + (sx > tx ? 26 : -26);
           py = busTo;
         }
-        return { move, d, px, py };
+        const role: 'main' | 'branch' | 'return' =
+          move.kind === 'return' ? 'return' : forward && from.row === to.row ? 'main' : 'branch';
+        return { move, d, px, py, role };
       })
     : [];
 
@@ -273,48 +277,78 @@ export function MockPathway({
         </g>
       ) : null}
 
-      {/* the moves */}
+      {/* the moves: painter's order (main -> branch -> return -> active) with white crossing halos */}
       <g fill="none">
-        {routes.map((route) => {
-          if (!route) return null;
-          const hot = current !== null && route.move.passes.includes(current);
-          return (
-            <g className="pt-arrow" key={`${route.move.from}>${route.move.to}|${route.d}`}>
-              <path
-                d={route.d}
-                markerEnd={`url(#${markerId})`}
-                stroke={hot ? ORANGE : INK}
-                strokeDasharray={route.move.kind === 'return' ? '5 4' : undefined}
-                strokeWidth={hot ? 2 : 1.1}
-              />
-              <g transform={`translate(${route.px - (route.move.passes.length * 17 - 2) / 2} ${route.py - 7.5})`}>
-                {route.move.passes.map((n, index) => (
-                  <g key={n} transform={`translate(${index * 17} 0)`}>
-                    <Pill active={n === current} n={n} />
-                  </g>
-                ))}
+        {routes
+          .filter((route): route is NonNullable<typeof route> => route !== null)
+          .slice()
+          .sort((left, right) => {
+            const rank = (entry: NonNullable<(typeof routes)[number]>) => {
+              const isHot = current !== null && entry.move.passes.includes(current);
+              if (isHot) return 3;
+              return entry.role === 'return' ? 2 : entry.role === 'branch' ? 1 : 0;
+            };
+            return rank(left) - rank(right);
+          })
+          .map((route) => {
+            const hot = current !== null && route.move.passes.includes(current);
+            const stroke = hot ? ORANGE : route.role === 'return' ? RETURN : route.role === 'branch' ? BRANCH : INK;
+            return (
+              <g className="pt-arrow" key={`${route.move.from}>${route.move.to}|${route.d}`}>
+                <path d={route.d} stroke="#fff" strokeLinecap="round" strokeLinejoin="round" strokeWidth={4.2} />
+                <path
+                  d={route.d}
+                  markerEnd={`url(#${markerId})`}
+                  stroke={stroke}
+                  strokeDasharray={route.role === 'return' ? '5 3.5' : undefined}
+                  strokeWidth={hot ? 2 : 1.15}
+                />
+                <g transform={`translate(${route.px - (route.move.passes.length * 17 - 2) / 2} ${route.py - 7.5})`}>
+                  {route.move.passes.map((n, index) => (
+                    <g key={n} transform={`translate(${index * 17} 0)`}>
+                      <Pill active={n === current} n={n} />
+                    </g>
+                  ))}
+                </g>
               </g>
-            </g>
-          );
-        })}
+            );
+          })}
       </g>
 
-      {/* titles above the boxes */}
-      {pathway.screens.map((screen) => (
-        <text
-          className={`pt-move pt-fade ${chart ? '' : 'out'}`}
-          fontSize={11}
-          fontWeight={700}
-          key={`title${screen.id}`}
-          paintOrder="stroke"
-          stroke="#fff"
-          strokeLinejoin="round"
-          strokeWidth={4}
-          style={{ transform: `translate(${boxX(screen)}px, ${rowTop(screen.row) - 7}px)` }}
-        >
-          {screen.title}
-        </text>
-      ))}
+      {/* titles above the boxes (with compact S# badge on renamed screens only, matching pathwayFigure.ts) */}
+      {pathway.screens.map((screen) => {
+        const showBadge = !new RegExp(`^screen\\s+${screen.index}\\b`, 'i').test(screen.title.trim());
+        const badgeLabel = `S${screen.index}`;
+        const badgeW = showBadge ? badgeLabel.length * 5.2 + 7 : 0;
+        return (
+          <g
+            className={`pt-move pt-fade ${chart ? '' : 'out'}`}
+            key={`title${screen.id}`}
+            style={{ transform: `translate(${boxX(screen)}px, ${rowTop(screen.row) - 7}px)` }}
+          >
+            {showBadge ? (
+              <>
+                <rect fill="#efefec" height={12.5} rx={3} stroke="#d4d4ce" strokeWidth={0.7} width={badgeW} x={0} y={-10} />
+                <text fill="#555" fontSize={8} fontWeight={700} textAnchor="middle" x={badgeW / 2} y={-1.2}>
+                  {badgeLabel}
+                </text>
+              </>
+            ) : null}
+            <text
+              fontSize={11}
+              fontWeight={700}
+              paintOrder="stroke"
+              stroke="#fff"
+              strokeLinejoin="round"
+              strokeWidth={4}
+              x={showBadge ? badgeW + 4 : 0}
+              y={0}
+            >
+              {screen.title}
+            </text>
+          </g>
+        );
+      })}
 
       {/* the cards: later steps first, so the first step of a box lies on top */}
       {[...MOCK_STEPS].reverse().map((step) => {
@@ -460,16 +494,20 @@ export function MockPathway({
             <text fill="#444" fontSize={9.5} x={21} y={10.8}>
               step number
             </text>
-            <path d="M100 7.5h24" markerEnd={`url(#${markerId})`} stroke={INK} strokeWidth={1.1} />
-            <text fill="#444" fontSize={9.5} x={130} y={10.8}>
-              move to the step's screen
+            <path d="M98 7.5h24" markerEnd={`url(#${markerId})`} stroke={INK} strokeWidth={1.15} />
+            <text fill="#444" fontSize={9.5} x={128} y={10.8}>
+              main move
             </text>
-            <path d="M262 7.5h24" markerEnd={`url(#${markerId})`} stroke={INK} strokeDasharray="5 4" strokeWidth={1.1} />
-            <text fill="#444" fontSize={9.5} x={292} y={10.8}>
+            <path d="M196 7.5h24" markerEnd={`url(#${markerId})`} stroke={BRANCH} strokeWidth={1.15} />
+            <text fill="#444" fontSize={9.5} x={226} y={10.8}>
+              branch or detour
+            </text>
+            <path d="M324 7.5h24" markerEnd={`url(#${markerId})`} stroke={RETURN} strokeDasharray="5 3.5" strokeWidth={1.15} />
+            <text fill="#444" fontSize={9.5} x={354} y={10.8}>
               return
             </text>
-            <rect fill="none" height={13} stroke={INK} strokeDasharray="3 2" strokeWidth={0.8} width={9} x={340} y={1} />
-            <text fill="#444" fontSize={9.5} x={354} y={10.8}>
+            <rect fill="none" height={13} stroke={INK} strokeDasharray="3 2" strokeWidth={0.8} width={9} x={402} y={1} />
+            <text fill="#444" fontSize={9.5} x={416} y={10.8}>
               pop-up
             </text>
           </g>
