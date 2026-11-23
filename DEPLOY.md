@@ -248,7 +248,7 @@ moves it).
 
 ```bash
 git clone https://github.com/j-nivekk/Stepthrough.git && cd Stepthrough
-git checkout v1.4.2                                           # the latest release
+git checkout v1.4.3                                           # the latest release
 (cd backend && uv sync)                                       # add --group ocr for text recognition (x86-64 only)
 (cd frontend && npm ci && VITE_API_BASE_URL= npm run build)
 ```
@@ -290,7 +290,7 @@ To upgrade, check out the new release, update both parts and restart. Use the sa
 `uv sync` removes the packages it is not asked for, text recognition included.
 
 ```bash
-git fetch --tags && git checkout v1.4.3                       # the new release
+git fetch --tags && git checkout v1.4.4                       # the new release
 (cd backend && uv sync)                                       # with --group ocr if you use text recognition
 (cd frontend && npm ci && VITE_API_BASE_URL= npm run build)
 systemctl --user restart stepthrough
