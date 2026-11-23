@@ -1,6 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
 import { getRun } from '../../../api';
+import {
+  ContextMenu,
+  keyboardMenuAnchor,
+  shouldIgnoreContextMenu,
+  triggerMenuAnchor,
+  type ContextMenuItem,
+  type ContextMenuState,
+} from '../../../components/ContextMenu';
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
 import { formatElapsedDuration } from '../../../lib/utils';
 import { EditableName } from '../../../components/EditableName';
@@ -45,25 +53,6 @@ interface AnalysisTaskRowSetting {
   label: string;
   value: string;
   valueClassName?: string;
-}
-
-interface TaskMenuState {
-  runId: string;
-  x: number;
-  y: number;
-  alignRight?: boolean;
-  anchorTop?: number;
-}
-
-interface TaskMenuItem {
-  label: string;
-  danger?: boolean;
-  disabled?: boolean;
-  title?: string;
-  /** Afterwards the focus goes back to the run's ⋯ (not for rename, whose field takes it, nor delete, whose
-   *  question does). */
-  refocus?: boolean;
-  run: () => void;
 }
 
 export interface AnalysisTasksPanelProps {
@@ -143,7 +132,7 @@ export function AnalysisTasksPanel({
   );
   // which run's name to edit, from its context menu; the nonce starts the edit again on a second click
   const [renameRequest, setRenameRequest] = useState<{ id: string; nonce: number } | null>(null);
-  const [menu, setMenu] = useState<TaskMenuState | null>(null);
+  const [menu, setMenu] = useState<ContextMenuState | null>(null);
   // the run whose log is open in its details
   const [logsRunId, setLogsRunId] = useState<string | null>(null);
   const knownActiveRunIds = useRef<Set<string> | null>(null);
@@ -199,7 +188,7 @@ export function AnalysisTasksPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRunId]);
 
-  const menuItem = menu ? analysisTaskItems.find((candidate) => candidate.run.id === menu.runId) ?? null : null;
+  const menuItem = menu ? analysisTaskItems.find((candidate) => candidate.run.id === menu.id) ?? null : null;
   const menuRun = menuItem
     ? selectedRunId === menuItem.run.id && selectedRunSummary?.id === menuItem.run.id
       ? selectedRunSummary
@@ -211,71 +200,42 @@ export function AnalysisTasksPanel({
     if (menu && !menuRun) setMenu(null);
   }, [menu, menuRun]);
 
-  // Dismiss the floating run menu on outside pointerdown, scroll, resize, or Escape (matches PathwayCanvas).
-  useEffect(() => {
-    if (!menu) return;
-    const triggerSelector = `[data-task-menu-trigger="${CSS.escape(menu.runId)}"]`;
-    const close = () => setMenu(null);
-    function handlePointerDown(event: globalThis.PointerEvent) {
-      const target = event.target instanceof Element ? event.target : null;
-      if (target?.closest('.analysis-task-menu') || target?.closest(triggerSelector)) return;
-      setMenu(null);
-    }
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.stopPropagation();
-        setMenu(null);
-      }
-    }
-    window.addEventListener('pointerdown', handlePointerDown, true);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('pointerdown', handlePointerDown, true);
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [menu]);
-
   /** Close the menu; after Escape or an action that leaves the focus nowhere, it goes back to the run's ⋯, so
    *  that someone using the keyboard keeps their place. */
-  function closeMenu(refocus = false) {
-    const runId = menu?.runId;
-    setMenu(null);
-    if (!refocus || !runId) return;
-    window.requestAnimationFrame(() =>
-      document.querySelector<HTMLElement>(`[data-task-menu-trigger="${CSS.escape(runId)}"]`)?.focus(),
-    );
-  }
+  const closeMenu = useCallback(
+    (refocus = false) => {
+      const runId = menu?.id;
+      setMenu(null);
+      if (!refocus || !runId) return;
+      window.requestAnimationFrame(() =>
+        document.querySelector<HTMLElement>(`[data-task-menu-trigger="${CSS.escape(runId)}"]`)?.focus(),
+      );
+    },
+    [menu?.id],
+  );
 
   function handleRowContextMenu(event: MouseEvent<HTMLDivElement>, runId: string) {
-    // Keep the browser's native text menu while editing a run's name inline.
-    if (event.target instanceof Element && event.target.closest('input, textarea')) return;
+    if (shouldIgnoreContextMenu(event.target)) return;
     event.preventDefault();
-    setMenu({ runId, x: event.clientX, y: event.clientY });
+    setMenu({ id: runId, x: event.clientX, y: event.clientY });
   }
 
   function handleRowKeyDown(event: KeyboardEvent<HTMLDivElement>, runId: string) {
-    if (event.target instanceof Element && event.target.closest('input, textarea')) return;
+    if (shouldIgnoreContextMenu(event.target)) return;
     if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
     event.preventDefault();
-    const trigger = event.currentTarget.querySelector<HTMLElement>('[data-task-menu-trigger]');
-    const rect = (trigger ?? event.currentTarget).getBoundingClientRect();
-    setMenu({ runId, x: rect.right, y: rect.bottom + 4, alignRight: true, anchorTop: rect.top - 4 });
+    setMenu(keyboardMenuAnchor(event.currentTarget, '[data-task-menu-trigger]', runId));
   }
 
   function handleMoreClick(event: MouseEvent<HTMLButtonElement>, runId: string) {
-    if (menu?.runId === runId) {
+    if (menu?.id === runId) {
       setMenu(null);
       return;
     }
-    const rect = event.currentTarget.getBoundingClientRect();
-    setMenu({ runId, x: rect.right, y: rect.bottom + 4, alignRight: true, anchorTop: rect.top - 4 });
+    setMenu(triggerMenuAnchor(event.currentTarget, runId));
   }
 
-  function buildTaskMenuItems(run: RunSummary): TaskMenuItem[] {
+  function buildTaskMenuItems(run: RunSummary): ContextMenuItem[] {
     const busy = busyRunIds.includes(run.id);
     const isDone = run.status === 'completed';
     const isExpanded = expandedTaskRunId === run.id;
@@ -375,7 +335,7 @@ export function AnalysisTasksPanel({
     const isLive = liveRunStatuses.includes(run.status);
     // the expanded, unselected row already shows the full progress bar
     const showLiveLine = isLive && !(isExpanded && !isSelected);
-    const isMenuOpen = menu?.runId === run.id;
+    const isMenuOpen = menu?.id === run.id;
     const rowClassName = [
       'analysis-task-row',
       isSelected ? 'selected' : null,
@@ -647,107 +607,19 @@ export function AnalysisTasksPanel({
         )}
       </div>
       {menu && menuRun ? (
-        <TaskContextMenu
+        <ContextMenu
           alignRight={menu.alignRight}
           anchorTop={menu.anchorTop}
+          className="analysis-task-menu"
           items={buildTaskMenuItems(menuRun)}
-          key={menu.runId}
+          key={menu.id}
           onClose={closeMenu}
+          triggerSelector={`[data-task-menu-trigger="${CSS.escape(menu.id)}"]`}
           x={menu.x}
           y={menu.y}
         />
       ) : null}
     </section>
-  );
-}
-
-/** Compact run context menu, matching PathwayMenu's visual language at the tasks list's tighter scale. */
-function TaskContextMenu({
-  alignRight = false,
-  anchorTop,
-  items,
-  onClose,
-  x,
-  y,
-}: {
-  alignRight?: boolean;
-  anchorTop?: number;
-  items: TaskMenuItem[];
-  onClose: (refocus?: boolean) => void;
-  x: number;
-  y: number;
-}) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [position, setPosition] = useState<{ left: number; top: number }>({ left: x, top: y });
-
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const { width, height } = element.getBoundingClientRect();
-    const rawLeft = alignRight ? x - width : x;
-    const flippedLeft = rawLeft + width > window.innerWidth - 8 ? x - width : rawLeft;
-    const left = Math.max(8, Math.min(window.innerWidth - width - 8, flippedLeft));
-    const flippedTop = y + height > window.innerHeight - 8 ? (anchorTop ?? y) - height : y;
-    const top = Math.max(8, Math.min(window.innerHeight - height - 8, flippedTop));
-    setPosition({ left, top });
-  }, [x, y, alignRight, anchorTop]);
-
-  useEffect(() => {
-    ref.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
-  }, [x, y]);
-
-  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    // Keys pressed in the menu are the menu's: the page's own shortcuts (a, r, u and the arrows in the step review,
-    // k, Space for the video) listen on the window and would otherwise act on what is behind it.
-    event.stopPropagation();
-    const buttons = [...(ref.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
-    if (!buttons.length) return;
-    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      const step = event.key === 'ArrowDown' ? 1 : -1;
-      const nextIndex = index < 0 ? (step > 0 ? 0 : buttons.length - 1) : (index + step + buttons.length) % buttons.length;
-      buttons[nextIndex]?.focus();
-    } else if (event.key === 'Home') {
-      event.preventDefault();
-      buttons[0]?.focus();
-    } else if (event.key === 'End') {
-      event.preventDefault();
-      buttons[buttons.length - 1]?.focus();
-    } else if (event.key === 'Escape') {
-      onClose(true);
-    }
-  }
-
-  return (
-    <div
-      className="pathway-menu is-compact analysis-task-menu"
-      onContextMenu={(event) => event.preventDefault()}
-      onKeyDown={handleKeyDown}
-      onPointerDown={(event) => event.stopPropagation()}
-      ref={ref}
-      role="menu"
-      style={{ left: position.left, top: position.top }}
-    >
-      {items.map((item) => (
-        <div className="pathway-menu-row" key={item.label}>
-          <button
-            className={`pathway-menu-item ${item.danger ? 'is-danger' : ''}`}
-            disabled={item.disabled}
-            onClick={() => {
-              if (item.disabled) return;
-              onClose(item.refocus);
-              item.run();
-            }}
-            role="menuitem"
-            title={item.title}
-            type="button"
-          >
-            <span>{item.label}</span>
-          </button>
-        </div>
-      ))}
-    </div>
   );
 }
 

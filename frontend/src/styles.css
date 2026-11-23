@@ -2897,7 +2897,14 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 .analysis-video-row {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  padding-bottom: 2px;
+}
+
+.analysis-video-row.menu-open:not(.selected) {
+  margin-inline: -8px;
+  padding-inline: 8px;
+  background: rgba(0, 0, 0, 0.045);
 }
 
 .analysis-video-row-button,
@@ -2914,9 +2921,9 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 .analysis-video-row-button {
   width: 100%;
   display: flex;
+  justify-content: space-between;
   gap: 12px;
-  align-items: flex-start;
-  padding: 3px 0;
+  align-items: baseline;
   color: #000;
   font-size: 14px;
   line-height: 1.2;
@@ -2926,7 +2933,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 /* The selected video looks as a selected run does: the whole row in solid orange, everything in it white. */
 .analysis-video-row.selected {
   margin-inline: -8px;
-  padding: 3px 8px 4px;
+  padding: 6px 8px 8px;
   color: #fff;
   background: #b05a14;
 }
@@ -2965,15 +2972,16 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   line-height: 1.2;
 }
 
-.analysis-video-meta {
-  flex: 0 0 auto;
+.analysis-video-subrow {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 18px;
 }
 
 .analysis-video-duration {
+  flex: 0 0 auto;
   color: rgba(0, 0, 0, 0.6);
   white-space: nowrap;
   line-height: 1.2;
@@ -2988,13 +2996,22 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   font-size: 11px;
   line-height: 1.2;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .analysis-video-actions {
-  display: flex;
+  display: inline-flex;
+  align-items: baseline;
   justify-content: flex-end;
   gap: 8px;
-  min-height: 17px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.analysis-task-link.analysis-video-preview-link {
+  font-size: 12px;
 }
 
 /* A video still on its way in: greyed until it is a recording of the project. */
@@ -3003,6 +3020,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 }
 
 .analysis-video-upload .analysis-video-duration {
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -3013,7 +3031,8 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 }
 
 .analysis-video-row:hover .analysis-video-hover-link,
-.analysis-video-row:focus-within .analysis-video-hover-link {
+.analysis-video-row:focus-within .analysis-video-hover-link,
+.analysis-video-row.menu-open .analysis-video-hover-link {
   opacity: 1;
   pointer-events: auto;
 }
@@ -3217,7 +3236,8 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   text-decoration-color: #fff;
 }
 
-.analysis-task-row.selected .analysis-task-more:hover {
+.analysis-task-row.selected .analysis-task-more:hover,
+.analysis-video-row.selected .analysis-task-more:hover {
   background: rgba(255, 255, 255, 0.2);
 }
 
@@ -3232,6 +3252,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 }
 
 .analysis-video-row.selected .analysis-video-context-badge,
+.analysis-video-row.selected .analysis-task-more.is-open,
 .analysis-task-row.selected .analysis-task-more.is-open,
 .analysis-task-row.selected .live-pill {
   background: rgba(255, 255, 255, 0.2);
@@ -7884,24 +7905,21 @@ button:disabled {
     flex-direction: column;
   }
 
+  .analysis-video-subrow {
+    flex-wrap: wrap;
+  }
+
   .analysis-task-group-header {
     flex-wrap: wrap;
   }
 
-  .analysis-video-meta,
   .analysis-task-meta {
     align-items: flex-start;
     justify-content: flex-start;
   }
 
-  .analysis-video-meta,
   .candidate-bulk-actions {
     width: 100%;
-  }
-
-  .analysis-video-meta {
-    flex-direction: row;
-    flex-wrap: wrap;
   }
 
   .candidate-export-name-field {
