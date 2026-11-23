@@ -1,14 +1,15 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { absoluteApiUrl, getRunPathway, mergePathwayScreens, notePathwayFigure, restoreRunPhases, setRunPhase } from '../../api';
+import { getRunPathway, mergePathwayScreens, notePathwayFigure, restoreRunPhases, setRunPhase } from '../../api';
 import interItalicUrl from '../../assets/fonts/InterVariable-Italic.ttf?url';
 import interUrl from '../../assets/fonts/InterVariable.ttf?url';
 import { markPathwayTutorialSeen, PathwayTutorial, pathwayTutorialSeen } from '../../components/pathwayTutorial/PathwayTutorial';
 import { markWhatsNewSeen, WhatsNewTour, whatsNewSeen } from '../../components/WhatsNewTour';
 import { downloadBlob, downloadText } from '../../lib/accountLinks';
 import { APP_VERSION } from '../../lib/buildInfo';
-import { buildPathwayFigure, formatPathwayTime, pathwayColumnsFor, type PathwayFigureOptions, type PathwayNotesPlacement } from '../../lib/pathwayFigure';
+import { buildPathwayFigure, formatPathwayTime, pathwayColumnsFor, pathwayFrameWidth, type PathwayFigureOptions, type PathwayNotesPlacement } from '../../lib/pathwayFigure';
+import { screenshotUrl, screenshotWidth } from '../../lib/screenshots';
 import { renderPathwayPng } from '../../lib/pathwayPng';
 import {
   clampPathwayZoom,
@@ -62,6 +63,12 @@ const NOTES: Array<[PathwayNotesPlacement, string, string]> = [
   ['under', 'under screens', 'notes under each screen'],
   ['key', 'in a key', 'notes in a list below the chart'],
   ['hidden', 'off', 'leave the notes out'],
+];
+// Optional detours: trips off the main way through that come back to it (services/pathway.py). Some interactions
+// are optional, so counting their steps would not say faithfully how many steps an activity takes.
+const DETOURS: Array<[boolean, string, string]> = [
+  [true, 'counted', 'the steps of optional detours count as the others'],
+  [false, 'left out', 'leave the steps of optional detours (trips off the main way that come back to it) out of the counts; their numbers are hollow'],
 ];
 
 /** Today as YYYY-MM-DD, by the clock of this computer. */
@@ -144,18 +151,29 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
 
   const aspect = recordingAspect(recording?.width, recording?.height);
   const options: PathwayFigureOptions = useMemo(
-    () => ({ notes: view.notes, times: view.times, caption: view.caption }),
-    [view.notes, view.times, view.caption],
+    () => ({ notes: view.notes, times: view.times, caption: view.caption, countDetours: view.countDetours }),
+    [view.notes, view.times, view.caption, view.countDetours],
   );
   const filename = recording?.filename ?? run.summary.recording_id;
+  const hasDetours = Boolean(pathway && pathway.main_step_count !== undefined && pathway.main_step_count < pathway.step_count);
 
   // On the page, a row takes as many boxes as fit the space at full size, so its labels are not shrunk to fit; a
   // downloaded figure keeps the usual width. Rebuilt only when that number changes, not with every pixel of a resize.
   const columns = areaWidth > 0 ? pathwayColumnsFor(areaWidth, aspect) : undefined;
+  // The boxes draw a copy of each screenshot as wide as they are (at most at full size, or as zoomed in), not the
+  // screenshot itself; the hovered step's preview shows in the same box. Only a different copy draws them again.
+  const boxWidth = pathwayFrameWidth(aspect) * Math.max(1, view.zoom ?? 1);
+  const copyWidth = screenshotWidth(boxWidth);
 
   /** The figure of a pathway: on the page, its boxes and step numbers ready to be selected, dragged and previewed. */
   function figureFor(source: Pathway, imageFor: (step: PathwayStep) => string, page?: { highlight: string | null; columns?: number }) {
-    const counts = `${plural(source.step_count, 'step', 'steps')} on ${plural(source.screen_count, 'screen', 'screens')}`;
+    // With the optional detours left out, the counts are those of the main way through, and say what was left out.
+    const detourSteps = source.main_step_count === undefined ? 0 : source.step_count - source.main_step_count;
+    const counts =
+      options.countDetours === false && detourSteps > 0
+        ? `${plural(source.main_step_count ?? 0, 'step', 'steps')} on ${plural(source.main_screen_count ?? 0, 'screen', 'screens')}, ` +
+          `plus ${detourSteps} in optional detours`
+        : `${plural(source.step_count, 'step', 'steps')} on ${plural(source.screen_count, 'screen', 'screens')}`;
     const parts = [projectName, counts, recording ? formatPathwayTime(recording.duration_ms) : ''].filter(Boolean);
     return buildPathwayFigure({
       pathway: source,
@@ -175,12 +193,13 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   const figure = useMemo(
     () =>
       pathway && pathway.screens.length
-        ? figureFor(pathway, (step) => absoluteApiUrl(step.image_url), { highlight: null, columns })
+        ? figureFor(pathway, (step) => screenshotUrl(step.image_url, boxWidth), { highlight: null, columns })
         : null,
     // figureFor reads only what is listed here; the selection is drawn over the figure (PathwayCanvas)
-    [pathway, options, aspect, filename, projectName, recording?.duration_ms, columns],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- boxWidth matters only through copyWidth
+    [pathway, options, aspect, filename, projectName, recording?.duration_ms, columns, copyWidth],
   );
-  const peek = usePathwayPeek(pathway, figure?.svg);
+  const peek = usePathwayPeek(pathway, figure?.svg, boxWidth);
   // One object per figure: React sets the markup again whenever it gets a new object, even with the same text, and
   // the analysis page renders every second for its clock. That would draw the chart anew each second and take
   // away the step a pointer is resting on.
@@ -206,7 +225,8 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
       const maxWidth = Math.round(220 * Math.sqrt(aspect) * 3);
       for (const screen of pathway.screens) {
         const step = shown.get(screen.image_step_id);
-        if (step) images.set(step.step_id, await embedImage(absoluteApiUrl(step.image_url), maxWidth));
+        // a copy at least that wide (not the screenshot itself, often many times larger), made smaller to fit
+        if (step) images.set(step.step_id, await embedImage(screenshotUrl(step.image_url, maxWidth, 1), maxWidth));
       }
       const file = figureFor(pathway, (step) => images.get(step.step_id) ?? '');
       const name = `${splitFilename(filename).base}-pathway.${format}`;
@@ -356,6 +376,23 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
               </button>
             ))}
           </div>
+          {hasDetours ? (
+            <div aria-label="optional detours" className="pathway-control" role="group">
+              <span className="pathway-control-label">detours</span>
+              {DETOURS.map(([value, label, hint]) => (
+                <button
+                  aria-pressed={view.countDetours === value}
+                  className={`candidate-filter-tab ${view.countDetours === value ? 'active' : ''}`}
+                  key={label}
+                  onClick={() => setView((current) => ({ ...current, countDetours: value }))}
+                  title={hint}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div aria-label="what else to show" className="pathway-control" role="group">
             <span className="pathway-control-label">show</span>
             <button

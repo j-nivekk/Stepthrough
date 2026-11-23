@@ -71,6 +71,11 @@ _COMMON_NOTES = {
     "image_path": "the screenshot, inside this bundle",
     "status, title, notes": "the reviewer's decision and annotations",
     "phase": "the phase of the walkthrough the step is in, as the reviewer named it in the pathway; empty outside every phase",
+    "main_step, detour": (
+        "the step's number along the main way through the pathway, leaving out optional detours (trips off the main "
+        "way that come back to it, see pathway.json); detour is true for a step of such a trip, which has no "
+        "main_step. Counting the main_step values gives the steps the walkthrough takes without them"
+    ),
     "origin": (
         "detected: found by the analysis; manual: added by hand by the reviewer, so it has no change, "
         "timing or label"
@@ -250,6 +255,11 @@ def create_export_bundle(
     images_dir = bundle_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
 
+    # The same steps as a pathway: the screens they show and the moves between them; it also says which steps are
+    # optional detours from the main way through.
+    pathway = build_pathway(export_rows, candidates, phases=phases)
+    way = {step["step_id"]: step for step in pathway["steps"]}
+
     exported_manifest_rows = []
     for row in export_rows:
         source_path = absolute_data_path(row["image_path"])
@@ -261,6 +271,8 @@ def create_export_bundle(
             **exported,
             "image_path": f"images/{row['export_filename']}",
             "phase": phase_at(phases, row["timestamp_ms"]),
+            "main_step": way[row["step_id"]]["main_step"],
+            "detour": way[row["step_id"]]["detour"],
             **_timing_columns(row),
         })
 
@@ -304,6 +316,8 @@ def create_export_bundle(
             fieldnames=[
                 "step_id",
                 "step_index",
+                "main_step",
+                "detour",
                 "timestamp_ms",
                 "timestamp_tc",
                 "image_path",
@@ -328,10 +342,8 @@ def create_export_bundle(
             extrasaction="ignore",
         )
         writer.writeheader()
-        writer.writerows(exported_manifest_rows)
+        writer.writerows({**row, "detour": "true" if row["detour"] else "false"} for row in exported_manifest_rows)
 
-    # The same steps as a pathway: the screens they show and the moves between them.
-    pathway = build_pathway(export_rows, candidates, phases=phases)
     for step in pathway["steps"]:
         step["image_path"] = f"images/{step.pop('export_filename')}"
     pathway = {"bundle_id": bundle_id, "created_at": manifest["created_at"], "steps_file": "steps.json", **pathway}

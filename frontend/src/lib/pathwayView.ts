@@ -30,6 +30,7 @@ export function loadPathwayView(): PathwayView {
       notes: NOTES.includes(stored.notes as PathwayNotesPlacement) ? (stored.notes as PathwayNotesPlacement) : 'under',
       times: stored.times !== false,
       caption: stored.caption !== false,
+      countDetours: stored.countDetours !== false,
       zoom: typeof stored.zoom === 'number' && Number.isFinite(stored.zoom) ? clampPathwayZoom(stored.zoom) : null,
     };
   } catch {

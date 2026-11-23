@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
-import { absoluteApiUrl, getRun } from '../../../api';
+import { getRun } from '../../../api';
+import { screenshotUrl } from '../../../lib/screenshots';
 import { formatRunShortTimestamp } from '../../../lib/formatters';
 import { compareRunSettings, compareRuns, isReviewed } from '../../../lib/runComparison';
 import type { AnalysisMetadata, CandidateFrame, RecordingSummary, RunSummary } from '../../../types';
@@ -131,7 +132,7 @@ export function RunComparison({
   const shot = (candidate: CandidateFrame | null, runId: string) =>
     candidate ? (
       <figure className="run-compare-shot">
-        <img alt={`${name(runId)} at ${candidate.timestamp_tc}`} loading="lazy" src={absoluteApiUrl(candidate.image_url)} />
+        <img alt={`${name(runId)} at ${candidate.timestamp_tc}`} loading="lazy" src={screenshotUrl(candidate.image_url, 440)} />
         <figcaption>
           <b>{name(runId)}</b> {candidate.timestamp_tc.replace(/^00:/, '')}
           {isReviewed(candidate) ? (

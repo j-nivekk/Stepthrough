@@ -554,14 +554,23 @@ function treePathway(tree: Array<[number, number | null]>): Pathway {
   return { ...pathway, step_count: steps.length, screen_count: screens.length, steps, screens, transitions, phases: [] };
 }
 
-test('a short side trip stays right below the row it leaves, before the long way on', () => {
-  // Row 0: S1 S2 S3; S3 goes on to a short trip (S4 only), S2 branches into the long rest (S5 to S9).
+test('the long way on keeps the row and a short side trip goes right below it', () => {
+  // S2 leads to a short trip (S3, S4) first in time, and later to the long rest of the walkthrough (S5 to S9).
   const draw = treePathway([[1, null], [2, 1], [3, 2], [4, 3], [5, 2], [6, 5], [7, 6], [8, 7], [9, 8]]);
-  const rows = rowOf(buildPathwayFigure({ ...input, pathway: draw, columns: 3, options: { notes: 'hidden', caption: false, times: true } }).svg);
+  const layout = (pathway: Pathway) =>
+    rowOf(buildPathwayFigure({ ...input, pathway, columns: 3, options: { notes: 'hidden', caption: false, times: true } }).svg);
+  const rows = layout(draw);
   const row = (index: number) => rows.get(`screen-${String(index).padStart(2, '0')}`) ?? 0;
-  assert.ok(row(4) > row(1), 'the side trip is below the first row');
-  assert.ok(row(4) < row(5), 'the side trip comes before the long branch, not after all of it');
-  assert.ok(row(9) > row(5));
+  assert.equal(row(5), row(1), 'the long way on stays on the row');
+  assert.ok(row(3) > row(1), 'the side trip goes below');
+  assert.ok(row(4) < row(6), 'the side trip comes right below, before the rest of the long way on');
+  assert.ok(row(9) > row(6));
+
+  // what the server worked out wins: here it keeps the side trip on the row
+  const told = { ...draw, screens: draw.screens.map((screen) => ({ ...screen, continues_with: screen.id === 'screen-02' ? 'screen-03' : undefined })) };
+  const toldRows = layout(told);
+  assert.equal(toldRows.get('screen-03'), toldRows.get('screen-01'));
+  assert.ok((toldRows.get('screen-05') ?? 0) > (toldRows.get('screen-01') ?? 0));
 });
 
 test('a branch of a box at the end of a row starts a row of its own, drawn as a branch', () => {
@@ -594,4 +603,27 @@ test('on the page a row takes as many boxes as fit the space with little shrinki
   assert.equal(file.width, buildPathwayFigure({ ...input, pathway: draw, aspect: desktop }).width);
   // the times under the screens are a size up from the other small labels
   assert.ok(file.svg.includes('font-size="11" fill="#4a4a45"'));
+});
+
+test('with the optional detours left out, their numbers are hollow and the counts leave them out', () => {
+  // S2 -> S3 (a trip that comes back) and S2 -> S4 -> S5 (the main way); steps 3 and 4 are the trip and the way back
+  const base = treePathway([[1, null], [2, 1], [3, 2], [4, 2], [5, 4]]);
+  const steps = base.steps.map((step) => ({ ...step, detour: step.step_index === 3, main_step: step.step_index === 3 ? null : step.step_index }));
+  const phase = { name: 'browse', first_step_id: 'step-1', last_step_id: 'step-5', first_step_index: 1, last_step_index: 5,
+    step_count: 5, screen_count: 5, main_step_count: 4, main_screen_count: 4, screen_ids: steps.map((step) => step.screen_id),
+    start_ms: 1000, end_ms: null, duration_ms: null };
+  const draw = { ...base, steps, phases: [phase], main_step_count: 4, main_screen_count: 4 } as Pathway;
+  const figure = (countDetours?: boolean) =>
+    buildPathwayFigure({ ...input, pathway: draw, columns: 4, options: { notes: 'hidden', caption: true, times: false, countDetours } }).svg;
+  const hollow = /<rect [^>]*fill="#fff" stroke="#111" stroke-width="1.1"\/><text [^>]*>3<\/text>/;
+
+  const counted = figure();
+  assert.ok(!hollow.test(counted), 'counted: every number is solid');
+  assert.ok(counted.includes('5 steps on 5 screens'), 'the phase counts every step');
+  assert.ok(!counted.includes('optional detour'));
+
+  const leftOut = figure(false);
+  assert.ok(hollow.test(leftOut), "the trip's number is hollow");
+  assert.ok(leftOut.includes('4 steps on 4 screens'), "the phase's counts leave the trip out");
+  assert.ok(leftOut.includes('step of an optional detour, left out of the counts'), 'the key says what hollow means');
 });

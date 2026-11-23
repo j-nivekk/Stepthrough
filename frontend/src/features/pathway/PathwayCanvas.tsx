@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 
-import { absoluteApiUrl, type PhaseBoundary, type PhaseSteps } from '../../api';
+import { type PhaseBoundary, type PhaseSteps } from '../../api';
 import { isPopupStep, popupChange } from '../../components/ScreenChoice';
 import { formatPathwayTime, type PathwayFigure } from '../../lib/pathwayFigure';
 import { record, undoChanges, type HistoryEntry } from '../../lib/pathwayHistory';
 import { unstackAllChanges, unstackByVisitChanges, unstackStepsChanges } from '../../lib/pathwayUnstack';
+import { screenshotUrl } from '../../lib/screenshots';
 import type { CandidateChanges, CandidateFrame, Pathway, PathwayPhase, PathwayRowChoice, PathwayScreen, PathwayStep } from '../../types';
 import { PathwayPhases } from './PathwayPhases';
 
@@ -113,6 +114,8 @@ interface HoveredMove {
 }
 
 const DRAG_START = 5;
+/** How wide the menus draw a screen's thumbnail, in CSS pixels (styles.css .pathway-menu-thumb). */
+const MENU_THUMB = 34;
 const HISTORY = 30;
 
 function prefersStill(): boolean {
@@ -464,7 +467,7 @@ export function PathwayCanvas({
       steps.forEach((step, index) => {
         list.push({
           label: stepMenuLabel(step),
-          thumb: step.image_url ? absoluteApiUrl(step.image_url) : undefined,
+          thumb: step.image_url ? screenshotUrl(step.image_url, MENU_THUMB) : undefined,
           divider: index === 0,
           run: () => unstackOneStep(box, step),
         });
@@ -489,7 +492,7 @@ export function PathwayCanvas({
     steps.forEach((step, index) => {
       list.push({
         label: stepMenuLabel(step),
-        thumb: step.image_url ? absoluteApiUrl(step.image_url) : undefined,
+        thumb: step.image_url ? screenshotUrl(step.image_url, MENU_THUMB) : undefined,
         divider: index === 0,
         run: () => unstackOneStep(box, step),
       });
@@ -540,7 +543,7 @@ export function PathwayCanvas({
   function menuItems(): MenuItem[] {
     const thumbOf = (screen: PathwayScreen): string | undefined => {
       const url = stepById.get(screen.image_step_id)?.image_url;
-      return url ? absoluteApiUrl(url) : undefined;
+      return url ? screenshotUrl(url, MENU_THUMB) : undefined;
     };
     const others = (except: PathwayScreen[]) =>
       pathway.screens

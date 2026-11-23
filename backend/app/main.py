@@ -147,7 +147,7 @@ from .services.video import (
 from .compression import CompressMiddleware
 from .export_cleanup import clear_old_exports
 from .live import CLIENT_HEADER, LiveHub, TaskWrites, clean_targets
-from . import project_file, server_settings, traffic, usage, usage_routes, visitors
+from . import project_file, server_settings, thumbnails, traffic, usage, usage_routes, visitors
 from .storage import (
     absolute_data_path,
     asset_url,
@@ -2066,9 +2066,14 @@ def project_asset(asset_path: str, request: Request, user: CurrentUser) -> Respo
 
     The URL is the file's place under ``projects/``, whose first folder is ``{slug}-{id[:8]}``. Range requests
     work, so videos can be scrubbed. Browsers must check back each time (the answer depends on who asks), and
-    get a short "not modified" when their copy is current."""
+    get a short "not modified" when their copy is current. For a screenshot, ``?w=`` (one of thumbnails.WIDTHS)
+    asks for a copy that wide instead, for the page's boxes, cards and filmstrip."""
     folder, _, inside = asset_path.partition("/")
     slug, _, id_prefix = folder.rpartition("-")
+    width_asked = request.query_params.get("w")
+    width = int(width_asked) if width_asked and width_asked.isdigit() and int(width_asked) in thumbnails.WIDTHS else None
+    if width_asked is not None and width is None:
+        raise HTTPException(status_code=422, detail=f"w must be one of {', '.join(map(str, thumbnails.WIDTHS))}")
     if inside and slug and id_prefix:
         for project in find_projects_by_folder(slug, id_prefix):
             if project_role(project["id"], user) is None:
@@ -2076,6 +2081,8 @@ def project_asset(asset_path: str, request: Request, user: CurrentUser) -> Respo
             root = project_dir(project["slug"], project["id"]).resolve()
             path = (root / inside).resolve()
             if path.is_relative_to(root) and path.is_file():
+                if width is not None and thumbnails.is_image(path):
+                    path = thumbnails.thumbnail(path, width)
                 headers = {"Cache-Control": "private, no-cache"}
                 response = FileResponse(path, headers=headers, stat_result=path.stat())
                 if request.headers.get("if-none-match") == response.headers["etag"]:

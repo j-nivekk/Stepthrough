@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch
 import { busyElsewhere, busyRunIds } from '../../lib/live';
 import { useLive } from '../live/LiveProvider';
 import { absoluteApiUrl } from '../../api';
+import { screenshotUrl } from '../../lib/screenshots';
 import { CandidateCard, CandidateRow, DecisionIcon } from '../../components/CandidateCard';
 import { CandidateGallery } from '../../components/CandidateGallery';
 import { EditableName } from '../../components/EditableName';
@@ -813,10 +814,15 @@ export function AnalysisScreen({
     }
   }, [openPopover, presetCopyFeedback, presetImportError]);
 
+  // The clock moves the elapsed time of running analyses each second, and "last exported 5 min ago" each minute.
+  // Each tick draws the whole page again (every step card, the pathway), so it ticks each second only while an
+  // analysis is running.
+  const anyRunActive = analysisTaskItems.some((item) => activeRunStatuses.includes(item.run.status));
   useEffect(() => {
-    const intervalId = globalThis.setInterval(() => setTaskClockMs(Date.now()), 1000);
+    setTaskClockMs(Date.now());
+    const intervalId = globalThis.setInterval(() => setTaskClockMs(Date.now()), anyRunActive ? 1000 : 60_000);
     return () => globalThis.clearInterval(intervalId);
-  }, []);
+  }, [anyRunActive]);
 
   useEffect(() => {
     if (!canReviewCandidates || showPathway) {
@@ -2231,7 +2237,7 @@ export function AnalysisScreen({
                                 <img
                                   alt=""
                                   className="candidate-timeline-preview-thumb"
-                                  src={absoluteApiUrl(timelineScrub.candidate.image_url)}
+                                  src={screenshotUrl(timelineScrub.candidate.image_url, 78)}
                                 />
                                 <div className="candidate-timeline-preview-meta">
                                   <span className="candidate-timeline-preview-head">
@@ -2594,6 +2600,7 @@ export function AnalysisScreen({
                       const similarityLink = candidateSimilarityLinks.get(candidate.id);
                       return (
                         <CandidateCard
+                          imageWidth={stepCardWidth}
                           candidate={candidate}
                           compact={stepCardWidth < 190}
                           hover={stepHover(candidate)}

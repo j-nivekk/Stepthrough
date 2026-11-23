@@ -20,7 +20,7 @@
  * Phases (named stretches of steps) are drawn as a bracket over the boxes they reach first, with the phase's
  * name and how many steps and screens it takes.
  */
-import type { Pathway, PathwayScreen, PathwayStep, PathwayTransition } from '../types';
+import type { Pathway, PathwayPhase, PathwayScreen, PathwayStep, PathwayTransition } from '../types';
 import { BADGE_HEIGHT, BADGE_WIDTH, buildPathwayBadge } from './pathwayBadge';
 
 export type PathwayNotesPlacement = 'under' | 'key' | 'hidden';
@@ -32,9 +32,14 @@ export interface PathwayFigureOptions {
   times: boolean;
   /** The title above the chart and the legend below it. */
   caption: boolean;
+  /**
+   * Count the steps of optional detours (trips off the main way through that come back to it, services/pathway.py)
+   * as the others; left out, they have hollow numbers and the counts of the phases leave them out.
+   */
+  countDetours?: boolean;
 }
 
-export const defaultPathwayFigureOptions: PathwayFigureOptions = { notes: 'under', times: true, caption: true };
+export const defaultPathwayFigureOptions: PathwayFigureOptions = { notes: 'under', times: true, caption: true, countDetours: true };
 
 export type TextMeasurer = (text: string, size: number, bold?: boolean) => number;
 
@@ -197,26 +202,31 @@ function wrapText(content: string, width: number, size: number, bold: boolean, m
 
 const pillWidth = (label: string): number => (label.length === 1 ? 15 : label.length * 6.2 + 10);
 
-function pill(x: number, cy: number, label: string, fill = INK): string {
+/** A step number: solid, or hollow for a step of an optional detour that is left out of the counts. */
+function pill(x: number, cy: number, label: string, fill = INK, hollow = false): string {
   const width = pillWidth(label);
-  return (
-    `<rect x="${n1(x)}" y="${n1(cy - 7.5)}" width="${n1(width)}" height="15" rx="7.5" fill="${fill}"/>` +
-    text(x + width / 2, cy + 3.3, label, { size: 9.5, bold: true, fill: '#fff', anchor: 'middle' })
-  );
+  const back = hollow
+    ? `<rect x="${n1(x + 0.55)}" y="${n1(cy - 6.95)}" width="${n1(width - 1.1)}" height="13.9" rx="6.95" fill="#fff" stroke="${fill}" stroke-width="1.1"/>`
+    : `<rect x="${n1(x)}" y="${n1(cy - 7.5)}" width="${n1(width)}" height="15" rx="7.5" fill="${fill}"/>`;
+  return back + text(x + width / 2, cy + 3.3, label, { size: 9.5, bold: true, fill: hollow ? fill : '#fff', anchor: 'middle' });
 }
+
+const NONE: ReadonlySet<string> = new Set();
+
+const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`;
 
 function compactPasses(labels: string[]): string[] {
   return labels.length > MAX_PILLS ? [...labels.slice(0, MAX_PILLS - 1), `+${labels.length - MAX_PILLS + 1}`] : labels;
 }
 
-/** Step numbers side by side, centred on a point of a line. */
-function pillRow(cx: number, cy: number, labels: string[], fill = INK): string {
+/** Step numbers side by side, centred on a point of a line; those in `hollow` drawn hollow. */
+function pillRow(cx: number, cy: number, labels: string[], fill = INK, hollow: ReadonlySet<string> = NONE): string {
   const shown = compactPasses(labels);
   const total = shown.reduce((sum, label) => sum + pillWidth(label), 0) + 2 * (shown.length - 1);
   let x = cx - total / 2;
   let out = '';
   for (const label of shown) {
-    out += pill(x, cy, label, fill);
+    out += pill(x, cy, label, fill, hollow.has(label));
     x += pillWidth(label) + 2;
   }
   return out;
@@ -255,8 +265,10 @@ function renderPortalChip(params: {
   measure: TextMeasurer;
   targetScreen: PathwayScreen;
   peek: boolean;
+  /** Step numbers of optional detours left out of the counts, drawn hollow. */
+  hollow?: ReadonlySet<string>;
 }): { svg: string; width: number } {
-  const { x, cy, labels, tagText, side, role, measure, targetScreen, peek } = params;
+  const { x, cy, labels, tagText, side, role, measure, targetScreen, peek, hollow = NONE } = params;
   const color = ROLE_COLOR[role];
   const { width, pillsWidth, shown } = measurePortalChip(labels, tagText, measure);
   const dashed = role === 'return' ? ' stroke-dasharray="3.5 2.5"' : '';
@@ -268,9 +280,12 @@ function renderPortalChip(params: {
     let px = startX;
     for (const label of shown) {
       const pw = miniPillWidth(label);
+      const open = hollow.has(label);
       inner +=
-        `<rect x="${n1(px)}" y="${n1(cy - 6.5)}" width="${n1(pw)}" height="13" rx="6.5" fill="${color}"/>` +
-        text(px + pw / 2, cy + 3.1, label, { size: 8.8, bold: true, fill: '#fff', anchor: 'middle' });
+        (open
+          ? `<rect x="${n1(px + 0.5)}" y="${n1(cy - 6)}" width="${n1(pw - 1)}" height="12" rx="6" fill="#fff" stroke="${color}" stroke-width="1"/>`
+          : `<rect x="${n1(px)}" y="${n1(cy - 6.5)}" width="${n1(pw)}" height="13" rx="6.5" fill="${color}"/>`) +
+        text(px + pw / 2, cy + 3.1, label, { size: 8.8, bold: true, fill: open ? color : '#fff', anchor: 'middle' });
       px += pw + 2;
     }
   };
@@ -321,11 +336,6 @@ function placeScreens(screens: PathwayScreen[], maxCols: number): { placed: Map<
   // A box the reviewer put on the row comes first, one they put below comes last; the rest keep their order.
   const rank = (screen: PathwayScreen): number => (screen.row_choice === 'continue' ? 0 : screen.row_choice === 'below' ? 2 : 1);
   for (const list of kids.values()) list.sort((a, b) => rank(a) - rank(b));
-  /** The box that continues the row of `parent`, if any. */
-  const onRow = (parent: PathwayScreen): PathwayScreen | undefined => {
-    const first = kids.get(parent.id)?.[0];
-    return first && first.row_choice !== 'below' ? first : undefined;
-  };
   /** How many boxes hang from `screen`, itself included: a side trip is small, the rest of the walkthrough large. */
   const sizes = new Map<string, number>();
   const sizeOf = (screen: PathwayScreen): number => {
@@ -335,6 +345,18 @@ function placeScreens(screens: PathwayScreen[], maxCols: number): { placed: Map<
     const size = 1 + (kids.get(screen.id) ?? []).reduce((sum, kid) => sum + sizeOf(kid), 0);
     sizes.set(screen.id, size);
     return size;
+  };
+  /**
+   * The box that carries the row of `parent` on, if any: as the server worked it out (`continues_with`), or else
+   * the same way: the box the reviewer put on the row, or the one with the most boxes after it, so the long way on
+   * stays on the row and a side trip goes below (ties: the first reached). One put below never does.
+   */
+  const onRow = (parent: PathwayScreen): PathwayScreen | undefined => {
+    const list = kids.get(parent.id) ?? [];
+    if (parent.continues_with !== undefined) return list.find((kid) => kid.id === parent.continues_with);
+    const candidates = list.filter((kid) => kid.row_choice !== 'below');
+    if (candidates[0]?.row_choice === 'continue') return candidates[0];
+    return candidates.reduce<PathwayScreen | undefined>((best, kid) => (!best || sizeOf(kid) > sizeOf(best) ? kid : best), undefined);
   };
   const placed = new Map<string, Placed>();
   let nextRow = 0;
@@ -473,28 +495,40 @@ function buildCard(
       '</g>';
   }
 
-  // Step numbers, one pill per visit, each with the time the visit began.
+  // Step numbers, one pill per visit, each with the time the visit began. With the detours left out of the counts,
+  // a visit splits where its steps go from a detour to the main way (the step that comes back from a trip is part
+  // of it): the detour's numbers are hollow.
+  const leftOut = options.countDetours === false;
   let x = 0;
   let cy = height + stack + 16.5;
   for (const visit of screen.visits) {
-    const first = steps.get(visit.step_ids[0] ?? '');
-    const last = steps.get(visit.step_ids[visit.step_ids.length - 1] ?? '');
-    if (!first || !last) continue;
-    const label = first === last ? String(first.step_index) : `${first.step_index}–${last.step_index}`;
-    const time = options.times ? formatPathwayTime(first.timestamp_ms) : '';
-    const timeWidth = time ? 4 + measure(time, 11) : 0;
-    const pillW = pillWidth(label);
-    if (x > 0 && x + pillW + timeWidth > width) {
-      x = 0;
-      cy += 20;
+    const runs: Array<{ ids: string[]; detour: boolean }> = [];
+    for (const id of visit.step_ids) {
+      const detour = leftOut && Boolean(steps.get(id)?.detour);
+      const current = runs[runs.length - 1];
+      if (current && current.detour === detour) current.ids.push(id);
+      else runs.push({ ids: [id], detour });
     }
-    const number = pill(x, cy, label) + (time ? text(x + pillW + 4, cy + 3.8, time, { size: 11, fill: TIME }) : '');
-    // The steps of the visit, for the pointer preview. A transparent rect makes the gaps between the pill and its
-    // time part of the target.
-    svg += peek
-      ? `<g data-peek="${esc(visit.step_ids.join(' '))}"><rect x="${n1(x - 2)}" y="${n1(cy - 9.5)}" width="${n1(pillW + timeWidth + 4)}" height="19" fill="transparent"/>${number}</g>`
-      : number;
-    x += pillW + timeWidth + (time ? 9 : 3);
+    runs.forEach((group, index) => {
+      const first = steps.get(group.ids[0] ?? '');
+      const last = steps.get(group.ids[group.ids.length - 1] ?? '');
+      if (!first || !last) return;
+      const label = first === last ? String(first.step_index) : `${first.step_index}–${last.step_index}`;
+      const time = options.times && index === 0 ? formatPathwayTime(first.timestamp_ms) : '';
+      const timeWidth = time ? 4 + measure(time, 11) : 0;
+      const pillW = pillWidth(label);
+      if (x > 0 && x + pillW + timeWidth > width) {
+        x = 0;
+        cy += 20;
+      }
+      const number = pill(x, cy, label, INK, group.detour) + (time ? text(x + pillW + 4, cy + 3.8, time, { size: 11, fill: TIME }) : '');
+      // The steps of the pill, for the pointer preview. A transparent rect makes the gaps between the pill and its
+      // time part of the target.
+      svg += peek
+        ? `<g data-peek="${esc(group.ids.join(' '))}"><rect x="${n1(x - 2)}" y="${n1(cy - 9.5)}" width="${n1(pillW + timeWidth + 4)}" height="19" fill="transparent"/>${number}</g>`
+        : number;
+      x += pillW + timeWidth + (time ? 9 : 3);
+    });
   }
   if (screen.kind === 'popup') {
     if (x > 0 && x + measure('pop-up', 11) > width) {
@@ -572,8 +606,8 @@ function strokePath(d: string, role: MoveRole, peek: boolean, withArrow = true):
   return hit + halo + line;
 }
 
-/** The width of a screenshot's box for a recording of this width / height. */
-function frameWidth(aspect: number): number {
+/** The width of a screenshot's box, in the figure's units, for a recording of this width / height. */
+export function pathwayFrameWidth(aspect: number): number {
   return Math.max(FRAME_MIN_WIDTH, Math.round(FRAME_SIZE * Math.sqrt(aspect > 0 ? aspect : 16 / 10)));
 }
 
@@ -582,7 +616,7 @@ function frameWidth(aspect: number): number {
  * PAGE_MIN_SCALE, at least two: wide enough to use the space, never so wide that its labels become hard to read.
  */
 export function pathwayColumnsFor(space: number, aspect: number): number {
-  const pitch = frameWidth(aspect) + GAP_X;
+  const pitch = pathwayFrameWidth(aspect) + GAP_X;
   return Math.max(2, Math.floor((space / PAGE_MIN_SCALE - 2 * MARGIN - 2 * EDGE_ROOM + GAP_X) / pitch));
 }
 
@@ -591,12 +625,18 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   const measure = input.measure ?? measureText;
   const peek = Boolean(input.peek);
   const aspect = input.aspect > 0 ? input.aspect : 16 / 10;
-  const width = frameWidth(aspect);
+  const width = pathwayFrameWidth(aspect);
   const height = Math.round(width / aspect);
   const pitch = width + GAP_X;
   const maxCols = input.columns && input.columns >= 2 ? Math.floor(input.columns) : Math.max(2, Math.floor((TARGET_WIDTH - 2 * MARGIN + GAP_X) / pitch));
 
   const steps = new Map(pathway.steps.map((step) => [step.step_id, step]));
+  // With the optional detours left out of the counts, their step numbers are hollow wherever they show.
+  const hollow: ReadonlySet<string> =
+    options.countDetours === false ? new Set(pathway.steps.filter((step) => step.detour).map((step) => String(step.step_index))) : NONE;
+  // A phase's counts leave the detours out too, then (from the server; a pathway made on the page has none).
+  const phaseSteps = (phase: PathwayPhase): number => (hollow.size ? phase.main_step_count ?? phase.step_count : phase.step_count);
+  const phaseScreens = (phase: PathwayPhase): number => (hollow.size ? phase.main_screen_count ?? phase.screen_count : phase.screen_count);
   const { placed, rows, cols } = placeScreens(pathway.screens, maxCols);
   const cards = new Map<string, Card>();
   for (const screen of pathway.screens) cards.set(screen.id, buildCard(screen, steps, width, height, options, imageFor, measure, peek));
@@ -822,8 +862,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
       if (!continues) {
         labelled.add(open.phase);
         const counts =
-          `${phase.step_count} ${phase.step_count === 1 ? 'step' : 'steps'} on ` +
-          `${phase.screen_count} ${phase.screen_count === 1 ? 'screen' : 'screens'}` +
+          `${plural(phaseSteps(phase), 'step', 'steps')} on ${plural(phaseScreens(phase), 'screen', 'screens')}` +
           (options.times && phase.duration_ms != null ? `, ${formatPathwayTime(phase.duration_ms)}` : '');
         lines.push(...wrapText(counts, span, 10, false, measure).map((text) => ({ text, bold: false })));
       }
@@ -895,7 +934,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
         ? [[left(child), lineY], [right(parent) + 2, lineY]]
         : [[right(parent), lineY], [left(child) - 2, lineY]];
       svg += strokePath(roundedPath(pts), role, peek);
-      svg += pillRow((right(parent) + left(child)) / 2, lineY, passLabels, color);
+      svg += pillRow((right(parent) + left(child)) / 2, lineY, passLabels, color, hollow);
     } else if (plan.kind === 'elbow') {
       layer = 3;
       const parent = plan.reversed ? to : from;
@@ -908,14 +947,14 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
         const pts: Array<[number, number]> = [[left(child), childY], [trunk, childY], [trunk, parentY], [right(parent) + 2, parentY]];
         svg += strokePath(roundedPath(pts), role, peek);
         const pillX = Math.max(trunk + 20, (trunk + left(child)) / 2);
-        svg += pillRow(pillX, childY, passLabels, color);
+        svg += pillRow(pillX, childY, passLabels, color, hollow);
       } else {
         const childY = top(child) + height * 0.32;
         const parentY = Math.min(top(parent) + height - 14, top(parent) + height * 0.64 + stagger);
         const pts: Array<[number, number]> = [[right(parent), parentY], [trunk, parentY], [trunk, childY], [left(child) - 2, childY]];
         svg += strokePath(roundedPath(pts), role, peek);
         const pillX = Math.max(trunk + 20, (trunk + left(child)) / 2);
-        svg += pillRow(pillX, childY, passLabels, color);
+        svg += pillRow(pillX, childY, passLabels, color, hollow);
       }
     } else if (plan.kind === 'wrap') {
       layer = 1;
@@ -956,6 +995,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: to.screen,
           peek,
+          hollow,
         }).svg;
         svg += renderPortalChip({
           x: rightChipX,
@@ -967,6 +1007,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: from.screen,
           peek,
+          hollow,
         }).svg;
       } else {
         svg += renderPortalChip({
@@ -979,6 +1020,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: from.screen,
           peek,
+          hollow,
         }).svg;
         svg += renderPortalChip({
           x: rightChipX,
@@ -990,6 +1032,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: to.screen,
           peek,
+          hollow,
         }).svg;
       }
     } else if (plan.kind === 'wrap-portal') {
@@ -1018,6 +1061,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: to.screen,
           peek,
+          hollow,
         }).svg;
 
         const arrChipX = right(parent) + 16;
@@ -1032,6 +1076,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: from.screen,
           peek,
+          hollow,
         }).svg;
       } else {
         // Departing right edge of parent -> arriving left edge of child
@@ -1047,6 +1092,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: to.screen,
           peek,
+          hollow,
         }).svg;
 
         const arrChipX = left(child) - 16 - arrW;
@@ -1061,6 +1107,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: from.screen,
           peek,
+          hollow,
         }).svg;
       }
     } else if (plan.kind === 'over') {
@@ -1091,6 +1138,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: to.screen,
           peek,
+          hollow,
         }).svg;
         svg += renderPortalChip({
           x: arrX,
@@ -1102,10 +1150,11 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: from.screen,
           peek,
+          hollow,
         }).svg;
       } else {
         const pillX = span < 60 ? (fromX + toX) / 2 : toX + Math.sign(fromX - toX) * 32;
-        svg += pillRow(pillX, toBus, passLabels, color);
+        svg += pillRow(pillX, toBus, passLabels, color, hollow);
       }
     } else if (plan.kind === 'adjacent') {
       layer = 1;
@@ -1170,6 +1219,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: to.screen,
           peek,
+          hollow,
         }).svg;
         svg += renderPortalChip({
           x: arrX,
@@ -1181,6 +1231,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: from.screen,
           peek,
+          hollow,
         }).svg;
       } else {
         const midX = (startX + endX) / 2;
@@ -1194,6 +1245,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
           measure,
           targetScreen: to.screen,
           peek,
+          hollow,
         }).svg;
       }
     } else {
@@ -1226,6 +1278,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
         measure,
         targetScreen: to.screen,
         peek,
+        hollow,
       }).svg;
 
       // Arrival chip dropping straight down into `to`
@@ -1246,6 +1299,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
         measure,
         targetScreen: from.screen,
         peek,
+        hollow,
       }).svg;
     }
 
@@ -1370,6 +1424,7 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
       [(x, cy) => pill(x, cy, '2'), 15, 'step number, as in steps.csv'],
       [arrow('main'), 28, 'move to another screen, numbered by the step it leads to'],
     ];
+    if (hollow.size) items.splice(1, 0, [(x, cy) => pill(x, cy, '2', INK, true), 15, 'step of an optional detour, left out of the counts']);
     if (hasBranch) items.push([arrow('branch'), 28, 'branch or detour to another path']);
     if (hasReturn) items.push([arrow('return'), 28, 'return to an earlier screen']);
     if (hasPortal) {

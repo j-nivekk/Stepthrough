@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { absoluteApiUrl } from '../api';
+import { screenshotUrl } from '../lib/screenshots';
 import type { SimilarLink } from '../lib/analysis';
 import { formatPathwayTime } from '../lib/pathwayFigure';
 import type { GalleryLayoutSizing } from '../lib/stepLayout';
@@ -314,7 +314,7 @@ export function CandidateGallery({
                           alt={`step ${sequenceNumber} at ${candidate.timestamp_tc}`}
                           draggable={false}
                           loading="lazy"
-                          src={absoluteApiUrl(candidate.image_url)}
+                          src={screenshotUrl(candidate.image_url, sizing.thumbWidth)}
                         />
                         <label
                           className="candidate-gallery-thumb-check"
@@ -435,7 +435,7 @@ function GalleryStage({
             <img
               alt={`candidate screenshot at ${candidate.timestamp_tc}`}
               draggable={false}
-              src={absoluteApiUrl(candidate.image_url)}
+              src={screenshotUrl(candidate.image_url)}
             />
             <div aria-hidden="true" className="candidate-live-slot" ref={liveSlotRef} />
             <span aria-hidden="true" className="candidate-hover-progress" />

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
-import { absoluteApiUrl } from '../api';
+import { screenshotUrl } from '../lib/screenshots';
 import type { CandidateChanges, CandidateFrame } from '../types';
 
 /** Whether the step counts as a pop-up: the reviewer's say, or else the detector's label. */
@@ -190,7 +190,7 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, icon, anyStep
                 onClick={() => choose(step.id)}
                 type="button"
               >
-                <img alt="" loading="lazy" src={absoluteApiUrl(step.image_url)} />
+                <img alt="" loading="lazy" src={screenshotUrl(step.image_url, 34)} />
                 <strong>{numberOf(step) ?? step.detector_index}</strong>
                 <span>
                   {step.title || step.timestamp_tc}

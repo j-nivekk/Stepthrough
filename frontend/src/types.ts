@@ -493,6 +493,12 @@ export interface PathwayStep {
   kind_choice: 'automatic' | 'screen' | 'popup';
   /** The phase of the walkthrough the step is in; empty outside every phase. */
   phase?: string | null;
+  /**
+   * Part of an optional detour: a trip off the main way through that comes back to it, with the step that comes
+   * back (services/pathway.py). Such a step has no `main_step`, its number along the main way.
+   */
+  detour?: boolean;
+  main_step?: number | null;
   source_candidate_id: string;
 }
 
@@ -515,6 +521,14 @@ export interface PathwayScreen {
   visits: PathwayVisit[];
   time_on_screen_ms?: number | null;
   row_choice?: 'automatic' | PathwayRowChoice;
+  /**
+   * The screen that carries this one's row on in the figure (services/pathway.py): the one the reviewer put on the
+   * row, or else the one with the most screens reached after it; null where the row ends. Left out by pathways made
+   * on the page (the tutorial, tests), which work it out the same way (pathwayFigure.ts).
+   */
+  continues_with?: string | null;
+  /** On the main way through: the chain of screens that carry the rows on, from the first screen. */
+  main?: boolean;
 }
 
 /** A named stretch of consecutive steps, such as "sign up", with how many steps and screens it takes. */
@@ -526,6 +540,9 @@ export interface PathwayPhase {
   last_step_index: number;
   step_count: number;
   screen_count: number;
+  /** The same without the steps of optional detours (from the server). */
+  main_step_count?: number;
+  main_screen_count?: number;
   screen_ids: string[];
   start_ms: number;
   end_ms?: number | null;
@@ -554,6 +571,9 @@ export interface Pathway {
   detail: PathwayDetail;
   step_count: number;
   screen_count: number;
+  /** The steps without the optional detours, and on how many screens they are (from the server). */
+  main_step_count?: number;
+  main_screen_count?: number;
   steps: PathwayStep[];
   screens: PathwayScreen[];
   transitions: PathwayTransition[];

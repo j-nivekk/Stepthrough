@@ -570,11 +570,19 @@ of its first step up to the step after its last, so a step you add by hand in be
 | move one step to another box | drag its number onto that box, or **put it on…** |
 | take a change back | **⌘Z** (Ctrl+Z), or **undo** above the chart |
 | keep the main way through on one row | **row** for a box (under **⋯**): **next to** the screen before it, or **on a row below** |
+| count only the steps an activity needs | **detours: left out**: trips off the main way that come back to it drop out of the counts, and their step numbers turn hollow |
 | name the parts of the walkthrough | select boxes and choose **phase…**, or **phases** above the chart |
 | move the notes | **notes: under screens**, **in a key** below the chart, or **off** |
 | leave out the times, or the title and legend | **show: times** and **title and legend** |
 | change the size on the page | the slider; **fit** fills the width of the window |
 | save the chart | **download: svg** or **png** |
+
+The main way through is the row that carries on from the first screen: on its own, the way that leads on
+furthest, so a side trip that comes back goes below it; your **row** choices decide where you make them. Some
+interactions are optional, so a trip off the main way that comes back to it is an optional detour: with
+**detours: left out** the counts above the chart and of each phase are those of the main way, with how many steps
+the detours took. A trip that never comes back, or that only shows pop-ups the app put in the way, still counts.
+The export always has both: `main_step` numbers each step along the main way, and `detour` marks the others.
 
 **svg** saves one SVG image with the screenshots inside it, so it needs no other files. Its text stays text
 and every screen is a group of its own, so you can finish the figure in a drawing program such as Inkscape,

@@ -46,6 +46,17 @@ FIELD_NOTES = {
     "screens.visits": "each stay on the screen: the steps taken there before moving to another screen",
     "screens.row_choice": "where the reviewer put the box in the figure: automatic, continue (on the row of the "
                           "screen it was reached from) or below (on a row of its own under it)",
+    "screens.main": "the screen is on the main way through: the chain of screens that carry the rows on, from the "
+                    "first screen (continues_with)",
+    "steps.main_step": "the step's number along the main way through, leaving out optional detours; null for a step "
+                       "of a detour",
+    "steps.detour": "the step is part of an optional detour: a trip off the main way through that comes back to it "
+                    "(with the step that comes back); a trip that never comes back, or that only shows pop-ups, "
+                    "is not optional",
+    "main_step_count": "how many steps there are without the optional detours (main_screen_count: on how many screens)",
+    "screens.continues_with": "the screen that carries this one's row on in the figure: the one the reviewer put on "
+                              "the row, or else the one with the most screens reached after it (the long way on "
+                              "stays on the row, side trips go below); null where the row ends",
     "steps.phase": "the phase of the walkthrough the step is in, as the reviewer named it; null outside every phase",
     "phases": "stretches of consecutive steps that the reviewer named, such as sign up or verify identity, in order",
     "phases.screen_count": "how many different screens the steps of the phase are on",
@@ -233,6 +244,7 @@ def _phase_stretches(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             end_ms = None
         screen_ids = list(dict.fromkeys(step["screen_id"] for step in members))
+        main_members = [step for step in members if not step.get("detour")]
         phases.append({
             "name": stretch["name"],
             "first_step_id": first["step_id"],
@@ -241,12 +253,74 @@ def _phase_stretches(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "last_step_index": last["step_index"],
             "step_count": len(members),
             "screen_count": len(screen_ids),
+            "main_step_count": len(main_members),
+            "main_screen_count": len({step["screen_id"] for step in main_members}),
             "screen_ids": screen_ids,
             "start_ms": first["timestamp_ms"],
             "end_ms": end_ms,
             "duration_ms": None if end_ms is None else end_ms - first["timestamp_ms"],
         })
     return phases
+
+
+def _set_continuations(screens: list[dict[str, Any]]) -> None:
+    """Give every screen the one that carries its row on in the figure (``continues_with``), or None where the row
+    ends: the screen the reviewer put on the row, or else the one with the most screens reached after it, so the
+    long way on stays on the row and a side trip goes below (ties: the first reached). A screen the reviewer put
+    below never carries a row on."""
+    kids: dict[str, list[dict[str, Any]]] = {}
+    for screen in screens:  # in the order they were first reached
+        if screen["reached_from"]:
+            kids.setdefault(screen["reached_from"], []).append(screen)
+    sizes: dict[str, int] = {}
+    for screen in reversed(screens):  # a screen is always reached after the one it is reached from
+        sizes[screen["id"]] = 1 + sum(sizes.get(kid["id"], 1) for kid in kids.get(screen["id"], []))
+    for screen in screens:
+        candidates = [kid for kid in kids.get(screen["id"], []) if kid["row_choice"] != "below"]
+        chosen = next((kid for kid in candidates if kid["row_choice"] == "continue"), None)
+        if chosen is None and candidates:
+            chosen = max(candidates, key=lambda kid: sizes[kid["id"]])  # max keeps the first of equals
+        screen["continues_with"] = chosen["id"] if chosen else None
+
+
+def _mark_detours(steps: list[dict[str, Any]], screens: list[dict[str, Any]]) -> None:
+    """Mark the main way through and the optional detours from it.
+
+    The main way through is the chain of screens that carry the rows on (``continues_with``) from the first screen:
+    the long way on, or what the reviewer put on the rows. A detour is a run of steps on screens off that way that
+    comes back to it; its steps, and the step that comes back, are optional (``detour``): without the trip the user
+    would still be where they left. A run that never comes back (the recording ends there) is part of what was
+    done, and so is a trip that only shows pop-ups, which the app puts in the way rather than the user choosing them.
+    Every other step gets its number along the main way (``main_step``)."""
+    by_id = {screen["id"]: screen for screen in screens}
+    main: set[str] = set()
+    screen = screens[0] if screens else None
+    while screen is not None and screen["id"] not in main:
+        main.add(screen["id"])
+        screen = by_id.get(screen["continues_with"] or "")
+    for screen in screens:
+        screen["main"] = screen["id"] in main
+    for step in steps:
+        step["detour"] = False
+    start: int | None = None
+    for index, step in enumerate(steps):
+        if step["screen_id"] not in main:
+            if start is None:
+                start = index
+            continue
+        if start is not None:
+            trip = steps[start:index]
+            if any(by_id[each["screen_id"]]["kind"] != "popup" for each in trip):
+                for each in [*trip, step]:
+                    each["detour"] = True
+            start = None
+    number = 0
+    for step in steps:
+        if step["detour"]:
+            step["main_step"] = None
+        else:
+            number += 1
+            step["main_step"] = number
 
 
 def build_pathway(
@@ -352,12 +426,17 @@ def build_pathway(
         for visit in screen["visits"]:
             visit["time_on_screen_ms"] = _total([time_of[step_id] for step_id in visit["step_ids"]])
         screen["time_on_screen_ms"] = _total([visit["time_on_screen_ms"] for visit in screen["visits"]])
+    _set_continuations(screens)
+    _mark_detours(steps, screens)
+    main_steps = [step for step in steps if not step["detour"]]
 
     return {
         "format": PATHWAY_FORMAT,
         "detail": detail,
         "step_count": len(steps),
         "screen_count": len(screens),
+        "main_step_count": len(main_steps),
+        "main_screen_count": len({step["screen_id"] for step in main_steps}),
         "steps": steps,
         "screens": screens,
         "transitions": list(transitions.values()),

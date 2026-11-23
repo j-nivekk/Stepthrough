@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import csv
 import json
 
 from fastapi.testclient import TestClient
 
 from app.services.export import build_accepted_steps, build_all_candidate_rows
-from app.services.pathway import build_pathway
+from app.services.pathway import _mark_detours, _set_continuations, build_pathway
 
 
 def _candidate(index: int, label: str | None, *, status: str = 'accepted', similar_to: int | None = None,
@@ -354,6 +355,11 @@ def test_run_pathway_and_its_export(client: TestClient, video_factory, wait_for_
     assert all((bundle / step['image_path']).exists() for step in exported['steps'])
     assert all('image_url' not in step and 'export_filename' not in step for step in exported['steps'])
     assert 'the step it arrives at' in exported['field_notes']['transitions.passes']
+    # each step's number along the main way, and whether it is an optional detour (here every step counts)
+    assert [(step['main_step'], step['detour']) for step in manifest['steps']] == [(1, False), (2, False), (3, False)]
+    assert exported['main_step_count'] == 3 and exported['step_count'] == 3
+    rows = list(csv.DictReader((bundle / 'steps.csv').open(encoding='utf-8')))
+    assert [(row['main_step'], row['detour']) for row in rows] == [('1', 'false'), ('2', 'false'), ('3', 'false')]
 
 
 def test_phases_are_named_stretches_of_time() -> None:
@@ -445,3 +451,66 @@ def test_phases_are_set_by_steps_and_exported(client: TestClient, video_factory,
 
     assert client.put(f'/runs/{run_id}/phases', json={'name': '', 'first_step': second, 'last_step': third}).status_code == 200
     assert named() == []
+
+
+def test_the_long_way_on_carries_the_row_and_the_reviewer_can_say_otherwise() -> None:
+    def screens(tree: list[tuple[int, int | None]], rows: dict[int, str] | None = None) -> list[dict]:
+        made = [{'id': f's{index}', 'reached_from': f's{parent}' if parent else None,
+                 'row_choice': (rows or {}).get(index, 'automatic')} for index, parent in tree]
+        _set_continuations(made)
+        return made
+
+    # s2 leads first to a short trip (s3, s4) and later to the long rest (s5 to s7)
+    tree = [(1, None), (2, 1), (3, 2), (4, 3), (5, 2), (6, 5), (7, 6)]
+    on = {screen['id']: screen['continues_with'] for screen in screens(tree)}
+    assert on == {'s1': 's2', 's2': 's5', 's3': 's4', 's4': None, 's5': 's6', 's6': 's7', 's7': None}
+    # the reviewer put the short trip on the row
+    assert next(s for s in screens(tree, {3: 'continue'}) if s['id'] == 's2')['continues_with'] == 's3'
+    # ... or the long way below: the short trip carries the row on
+    assert next(s for s in screens(tree, {5: 'below'}) if s['id'] == 's2')['continues_with'] == 's3'
+    # nothing carries on a row whose boxes were all put below; equal ways on: the first reached
+    assert next(s for s in screens(tree, {3: 'below', 5: 'below'}) if s['id'] == 's2')['continues_with'] is None
+    assert screens([(1, None), (2, 1), (3, 1)])[0]['continues_with'] == 's2'
+
+
+def _walk(visits: list[str], tree: dict[str, str | None], popups: frozenset[str] = frozenset()) -> tuple[list[dict], list[dict]]:
+    """Steps on the screens in ``visits`` (one step each, in time), screens reached as in ``tree``."""
+    screens = [{'id': screen, 'reached_from': parent, 'row_choice': 'automatic', 'kind': 'popup' if screen in popups else 'screen'}
+               for screen, parent in tree.items()]
+    _set_continuations(screens)
+    steps = [{'step_id': f'step-{index}', 'screen_id': screen} for index, screen in enumerate(visits, start=1)]
+    _mark_detours(steps, screens)
+    return steps, screens
+
+
+def test_a_trip_off_the_main_way_that_comes_back_is_optional() -> None:
+    # a -> b -> (c -> d, and back to b) -> e -> f -> g: the long way on is b -> e -> f -> g
+    tree = {'a': None, 'b': 'a', 'c': 'b', 'd': 'c', 'e': 'b', 'f': 'e', 'g': 'f'}
+    steps, screens = _walk(['a', 'b', 'c', 'd', 'b', 'e', 'f', 'g'], tree)
+    assert [screen['id'] for screen in screens if screen['main']] == ['a', 'b', 'e', 'f', 'g']
+    # the trip and the step that comes back are optional; the rest are numbered along the main way
+    assert [step['detour'] for step in steps] == [False, False, True, True, True, False, False, False]
+    assert [step['main_step'] for step in steps] == [1, 2, None, None, None, 3, 4, 5]
+
+
+def test_a_trip_that_never_comes_back_or_only_shows_popups_counts() -> None:
+    tree = {'a': None, 'b': 'a', 'c': 'b', 'd': 'b', 'e': 'd'}
+    # the recording ends on the trip (c): it is part of what was done
+    steps, _ = _walk(['a', 'b', 'd', 'e', 'b', 'c'], tree)
+    assert steps[-1]['screen_id'] == 'c' and not any(step['detour'] for step in steps[4:])
+    # a pop-up over b, dismissed (b -> p -> b), is in the way, not chosen: counted
+    steps, _ = _walk(['a', 'b', 'p', 'b', 'c', 'd'], {'a': None, 'b': 'a', 'p': 'b', 'c': 'b', 'd': 'c'}, frozenset({'p'}))
+    assert not any(step['detour'] for step in steps)
+    assert [step['main_step'] for step in steps] == [1, 2, 3, 4, 5, 6]
+
+
+def test_the_pathway_and_its_phases_count_the_steps_with_and_without_detours() -> None:
+    candidates = [_candidate(index, 'tap', similar_to=similar) for index, similar in
+                  [(0, None), (1, None), (2, None), (3, 1), (4, None), (5, None)]]
+    pathway = _pathway(candidates)
+    by_index = {step['step_index']: step for step in pathway['steps']}
+    assert pathway['step_count'] == 6
+    assert pathway['main_step_count'] == sum(1 for step in pathway['steps'] if not step['detour'])
+    assert pathway['main_step_count'] + sum(step['detour'] for step in pathway['steps']) == 6
+    assert all((step['main_step'] is None) == step['detour'] for step in by_index.values())
+

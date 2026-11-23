@@ -481,6 +481,8 @@ class PathwayStepResponse(BaseModel):
     screen_choice: Literal["automatic", "new_screen", "same_screen"] = "automatic"
     kind_choice: Literal["automatic", "screen", "popup"] = "automatic"
     phase: str | None = None
+    detour: bool = False
+    main_step: int | None = None
     source_candidate_id: str
 
 
@@ -502,6 +504,8 @@ class PathwayScreenResponse(BaseModel):
     visits: list[PathwayVisitResponse]
     time_on_screen_ms: int | None = None
     row_choice: Literal["automatic", "continue", "below"] = "automatic"
+    continues_with: str | None = None
+    main: bool = False
 
 
 class PathwayPassResponse(BaseModel):
@@ -527,6 +531,8 @@ class PathwayPhaseResponse(BaseModel):
     last_step_index: int
     step_count: int
     screen_count: int
+    main_step_count: int | None = None
+    main_screen_count: int | None = None
     screen_ids: list[str]
     start_ms: int
     end_ms: int | None = None
@@ -540,6 +546,8 @@ class PathwayResponse(BaseModel):
     detail: PathwayDetail
     step_count: int
     screen_count: int
+    main_step_count: int | None = None
+    main_screen_count: int | None = None
     steps: list[PathwayStepResponse]
     screens: list[PathwayScreenResponse]
     transitions: list[PathwayTransitionResponse]

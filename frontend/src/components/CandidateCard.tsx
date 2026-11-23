@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { absoluteApiUrl } from '../api';
+import { screenshotUrl } from '../lib/screenshots';
 import { useLive } from '../features/live/LiveProvider';
 import { candidateLabelType, transitionLabelText, type SimilarLink } from '../lib/analysis';
 import { stepEditor } from '../lib/live';
@@ -307,10 +307,13 @@ export interface CandidateCardProps {
   /** Narrow card: scores and the notes toggle move out of the way until the card is active. */
   compact?: boolean;
   hover?: StepHoverProps;
+  /** How wide the card draws its screenshot, in CSS pixels, so it loads a copy that size (lib/screenshots.ts). */
+  imageWidth?: number;
 }
 
 export function CandidateCard({
   candidate,
+  imageWidth,
   isActive,
   isAnnotationExpanded,
   isCrossHovered = false,
@@ -363,7 +366,7 @@ export function CandidateCard({
         style={{ aspectRatio: String(imageAspectRatio) }}
         {...hoverHandlers(hover, liveSlotRef)}
       >
-        <img alt={`candidate screenshot at ${candidate.timestamp_tc}`} src={absoluteApiUrl(candidate.image_url)} />
+        <img alt={`candidate screenshot at ${candidate.timestamp_tc}`} src={screenshotUrl(candidate.image_url, imageWidth)} />
         <div aria-hidden="true" className="candidate-live-slot" ref={liveSlotRef} />
         <span aria-hidden="true" className="candidate-hover-progress" />
         {hover?.state === 'armed' ? <PlayFromHereButton iconOnly={compact} onClick={hover.onPlayFromHere} /> : null}
@@ -692,7 +695,7 @@ export function CandidateRow({
         <img
           alt={`candidate screenshot at ${candidate.timestamp_tc}`}
           loading="lazy"
-          src={absoluteApiUrl(candidate.image_url)}
+          src={screenshotUrl(candidate.image_url, thumbWidth)}
         />
         <span aria-hidden="true" className="candidate-hover-progress" />
         {hover?.state === 'armed' ? <PlayFromHereButton iconOnly onClick={hover.onPlayFromHere} /> : null}
