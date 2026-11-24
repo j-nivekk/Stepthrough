@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { numberRange, pathwayNumber, reviewNumbers, stepName, stepsPhrase, stretchName } from '../src/lib/stepNumbers';
+import { numberRange, pathwayNumber, returnLinks, reviewNumbers, stepName, stepsPhrase, stretchName } from '../src/lib/stepNumbers';
 import type { AcceptedStep, CandidateFrame, CandidateStatus } from '../src/types';
 
 const candidate = (index: number, status: CandidateStatus, label = 'navigation') =>
@@ -61,4 +61,18 @@ test('the steps of a box are named as stretches', () => {
   const box = [step(7), step(8), step(9), step(17, '9d'), step(18, '10')];
   assert.equal(stepsPhrase(box), 'steps 7–9 and 17–18');
   assert.equal(stepsPhrase(box, true), 'steps 7–9, 9d and 10');
+});
+
+test('an accepted step says where the user went back to after it, by the name of the step there', () => {
+  const back = (index: number, status: CandidateStatus, to: string | null, label?: string) => ({ ...candidate(index, status, label), returns_to: to }) as CandidateFrame;
+  const candidates = [
+    back(1, 'accepted', null, 'opening_screen'), back(2, 'accepted', null), back(3, 'accepted', 'c2'), back(4, 'accepted', 'c1'),
+    back(5, 'rejected', 'c2'), back(6, 'pending', 'c2'), back(7, 'accepted', 'c5'), back(8, 'accepted', 'gone'),
+  ];
+  const numbers = reviewNumbers(candidates, accepted(['c1', 0], ['c2', 1], ['c3', 2], ['c4', 3], ['c7', 4], ['c8', 5]));
+  assert.deepEqual([...returnLinks(candidates, numbers)], [
+    ['c3', { targetId: 'candidate-c2', label: 'then back to step 1' }],
+    ['c4', { targetId: 'candidate-c1', label: 'then back to the start' }],
+    ['c7', { targetId: 'candidate-c5', label: 'then back to candidate 4' }],
+  ]);
 });

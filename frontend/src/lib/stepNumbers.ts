@@ -6,9 +6,13 @@
  * themselves come from the server (backend/app/services/export.py and pathway.py), the same as in steps.csv.
  */
 import type { AcceptedStep, CandidateFrame, PathwayStep } from '../types';
+import type { SimilarLink } from './analysis';
 
 /** The opening screen, where other steps have a number. */
 export const START = 'start';
+
+/** On the line of a return the reviewer added, where a move has the number of the step it leads to. */
+export const BACK = 'back';
 
 const shown = (number: string): string => (number === '0' ? START : number);
 
@@ -46,6 +50,21 @@ export function reviewNumbers(candidates: CandidateFrame[], acceptedSteps: Accep
       return [candidate.id, { number, name: stepName(number), short: number }];
     }),
   );
+}
+
+/**
+ * Where the user went back to after a step, for the accepted steps the reviewer said so of (in the pathway): what to
+ * call it, and the step to jump to, by candidate id.
+ */
+export function returnLinks(candidates: CandidateFrame[], numbers: Map<string, ReviewNumber>): Map<string, SimilarLink> {
+  const links = new Map<string, SimilarLink>();
+  for (const candidate of candidates) {
+    const to = candidate.status === 'accepted' && candidate.returns_to ? numbers.get(candidate.returns_to) : undefined;
+    if (!to) continue;
+    const name = to.name === START ? `the ${START}` : to.name;
+    links.set(candidate.id, { targetId: `candidate-${candidate.returns_to}`, label: `then back to ${name}` });
+  }
+  return links;
 }
 
 // ── in the pathway ──

@@ -97,6 +97,9 @@ CREATE TABLE IF NOT EXISTS candidate_frames (
     -- Where the box of this step goes in the pathway figure: NULL (automatic), 'continue' (on the row of the box it
     -- was reached from) or 'below' (on a row of its own); the box's first step with a say decides.
     pathway_row TEXT,
+    -- The reviewer's say that after this step the user went back to an earlier screen, with no step of its own for it:
+    -- NULL, or the id of an earlier step that shows that screen.
+    returns_to TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(run_id, detector_index)
@@ -413,6 +416,7 @@ def init_db() -> None:
         _ensure_column(conn, "candidate_frames", "screen_link", "TEXT")
         _ensure_column(conn, "candidate_frames", "screen_kind", "TEXT")
         _ensure_column(conn, "candidate_frames", "pathway_row", "TEXT")
+        _ensure_column(conn, "candidate_frames", "returns_to", "TEXT")
         _ensure_column(conn, "recordings", "working_path", "TEXT")
         _ensure_column(conn, "users", "notes", "TEXT")
         _ensure_column(conn, "users", "password_hash", "TEXT")

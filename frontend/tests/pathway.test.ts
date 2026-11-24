@@ -643,6 +643,37 @@ test('at a chosen size a row takes as many boxes as fit at about that size; beyo
   }
 });
 
+test('a return the reviewer added is drawn dashed with "back" on it, and the key says what that is', () => {
+  // S1 -> S2 -> S3, then back to S2 without a step, and on to S4 and S5
+  const base = treePathway([[1, null], [2, 1], [3, 2], [4, 2], [5, 4]]);
+  const added = {
+    from_screen: 'screen-03', to_screen: 'screen-02', kind: 'return',
+    passes: [{ step_id: null, step_index: null, from_step_id: 'step-3', at_ms: null, origin: 'researcher' }],
+  };
+  const draw = { ...base, transitions: [...base.transitions, added] } as Pathway;
+  const figure = (pathway: Pathway, peek = true, caption = true) =>
+    buildPathwayFigure({ ...input, pathway, columns: 4, peek, options: { notes: 'hidden', caption, times: false } }).svg;
+  const svg = figure(draw);
+  const back = moveGroup(svg, 'move-screen-03-screen-02-ret');
+  assert.ok(back.includes('>back</text>') && back.includes('stroke-dasharray'), back);
+  assert.match(svg, /id="move-screen-03-screen-02-ret"[^>]* data-steps=""[^>]* data-added=""/);
+  assert.ok(svg.includes('return without a step, added by the reviewer'));
+  // the other moves keep their numbers, and say nothing of it
+  assert.ok(moveGroup(svg, 'move-screen-02-screen-03').includes('>3</text>'));
+  assert.equal(svg.match(/data-added/g)?.length, 1);
+  assert.ok(!figure(base).includes('data-added') && !figure(base).includes('added by the reviewer'));
+  // a file has the same, without what only the page needs
+  const file = figure(draw, false);
+  assert.ok(file.includes('>back</text>') && !file.includes('data-added'));
+
+  // a move made both ways: once with a step, once without
+  const both = { ...draw, transitions: [...base.transitions, { ...added, passes: [{ step_id: 'step-5', step_index: 5, from_step_id: 'step-4', at_ms: 5000, origin: 'recorded' }, ...added.passes] }] } as Pathway;
+  const twice = figure(both);
+  assert.match(twice, /id="move-screen-03-screen-02-ret"[^>]* data-steps="5"[^>]* data-added=""/);
+  const labels = [...moveGroup(twice, 'move-screen-03-screen-02-ret').matchAll(/>(\d+|back)<\/text>/g)].map((match) => match[1]);
+  assert.deepEqual(labels.slice(0, 2), ['5', 'back']);
+});
+
 test('laying a figure out to see how wide it is gives the width it is drawn at', () => {
   const branches = treePathway([[1, null], [2, 1], [3, 2], [4, 3], [5, 4], [6, 5], [7, 6], [8, 7], [9, 1], [10, 9], [11, 10], [12, 3], [13, 12], [14, 13], [15, 14]]);
   for (const draw of [line(40), branches, line(1)]) {

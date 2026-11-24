@@ -1,8 +1,9 @@
 import type { CandidateChanges, CandidateFrame } from '../types';
 
-/** What a change in the pathway can touch on a step: where it belongs, whether it is a pop-up, its row, its title. */
-export type HistoryField = 'screen_link' | 'screen_kind' | 'pathway_row' | 'title';
-const FIELDS: HistoryField[] = ['screen_link', 'screen_kind', 'pathway_row', 'title'];
+/** What a change in the pathway can touch on a step: where it belongs, whether it is a pop-up, its row, where it goes
+ *  back to, its title. */
+export type HistoryField = 'screen_link' | 'screen_kind' | 'pathway_row' | 'returns_to' | 'title';
+const FIELDS: HistoryField[] = ['screen_link', 'screen_kind', 'pathway_row', 'returns_to', 'title'];
 
 /** A field of a step as it is stored: no say at all is null. */
 type Stored = string | null;

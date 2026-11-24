@@ -503,6 +503,7 @@ def test_review_carries_over_to_a_new_run_of_the_same_recording(client: TestClie
     manual = client.post(f"/runs/{first['summary']['id']}/candidates/manual", json={'timestamp_ms': 2500}).json()
     client.patch(f"/candidates/{manual['id']}", json={'status': 'accepted', 'title': 'Blue, later'})
     client.patch(f"/candidates/{a[0]['id']}", json={'pathway_row': 'below'})
+    client.patch(f"/candidates/{a[1]['id']}", json={'returns_to': a[0]['id']})
     phase = {'name': 'Opening', 'first_step': a[0]['id'], 'last_step': a[0]['id']}
     assert client.put(f"/runs/{first['summary']['id']}/phases", json=phase).status_code == 200
     # already done on the new run: stays
@@ -512,7 +513,7 @@ def test_review_carries_over_to_a_new_run_of_the_same_recording(client: TestClie
     response = client.post(f"/runs/{second['summary']['id']}/review-from", json={'source_run_id': first['summary']['id'], 'pairs': pairs})
     assert response.status_code == 200, response.text
     assert response.json() == {
-        'decisions': 4, 'titles': 2, 'notes': 1, 'screen_choices': 2, 'added_manual': 1, 'unmatched': 0, 'phases': True,
+        'decisions': 4, 'titles': 2, 'notes': 1, 'screen_choices': 3, 'added_manual': 1, 'unmatched': 0, 'phases': True,
     }
 
     after = sorted(client.get(f"/runs/{second['summary']['id']}").json()['candidates'], key=lambda c: c['timestamp_ms'])
@@ -522,6 +523,7 @@ def test_review_carries_over_to_a_new_run_of_the_same_recording(client: TestClie
     assert after[0]['notes'] == 'first screen'
     assert after[2]['screen_link'] == after[0]['id']  # pointed at the new run's own step
     assert after[0]['pathway_row'] == 'below'
+    assert after[1]['returns_to'] == after[0]['id']
     assert by_time[2500]['candidate_origin'] == 'manual'
     # the phases go by time, so the same moments are in them
     pathway = client.get(f"/runs/{second['summary']['id']}/pathway").json()

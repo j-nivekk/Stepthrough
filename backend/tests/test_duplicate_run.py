@@ -72,7 +72,7 @@ def test_duplicate_completed_run_copies_steps_images_links_and_phases(client: Te
     )
     client.patch(
         f"/candidates/{second['id']}",
-        json={"status": "accepted", "title": "Detail", "screen_link": first["id"], "screen_kind": "popup"},
+        json={"status": "accepted", "title": "Detail", "screen_link": first["id"], "screen_kind": "popup", "returns_to": first["id"]},
     )
     client.put(
         f"/runs/{run['id']}/phases",
@@ -113,7 +113,7 @@ def test_duplicate_completed_run_copies_steps_images_links_and_phases(client: Te
     assert c1["screen_kind"] == "screen"
     assert c1["pathway_row"] == "below"
     # screen_link is remapped to the new candidate ID, not the original run's candidate ID
-    assert c2["screen_link"] == c1["id"]
+    assert c2["screen_link"] == c1["id"] and c2["returns_to"] == c1["id"]
     assert c2["screen_kind"] == "popup"
     assert detail["phases"] == [{"start_ms": 500, "name": "Onboarding"}]
 

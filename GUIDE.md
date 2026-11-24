@@ -441,8 +441,18 @@ While the video plays, the card of the step on screen is outlined, so you can se
 | change the layout | **grid**, **list** or **gallery**; the slider sets the size of the images, and **fit** goes back to fitting the view to the window |
 | select several steps | tick or drag across their boxes; shift-click a box (or shift/⌘/ctrl-click thumbnails in gallery view) to select a range or toggle items. **select: all**, **none** and **invert** above the steps act on the steps shown, as does the box above the list; `x` (and `shift+x`) does the same for the step in focus |
 | accept, reject or reset many steps at once | select them, then **accept**, **reject** or **reset** next to how many are selected. Steps that are so already are left as they are, and the selection stays, so a mistaken choice can be put right at once |
+| do any of this from a menu | right-click a step, in any of the three views (or `shift+F10` for the step in focus). On one of several selected steps, the menu is for all of them |
 | go to an earlier visit of the same screen | **similar to step N** on a revisit |
+| go to the screen someone went back to | **then back to step N**, on a step you said so of |
+| say that someone went back to an earlier screen where no step shows it | right-click the step they went back after, **return to** (see [Pathway](#pathway)) |
 | say which screen a step shows in the pathway | **stacking** under **annotate** on a card, in the **label, screen** column of the list, or in the gallery inspector |
+
+The menu of one step decides on it, plays it, opens its screenshot or its notes, and says where it goes in the pathway:
+**stacking**, **a pop-up**, **phase**, **return to**. The menu of several selected steps (it says how many) has the same for all of them
+at once. **accept 3 of 5** changes the three that are not accepted yet. **stacking** makes them **all the same** screen as
+the first of them, **each a new screen**, or **automatic** again. **phase** takes in every step from the first accepted one
+to the last, also those in between that are not selected, and **return to** is about the last accepted one. A right click
+on a step outside the selection is about that step only, and the selection stays. In a text field, and on text you selected, the browser's own menu opens, to copy and paste.
 
 An accepted step has the number it has in the pathway and the export, **step 5**; a screenshot you have not accepted
 is a **candidate**, numbered in the order it was found. So rejecting a candidate leaves no gap: the steps after it
@@ -487,7 +497,8 @@ How to read it:
 - The black numbers are step numbers, the same as on the accepted steps and in `steps.csv`. A screen shows the
   steps taken on it, each with its time. An arrow shows the number of the step it leads to, so you can
   follow the journey from 1 onwards.
-- A solid arrow goes onwards; a dashed arrow goes back to a screen that was first seen earlier.
+- A solid arrow goes onwards; a dashed arrow goes back to a screen that was first seen earlier. With **back** on it
+  instead of a number, the return is one you added (see **return to** below), and no step leads to it.
 - A doubled frame means several steps in a row on that screen (for example `6–7` after scrolling).
 - A box shows the screenshot of its first step. Rest the pointer on a step number under the box to see that
   step instead; a number for several steps in a row, such as `6–7`, shows them in turn.
@@ -536,10 +547,20 @@ A small toolbox opens beside what you selected. For a box: its **title** (a box 
 has a title, so this is that step's title, and the step list shows it too), **pop-up**, **stacking…** (to stack
 onto another box, unstack all steps, unstack by visit, pop out a single step, **stack automatically** back where
 steps were found, or **edit steps…**), and **phase…**. For a step: **own screen** (on stacked boxes), **put it
-on…** another box, and **pop-up**. Under **⋯** (and in the right-click menu) are the rarer ones such as **row**
-(which says whether the box goes **next to** the screen it was reached from or **on a row below**). Without a say,
-the first screen reached from a screen goes next to it and the others go below; use it to keep the main way through
-on one line and put detours underneath. The screens and the moves stay the same.
+on…** another box, and **pop-up**. Under **⋯** (and in the right-click menu) are the rarer ones: **row**, which says whether the box goes **next to** the
+screen it was reached from or **on a row below**, and **return to**. Without a say about its row, the longest way on
+from a screen goes next to it and the others go below; use it to keep the main way through on one line and put detours
+underneath. The screens and the moves stay the same.
+
+**return to** is for a trip that went back where no step shows it: after looking around in **Help**, say, someone
+pressed back and opened the next page at once, so the recording holds no still picture of the list in between. Choose
+**return to** on the last screen of the trip and pick the screen they went back to (screens seen before it, the latest
+first; for a box with several visits, it is the last one, or select the step number of another). The chart then has a
+dashed arrow back with **back** on it, what follows leaves from the screen they went back to, and the trip is an
+optional detour. No step is added, so the count of steps stays the same. It also works when the next step does show the
+screen they went back to: there is no second arrow then, and the trip counts as a detour however long it was. **no
+return** takes it away again. In the step list, the step then says where it went, such as **then back to step 41**:
+click it to jump there. It can also be chosen there, by right-clicking the step.
 
 The two most common corrections can also be dragged:
 
@@ -553,7 +574,8 @@ A dotted outline shows where a drop would go, and the line above the chart says 
 be taken back with **⌘Z** (Ctrl+Z on Windows) or **undo** on that line. The undo is your own: in a shared account,
 each browser takes back only what it did, and a step someone else changed since stays as they left it.
 
-Everything you change here is stored on the steps, exactly as if you had chosen it in the step list.
+Everything you change here is stored on the steps, exactly as if you had chosen it in the step list (**row** can only be
+chosen here).
 
 **Phases** name the parts of a walkthrough, such as "sign up", "verify identity" and "first payment". Select the
 boxes or the step a phase starts with and choose **phase…**, or click **phases** above the chart. A small panel
@@ -578,6 +600,7 @@ of its first step up to the step after its last, so a step you add by hand in be
 | move one step to another box | drag its number onto that box, or **put it on…** |
 | take a change back | **⌘Z** (Ctrl+Z), or **undo** above the chart |
 | keep the main way through on one row | **row** for a box (under **⋯**): **next to** the screen before it, or **on a row below** |
+| say that a trip went back where no step shows it | **return to** for its last screen or step (under **⋯**, or right-click) |
 | count only the steps an activity needs | **detours: left out**: trips off the main way that come back to it drop out of the counts and the numbers: their steps get letters, such as 13a |
 | name the parts of the walkthrough | select boxes and choose **phase…**, or **phases** above the chart |
 | move the notes | **notes: under screens**, **in a key** below the chart, or **off** |
@@ -592,8 +615,11 @@ interactions are optional, so a trip off the main way that comes back to it is a
 the detours took. The numbers follow: they count on along the main way, so the last one is the count, and the steps
 of a detour have a letter after the step it leaves from. `13a`, `13b` and `13c` are the steps of a detour taken
 after step 13, with the step that comes back; the next step of the main way is 14. A trip that never comes back, or
-that only shows pop-ups the app put in the way, still counts. The export always has both numbers: `step_index`
-counts every step, `path_step` has the numbers without the detours, and `detour` marks the steps of one.
+that only shows pop-ups the app put in the way, still counts. If a trip did come back and no step shows it, say so with
+**return to**. The export always has both numbers: `step_index`
+counts every step, `path_step` has the numbers without the detours, and `detour` marks the steps of one. Returns you
+added are in it as well: `returns_to_step_id` in `steps.csv` and `steps.json`, and in `pathway.json` `returns_to` on the
+step and a move with the `origin` `researcher`, which no step leads to.
 
 A saved chart has the same rows as the one on the page, so set how many screens a row takes with the slider first. Its
 size does not change with the slider: the file is as large as the chart on the page at 100%.

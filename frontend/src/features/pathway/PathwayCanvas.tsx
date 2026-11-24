@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
 
 import { type PhaseBoundary, type PhaseSteps } from '../../api';
+import { ActionMenu, type ActionItem } from '../../components/ActionMenu';
 import { isPopupStep, popupChange } from '../../components/ScreenChoice';
 import { formatPathwayTime, type PathwayFigure } from '../../lib/pathwayFigure';
 import { record, undoChanges, type HistoryEntry } from '../../lib/pathwayHistory';
+import { returnTargets, screenName, shorten } from '../../lib/pathwayReturns';
 import { unstackAllChanges, unstackByVisitChanges, unstackStepsChanges } from '../../lib/pathwayUnstack';
 import { screenshotUrl } from '../../lib/screenshots';
 import { pathwayNumber, stepName, stepsPhrase } from '../../lib/stepNumbers';
@@ -92,31 +94,14 @@ interface MenuState {
   kind: MenuKind;
 }
 
-interface MenuBounds {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-}
-
-interface MenuItem {
-  label: string;
-  hint?: string;
-  /** Optional small screenshot thumbnail shown to the left of screen or step titles. */
-  thumb?: string;
-  run?: () => void;
-  items?: MenuItem[];
-  danger?: boolean;
-  /** Draws a thin rule above this item to separate groups in a menu or submenu. */
-  divider?: boolean;
-}
-
 interface HoveredMove {
   id: string;
   from: string;
   to: string;
   role: string;
   steps: string;
+  /** With a return the reviewer added, which no step leads to. */
+  added: boolean;
   hasJump: boolean;
 }
 
@@ -140,14 +125,6 @@ function typing(target: EventTarget | null): boolean {
 /** A key pressed on a box, a jump chip, a button or a panel of the figure's tools is theirs: Enter there presses it. */
 function onControl(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest('[data-screen], [data-jump-to], button, a, select, .pathway-toolbox, .pathway-menu, .pathway-phases'));
-}
-
-/** How much of a title the status line, the menus and the labels show; the box itself shows all of it. */
-const TITLE_IN_LABELS = 40;
-
-function shorten(text: string, length = TITLE_IN_LABELS): string {
-  const trimmed = text.trim();
-  return trimmed.length > length ? `${trimmed.slice(0, length - 1).trimEnd()}…` : trimmed;
 }
 
 /**
@@ -225,8 +202,7 @@ export function PathwayCanvas({
     },
     [stepByCandidate, screenById],
   );
-  const name = (screen: PathwayScreen): string =>
-    screen.title === `Screen ${screen.index}` ? `Screen ${screen.index}` : `Screen ${screen.index}, ${shorten(screen.title)}`;
+  const name = screenName;
   const stepsOf = (screen: PathwayScreen): PathwayStep[] =>
     screen.visits.flatMap((visit) => visit.step_ids).map((id) => stepById.get(id)).filter((step): step is PathwayStep => Boolean(step));
   const numberOfStep = (step: PathwayStep): string => pathwayNumber(step, leaveOut);
@@ -444,14 +420,14 @@ export function PathwayCanvas({
   /** Every stacking & unstacking action for a single box in one unified menu. On a plain 1-step box with no
    *  overrides, lists the destination screens directly; otherwise groups stack onto, unstack, stack automatically,
    *  and edit steps cleanly under dividers. */
-  function stackingMenuItems(box: PathwayScreen, otherBoxes: Array<{ label: string; thumb?: string; screen: PathwayScreen }>): MenuItem[] {
+  function stackingMenuItems(box: PathwayScreen, otherBoxes: Array<{ label: string; thumb?: string; screen: PathwayScreen }>): ActionItem[] {
     const steps = stepsOf(box);
     const hasOverrides = chosenScreens(box).length > 0;
     const isStacked = steps.length > 1;
     if (!isStacked && !hasOverrides) {
       return otherBoxes.map(({ label, thumb, screen }) => ({ label, thumb, run: () => stackBox(box, screen) }));
     }
-    const list: MenuItem[] = [];
+    const list: ActionItem[] = [];
     if (otherBoxes.length) {
       list.push({
         label: 'stack onto',
@@ -473,7 +449,7 @@ export function PathwayCanvas({
         });
       });
     }
-    const tail: MenuItem[] = [];
+    const tail: ActionItem[] = [];
     if (hasOverrides) tail.push({ label: 'stack automatically', run: () => stackAutomatically(box) });
     if (isStacked) tail.push({ label: 'edit steps…', run: () => editStepsOf(box) });
     tail.forEach((item, index) => list.push({ ...item, divider: index === 0 && list.length > 0 }));
@@ -482,10 +458,10 @@ export function PathwayCanvas({
 
   /** Unstack-only items for the right-click context menu (where stack onto, stack automatically, and edit steps sit
    *  directly beside unstack). */
-  function unstackSubmenuItems(box: PathwayScreen): MenuItem[] {
+  function unstackSubmenuItems(box: PathwayScreen): ActionItem[] {
     const steps = stepsOf(box);
     if (steps.length <= 1) return [];
-    const list: MenuItem[] = [{ label: `unstack all (${steps.length} steps)`, run: () => unstackAll(box) }];
+    const list: ActionItem[] = [{ label: `unstack all (${steps.length} steps)`, run: () => unstackAll(box) }];
     if (box.visits.length > 1 && steps.length > box.visits.length) {
       list.push({ label: `by visit (${box.visits.length} visits)`, run: () => unstackByVisit(box) });
     }
@@ -500,7 +476,44 @@ export function PathwayCanvas({
     return list;
   }
 
-  function rowChoiceItems(box: PathwayScreen, parent: PathwayScreen, withPrefix = false): MenuItem[] {
+  /**
+   * Where the user went back to after a step, when nothing shows it: the screens seen before, the latest first. The
+   * trip is then a detour, and what follows leaves from the screen they went back to.
+   */
+  function returnItems(step: PathwayStep | undefined, what: string): ActionItem[] {
+    if (!step) return [];
+    const said = candidateById.get(step.source_candidate_id)?.returns_to;
+    const items = returnTargets(pathway, step.source_candidate_id, leaveOut).map(
+      (target): ActionItem => ({
+        label: target.label,
+        hint: target.current ? '✓' : undefined,
+        thumb: target.imageUrl ? screenshotUrl(target.imageUrl, MENU_THUMB) : undefined,
+        run: () => void act(`${what} returns to ${target.name}`, [[step.source_candidate_id, { returns_to: target.id }]]),
+      }),
+    );
+    if (said && items.length) {
+      items.unshift({ label: 'no return', run: () => void act(`took the return from ${what} away`, [[step.source_candidate_id, { returns_to: 'auto' }]]) });
+      if (items[1]) items[1].divider = true;
+    }
+    return items;
+  }
+  /** A box goes back from where it was last left. */
+  const lastStepOf = (screen: PathwayScreen): PathwayStep | undefined => stepsOf(screen).slice(-1)[0];
+  const returnItemsOfBox = (box: PathwayScreen): ActionItem[] => {
+    const last = lastStepOf(box);
+    return returnItems(last, box.visits.length > 1 && last ? `${name(box)} (after ${numbersOf([last])})` : name(box));
+  };
+  const returnItemsOfSteps = (steps: PathwayStep[]): ActionItem[] => {
+    const last = steps.slice(-1)[0];
+    return returnItems(last, last ? numbersOf([last]) : '');
+  };
+  /** ", then back to Screen 7", for the status line. */
+  const backNote = (step: PathwayStep | undefined): string => {
+    const to = step?.returns_to ? screenById.get(step.returns_to) : undefined;
+    return to ? `, then back to ${name(to)}` : '';
+  };
+
+  function rowChoiceItems(box: PathwayScreen, parent: PathwayScreen, withPrefix = false): ActionItem[] {
     const choice = box.row_choice ?? 'automatic';
     const prefix = withPrefix ? 'row: ' : '';
     return [
@@ -511,23 +524,28 @@ export function PathwayCanvas({
   }
 
   /** Secondary actions shown in the toolbox's `⋯` overflow menu — strictly items NOT already on the floating bar. */
-  function overflowMenuItems(): MenuItem[] {
+  function overflowMenuItems(): ActionItem[] {
     if (selectedBoxes.length === 1) {
       const box = selectedBoxes[0];
       const parent = pathway.screens.find((screen) => screen.id === box.reached_from);
-      return parent ? rowChoiceItems(box, parent, true) : [];
+      const items = parent ? rowChoiceItems(box, parent, true) : [];
+      const back = returnItemsOfBox(box);
+      if (back.length) items.push({ label: 'return to', divider: items.length > 0, items: back });
+      return items;
     }
     if (selectedBoxes.length > 1) return [];
     if (selectedSteps.length) {
       const own = screenOf(selectedSteps[0].source_candidate_id);
       const first = candidateById.get(selectedSteps[0].source_candidate_id);
-      const items: MenuItem[] = [];
+      const items: ActionItem[] = [];
       if (own && stepsOf(own).length > 1) {
         items.push({ label: `unstack all (${stepsOf(own).length} steps)`, run: () => unstackAll(own) });
       }
       if (first?.screen_link) {
         items.push({ label: 'stack automatically', run: () => moveStep(selectedSteps, 'auto') });
       }
+      const back = returnItemsOfSteps(selectedSteps);
+      if (back.length) items.push({ label: 'return to', divider: items.length > 0, items: back });
       const phase = phaseOfStep(selectedSteps[0]);
       items.push(
         phase
@@ -540,7 +558,7 @@ export function PathwayCanvas({
   }
 
   // ── the actions for what is selected: toolbox triggers open focused menus; right-click opens the full menu ──
-  function menuItems(): MenuItem[] {
+  function menuItems(): ActionItem[] {
     const thumbOf = (screen: PathwayScreen): string | undefined => {
       const url = stepById.get(screen.image_step_id)?.image_url;
       return url ? screenshotUrl(url, MENU_THUMB) : undefined;
@@ -560,7 +578,7 @@ export function PathwayCanvas({
       const own = screenOf(selectedSteps[0].source_candidate_id);
       return others(own ? [own] : []).map(({ label, thumb, screen }) => ({ label, thumb, run: () => moveStep(selectedSteps, screen) }));
     }
-    const items: MenuItem[] = [];
+    const items: ActionItem[] = [];
     if (selectedBoxes.length === 1) {
       const box = selectedBoxes[0];
       const steps = stepsOf(box);
@@ -589,6 +607,8 @@ export function PathwayCanvas({
       if (parent) {
         items.push({ label: 'row', divider: true, items: rowChoiceItems(box, parent) });
       }
+      const back = returnItemsOfBox(box);
+      if (back.length) items.push({ label: 'return to', divider: !parent, items: back });
       const phase = phaseOfStep(steps[0]);
       items.push(
         phase
@@ -612,6 +632,8 @@ export function PathwayCanvas({
       }
       if (first?.screen_link) items.push({ label: 'stack automatically', run: () => moveStep(selectedSteps, 'auto') });
       if (first) items.push({ label: isPopupStep(first) ? 'not a pop-up' : 'a pop-up', hint: 'P', divider: true, run: () => togglePopup(first.id, numbersOf(selectedSteps)) });
+      const back = returnItemsOfSteps(selectedSteps);
+      if (back.length) items.push({ label: 'return to', items: back });
       const phase = phaseOfStep(selectedSteps[0]);
       items.push(phase ? { label: `change the phase ${phase.name}…`, run: () => openPhases({ phase }) } : { label: 'make a phase from here…', run: () => phaseFor(selectedSteps) });
     } else {
@@ -872,6 +894,7 @@ export function PathwayCanvas({
       to: moveEl.getAttribute('data-to') ?? '',
       role: moveEl.getAttribute('data-role') ?? 'main',
       steps: moveEl.getAttribute('data-steps') ?? '',
+      added: moveEl.hasAttribute('data-added'),
       hasJump: Boolean(moveEl.querySelector('[data-jump-to]')),
     });
   }
@@ -1123,7 +1146,9 @@ export function PathwayCanvas({
   } else if (hoveredMove) {
     const fromScreen = screenById.get(hoveredMove.from);
     const toScreen = screenById.get(hoveredMove.to);
-    const roleLabel = hoveredMove.role === 'return' ? 'return' : hoveredMove.role === 'branch' ? 'branch / detour' : 'main flow';
+    const roleLabel =
+      (hoveredMove.role === 'return' ? 'return' : hoveredMove.role === 'branch' ? 'branch / detour' : 'main flow') +
+      (hoveredMove.added ? (hoveredMove.steps ? ', and one added without a step' : ' added without a step') : '');
     const stepPrefix = hoveredMove.steps ? (hoveredMove.steps.includes(',') ? `steps ${hoveredMove.steps}: ` : `step ${hoveredMove.steps}: `) : '';
     const route = fromScreen && toScreen ? `${name(fromScreen)} → ${name(toScreen)}` : 'move';
     const jumpHint = hoveredMove.hasJump ? ' · click a jump tag to scroll there' : '';
@@ -1133,12 +1158,12 @@ export function PathwayCanvas({
     const boxSteps = stepsOf(box);
     status =
       boxSteps.length > 1
-        ? `${name(box)}: ${numbersOf(boxSteps)}. drag onto another box to stack, or use stacking to separate steps.`
-        : `${name(box)}: ${numbersOf(boxSteps)}. drag it onto another box to stack it, or right-click for more.`;
+        ? `${name(box)}: ${numbersOf(boxSteps)}${backNote(lastStepOf(box))}. drag onto another box to stack, or use stacking to separate steps.`
+        : `${name(box)}: ${numbersOf(boxSteps)}${backNote(lastStepOf(box))}. drag it onto another box to stack it, or right-click for more.`;
   } else if (selectedBoxes.length > 1) {
     status = `${selectedBoxes.length} boxes selected: stack them together, or make them a phase.`;
   } else if (selectedSteps.length) {
-    status = `${numbersOf(selectedSteps)}: drag it onto another box, or off the boxes for a screen of its own.`;
+    status = `${numbersOf(selectedSteps)}${backNote(selectedSteps.slice(-1)[0])}: drag it onto another box, or off the boxes for a screen of its own.`;
   } else {
     status = 'click a box to change it, or a step number for one step. drag a box onto another to stack them. right-click for more.';
   }
@@ -1472,7 +1497,7 @@ export function PathwayCanvas({
           ) : null}
           {toolbox}
           {menu ? (
-            <PathwayMenu
+            <ActionMenu
               bounds={(() => {
                 const scroller = stageRef.current?.parentElement?.getBoundingClientRect();
                 if (!scroller) return undefined;
@@ -1498,233 +1523,5 @@ export function PathwayCanvas({
         </span>
       ) : null}
     </>
-  );
-}
-
-/** Clamps a floating menu rectangle to stay completely visible inside the pathway canvas (or viewport if narrower). */
-function clampMenuBounds(width: number, height: number, bounds?: MenuBounds) {
-  const viewLeft = 8;
-  const viewRight = window.innerWidth - 8;
-  const viewTop = 8;
-  const viewBottom = window.innerHeight - 8;
-  const useCanvasX = Boolean(bounds && bounds.right - bounds.left >= width);
-  return {
-    minLeft: useCanvasX && bounds ? bounds.left : viewLeft,
-    maxRight: useCanvasX && bounds ? bounds.right : viewRight,
-    minTop: viewTop,
-    maxBottom: viewBottom,
-    width,
-    height,
-  };
-}
-
-/** The actions as a menu, at the pointer; an item with items of its own opens them beside it. */
-function PathwayMenu({
-  items,
-  x,
-  y,
-  flipY,
-  bounds,
-  onClose,
-}: {
-  items: MenuItem[];
-  x: number;
-  y: number;
-  flipY?: number;
-  bounds?: MenuBounds;
-  onClose: () => void;
-}) {
-  const [open, setOpen] = useState<number | null>(null);
-  const [openAnchor, setOpenAnchor] = useState<HTMLElement | null>(null);
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [pos, setPos] = useState<{ left: number; top: number }>({ left: x, top: y });
-  const bLeft = bounds?.left;
-  const bRight = bounds?.right;
-  const bTop = bounds?.top;
-  const bBottom = bounds?.bottom;
-  // Keep the menu completely visible inside the pathway canvas & viewport (flipping left/up when near edges).
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const box = element.getBoundingClientRect();
-    const rectBounds =
-      bLeft !== undefined && bRight !== undefined && bTop !== undefined && bBottom !== undefined
-        ? { left: bLeft, right: bRight, top: bTop, bottom: bBottom }
-        : undefined;
-    const { minLeft, maxRight, minTop, maxBottom } = clampMenuBounds(box.width, box.height, rectBounds);
-    let left = x;
-    if (left + box.width > maxRight) {
-      const flipped = x - box.width;
-      left = flipped >= minLeft ? flipped : maxRight - box.width;
-    }
-    left = Math.round(Math.max(minLeft, Math.min(left, Math.max(minLeft, maxRight - box.width))));
-    let top = y;
-    if (top + box.height > maxBottom) {
-      top = flipY !== undefined && flipY - box.height >= minTop ? flipY - box.height : maxBottom - box.height;
-    }
-    top = Math.round(Math.max(minTop, Math.min(top, Math.max(minTop, maxBottom - box.height))));
-    setPos((current) => (current.left === left && current.top === top ? current : { left, top }));
-  }, [x, y, flipY, bLeft, bRight, bTop, bBottom, items.length]);
-  /** Whether the open submenu was opened with the keyboard, and so takes the focus. */
-  const [byKey, setByKey] = useState(false);
-  useEffect(() => {
-    ref.current?.querySelector<HTMLButtonElement>('button')?.focus();
-  }, []);
-
-  function onKey(event: KeyboardEvent<HTMLDivElement>) {
-    // Keys pressed in the menu stay in it: the figure's own (P, Enter, the arrows) would act on the selection behind it.
-    event.stopPropagation();
-    const submenu = document.activeElement instanceof Element ? document.activeElement.closest('.pathway-submenu') : null;
-    const scope = submenu ?? ref.current;
-    const buttons = [...(scope?.querySelectorAll<HTMLButtonElement>(':scope > div > button') ?? [])];
-    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      const next = buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length];
-      next?.focus();
-    } else if (event.key === 'ArrowRight' && !submenu && index >= 0 && items[index]?.items) {
-      event.preventDefault();
-      setByKey(true);
-      setOpenAnchor((document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.pathway-menu-row') ?? null);
-      setOpen(index);
-    } else if (event.key === 'ArrowLeft' && submenu) {
-      event.preventDefault();
-      submenu.parentElement?.querySelector<HTMLButtonElement>(':scope > button')?.focus();
-      setOpen(null);
-      setOpenAnchor(null);
-    } else if (event.key === 'Escape') {
-      onClose();
-    }
-  }
-
-  return (
-    <div
-      className="pathway-menu"
-      onKeyDown={onKey}
-      onPointerDown={(event) => event.stopPropagation()}
-      ref={ref}
-      role="menu"
-      style={{ left: pos.left, top: pos.top }}
-    >
-      {items.map((item, index) => (
-        <div
-          className="pathway-menu-row"
-          key={item.label}
-          onPointerEnter={(event) => {
-            setByKey(false);
-            setOpen(item.items ? index : null);
-            setOpenAnchor(item.items ? event.currentTarget : null);
-          }}
-        >
-          {item.divider ? <div aria-hidden="true" className="pathway-menu-divider" /> : null}
-          <button
-            aria-expanded={item.items ? open === index : undefined}
-            aria-haspopup={item.items ? 'menu' : undefined}
-            className={`pathway-menu-item ${item.danger ? 'is-danger' : ''}`}
-            onClick={(event) => {
-              if (item.items) {
-                // Enter or Space (a click with no pointer) opens it with its first item in focus.
-                setByKey(event.detail === 0);
-                const nextOpen = open === index ? null : index;
-                setOpen(nextOpen);
-                setOpenAnchor(nextOpen !== null ? event.currentTarget.closest<HTMLElement>('.pathway-menu-row') : null);
-                return;
-              }
-              onClose();
-              item.run?.();
-            }}
-            role="menuitem"
-            title={item.label}
-            type="button"
-          >
-            <span className="pathway-menu-main">
-              {item.thumb ? <img alt="" className="pathway-menu-thumb" loading="lazy" src={item.thumb} /> : null}
-              <span className="pathway-menu-label">{item.label}</span>
-            </span>
-            <span className="pathway-menu-hint">{item.items ? '▸' : item.hint ?? ''}</span>
-          </button>
-          {item.items && open === index ? (
-            <PathwaySubmenu anchor={openAnchor} bounds={bounds} focusFirst={byKey} items={item.items} onClose={onClose} />
-          ) : null}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** The items of a menu item, placed fixed beside its parent row and clamped strictly inside the canvas & viewport. */
-function PathwaySubmenu({
-  anchor,
-  bounds,
-  focusFirst,
-  items,
-  onClose,
-}: {
-  anchor: HTMLElement | null;
-  bounds?: MenuBounds;
-  focusFirst: boolean;
-  items: MenuItem[];
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [pos, setPos] = useState<{ left: number; top: number }>(() => {
-    const row = anchor?.getBoundingClientRect();
-    return row ? { left: row.right + 2, top: row.top - 4 } : { left: 8, top: 8 };
-  });
-  const bLeft = bounds?.left;
-  const bRight = bounds?.right;
-  const bTop = bounds?.top;
-  const bBottom = bounds?.bottom;
-  useLayoutEffect(() => {
-    const element = ref.current;
-    const row = anchor?.getBoundingClientRect();
-    if (!element || !row) return;
-    const box = element.getBoundingClientRect();
-    const rectBounds =
-      bLeft !== undefined && bRight !== undefined && bTop !== undefined && bBottom !== undefined
-        ? { left: bLeft, right: bRight, top: bTop, bottom: bBottom }
-        : undefined;
-    const { minLeft, maxRight, minTop, maxBottom } = clampMenuBounds(box.width, box.height, rectBounds);
-    let left = row.right + 2;
-    if (left + box.width > maxRight) {
-      const flipped = row.left - box.width - 2;
-      left = flipped >= minLeft ? flipped : maxRight - box.width;
-    }
-    left = Math.round(Math.max(minLeft, Math.min(left, Math.max(minLeft, maxRight - box.width))));
-    const top = Math.round(Math.max(minTop, Math.min(row.top - 4, Math.max(minTop, maxBottom - box.height))));
-    setPos((current) => (current.left === left && current.top === top ? current : { left, top }));
-  }, [anchor, bLeft, bRight, bTop, bBottom, items.length]);
-  useEffect(() => {
-    if (focusFirst) ref.current?.querySelector<HTMLButtonElement>('button')?.focus();
-  }, [focusFirst]);
-  return (
-    <div
-      className="pathway-menu pathway-submenu"
-      ref={ref}
-      role="menu"
-      style={{ left: pos.left, top: pos.top }}
-    >
-      {items.map((child) => (
-        <div className="pathway-menu-row" key={child.label}>
-          {child.divider ? <div aria-hidden="true" className="pathway-menu-divider" /> : null}
-          <button
-            className="pathway-menu-item"
-            onClick={() => {
-              onClose();
-              child.run?.();
-            }}
-            role="menuitem"
-            title={child.label}
-            type="button"
-          >
-            <span className="pathway-menu-main">
-              {child.thumb ? <img alt="" className="pathway-menu-thumb" loading="lazy" src={child.thumb} /> : null}
-              <span className="pathway-menu-label">{child.label}</span>
-            </span>
-            {child.hint ? <span className="pathway-menu-hint">{child.hint}</span> : null}
-          </button>
-        </div>
-      ))}
-    </div>
   );
 }

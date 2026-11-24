@@ -23,6 +23,13 @@ export function shouldIgnoreContextMenu(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest('input, textarea'));
 }
 
+/** Whether a place in the window is on selected text, where the browser's own menu is to copy it with. */
+export function onSelectedText(x: number, y: number): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) return false;
+  return [...selection.getRangeAt(0).getClientRects()].some((box) => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom);
+}
+
 /** Computes a floating menu anchor aligned to a row's `⋯` trigger (or the row itself) for keyboard ContextMenu / Shift+F10. */
 export function keyboardMenuAnchor(row: HTMLElement, triggerSelector: string, id: string): ContextMenuState {
   const trigger = row.querySelector<HTMLElement>(triggerSelector);

@@ -30,3 +30,12 @@ test('automatic and an empty title count as no say, and a step that is gone is s
   assert.deepEqual(undoChanges(entry, [step('a', { pathway_row: null })]), { changes: [['a', { pathway_row: 'below' }]], kept: 0 });
   assert.deepEqual(undoChanges(entry, [step('a', { pathway_row: 'below' })]), { changes: [], kept: 0 });
 });
+
+test('a return to an earlier screen is taken back, to the screen it said before or to none', () => {
+  const entry = record('Screen 3 returns to Screen 2', [step('a'), step('b', { returns_to: 'x' })], [['a', { returns_to: 'b' }], ['b', { returns_to: 'auto' }]]);
+  assert.deepEqual(undoChanges(entry, [step('a', { returns_to: 'b' }), step('b', { returns_to: null })]), {
+    changes: [['a', { returns_to: 'auto' }], ['b', { returns_to: 'x' }]], kept: 0,
+  });
+  // someone else has said otherwise since: that stays
+  assert.deepEqual(undoChanges(entry, [step('a', { returns_to: 'z' }), step('b', { returns_to: 'x' })]), { changes: [], kept: 1 });
+});

@@ -226,6 +226,8 @@ export interface CandidateFrame {
   /** Where the step's box goes in the pathway figure: on the row of the box it was reached from, or on a row of
    *  its own below. Empty leaves it to the layout; the box's first step with a say decides. */
   pathway_row?: PathwayRowChoice | null;
+  /** The reviewer's say that after this step the user went back to an earlier screen: the id of a step on it. */
+  returns_to?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -239,6 +241,8 @@ export interface CandidateChanges {
   screen_link?: string;
   screen_kind?: 'auto' | 'screen' | 'popup';
   pathway_row?: 'auto' | PathwayRowChoice;
+  /** `auto` (no say), or the id of an earlier step of the run. */
+  returns_to?: string;
   /** In a shared account, the text this browser began from: if someone else saved other text meanwhile, the
    *  change is refused instead of written over theirs. */
   previous_title?: string;
@@ -382,7 +386,7 @@ export interface UsageReport extends ReportWindow {
     exports: number;
     figures: number;
     corrections: number;
-    corrections_by_choice: Partial<Record<'same_screen' | 'new_screen' | 'automatic' | 'popup' | 'not_popup' | 'popup_automatic', number>>;
+    corrections_by_choice: Partial<Record<'same_screen' | 'new_screen' | 'automatic' | 'popup' | 'not_popup' | 'popup_automatic' | 'return' | 'no_return', number>>;
     comparisons: number;
     boxes_switched: number;
     guide_opened: number;
@@ -501,6 +505,8 @@ export interface PathwayStep {
   detour?: boolean;
   /** The number along the main way: "13", or "13a" for the first step of a detour taken after step 13. */
   path_step?: string;
+  /** The screen the user went back to after this step, as the reviewer said (its id). */
+  returns_to?: string | null;
   source_candidate_id: string;
 }
 
@@ -553,12 +559,13 @@ export interface PathwayPhase {
 }
 
 export interface PathwayPass {
-  /** The step the move arrives at. */
-  step_id: string;
-  step_index: number;
+  /** The step the move arrives at; none for a return the reviewer added (`origin`: researcher). */
+  step_id: string | null;
+  step_index: number | null;
   from_step_id: string;
-  at_ms: number;
+  at_ms: number | null;
   transition_type?: string | null;
+  origin?: 'recorded' | 'researcher';
 }
 
 export interface PathwayTransition {

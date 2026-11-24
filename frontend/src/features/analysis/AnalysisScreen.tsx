@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
 import { busyElsewhere, busyRunIds } from '../../lib/live';
 import { useLive } from '../live/LiveProvider';
-import { absoluteApiUrl } from '../../api';
+import { absoluteApiUrl, setRunPhase } from '../../api';
 import { screenshotUrl } from '../../lib/screenshots';
 import { DecisionIcon } from '../../components/CandidateCard';
+import { onSelectedText, shouldIgnoreContextMenu } from '../../components/ContextMenu';
 import { CandidateGallery } from '../../components/CandidateGallery';
 import { EditableName } from '../../components/EditableName';
 import {
@@ -62,6 +64,7 @@ import { AnalysisParametersPanel } from './components/AnalysisParametersPanel';
 import { AnalysisTasksPanel } from './components/AnalysisTasksPanel';
 import { AnalysisVideosPanel } from './components/AnalysisVideosPanel';
 import { RunComparison, type CarryOverPair } from './components/RunComparison';
+import { StepMenu } from './components/StepMenu';
 import { defaultComparisonPair } from '../../lib/runComparison';
 import type { ImportQueueItem } from '../../lib/importQueue';
 import type { WorkflowStage } from '../../lib/workflow';
@@ -88,10 +91,13 @@ import { useElementWidth } from './useElementWidth';
 import { useHoverClips } from './useHoverClips';
 import { usePlaybackHighlight } from './usePlaybackHighlight';
 import { track } from '../../lib/usage';
-import { withPhaseHeaders } from '../../components/PhaseChoice';
+import { phaseAt, withPhaseHeaders } from '../../components/PhaseChoice';
+import { PhaseNamePopover } from '../../components/PhaseNamePopover';
+import { isPopupStep, popupChange } from '../../components/ScreenChoice';
 import { ReviewCard, ReviewRow } from '../../components/ReviewSteps';
 import { StepNumbersProvider } from '../../components/StepNumbers';
-import { reviewNumbers, START } from '../../lib/stepNumbers';
+import type { StepMenuContext } from '../../lib/stepMenu';
+import { candidateNumber, returnLinks, reviewNumbers, START } from '../../lib/stepNumbers';
 import { useStable } from '../../lib/useStable';
 
 
@@ -158,6 +164,8 @@ export interface AnalysisScreenProps {
     candidateId: string,
     payload: CandidateChanges,
   ) => void;
+  /** Changes to several steps at once. */
+  onUpdateCandidates: (runId: string, recordingId: string, changes: Array<[string, CandidateChanges]>) => Promise<void>;
   ocrAvailable: boolean;
   ocrStatus: OcrStatus | null;
   ocrStatusMessage: string | null;
@@ -285,6 +293,7 @@ export function AnalysisScreen({
   onSelectRun,
   onStartRun,
   onUpdateCandidate,
+  onUpdateCandidates,
   ocrAvailable,
   ocrStatus,
   ocrStatusMessage,
@@ -321,6 +330,23 @@ export function AnalysisScreen({
   // keyboard's x reads it from a handler made once.
   const selectionAnchorRef = useRef<string | null>(null);
   const [bulkCandidatePending, setBulkCandidatePending] = useState(false);
+  // The right-click menu of a step (or of the selected steps, when it is one of several), and the naming of a phase
+  // that it can lead to.
+  const [stepMenu, setStepMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const closeStepMenu = useCallback(() => setStepMenu(null), []);
+  // Whether the pointer came down on selected text. By the time the menu is asked for it is too late to tell: on a Mac,
+  // a right click selects the word it is on first.
+  const pressedTextRef = useRef(false);
+  useEffect(() => {
+    const note = (event: PointerEvent) => {
+      pressedTextRef.current = onSelectedText(event.clientX, event.clientY);
+    };
+    window.addEventListener('pointerdown', note, true);
+    return () => window.removeEventListener('pointerdown', note, true);
+  }, []);
+  const [phaseNaming, setPhaseNaming] = useState<{ first: CandidateFrame; last: CandidateFrame; x: number; y: number; problem?: string } | null>(null);
+  const closePhaseNaming = useCallback(() => setPhaseNaming(null), []);
+  const queryClient = useQueryClient();
   const [queuedManualMarkItems, setQueuedManualMarkItems] = useState<PendingManualMark[]>([]);
   const [manualCapturePulseToken, setManualCapturePulseToken] = useState(0);
   const [expandedAnnotationCandidateId, setExpandedAnnotationCandidateId] = useState<string | null>(null);
@@ -548,6 +574,7 @@ export function AnalysisScreen({
     () => reviewNumbers(selectedRun?.candidates ?? [], selectedRun?.accepted_steps ?? []),
     [selectedRun?.candidates, selectedRun?.accepted_steps],
   );
+  const backLinks = useMemo(() => returnLinks(selectedRun?.candidates ?? [], stepNumbers), [selectedRun?.candidates, stepNumbers]);
   const stepPhases = useMemo(
     () => (selectedRun ? { runId: selectedRun.summary.id, boundaries: selectedRun.phases } : undefined),
     [selectedRun?.summary.id, selectedRun?.phases],
@@ -871,6 +898,17 @@ export function AnalysisScreen({
         return;
       }
 
+      if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+        // The lists of tasks and videos have menus of their own.
+        const review = document.getElementById('analysis-candidate-review');
+        const elsewhere = event.target instanceof Element && event.target !== document.body && !review?.contains(event.target);
+        const box = document.getElementById(`candidate-${activeCandidate.id}`)?.getBoundingClientRect();
+        if (elsewhere || !box) return;
+        event.preventDefault();
+        openStepMenu(activeCandidate.id, box.left + 18, Math.max(12, box.top + 18));
+        return;
+      }
+
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
         handleStepCandidate(-1);
@@ -904,7 +942,7 @@ export function AnalysisScreen({
 
     window.addEventListener('keydown', handleReviewKeydown);
     return () => window.removeEventListener('keydown', handleReviewKeydown);
-  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedCandidateIds.length, selectedRun?.summary.id, showPathway, stepLayout.view]);
+  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedCandidateIds.length, selectedRun?.summary.id, selectedShownCandidateIds, showPathway, stepLayout.view]);
 
   useEffect(() => {
     if (!previewVideoUrl) {
@@ -1164,6 +1202,16 @@ export function AnalysisScreen({
     setBulkCandidatePending(true);
     try {
       await onBulkUpdateCandidates(selectedRun.summary.id, selectedRun.summary.recording_id, changing, status);
+    } finally {
+      setBulkCandidatePending(false);
+    }
+  }
+
+  async function handleUpdateSelectedCandidates(changes: Array<[string, CandidateChanges]>) {
+    if (!selectedRun || !changes.length) return;
+    setBulkCandidatePending(true);
+    try {
+      await onUpdateCandidates(selectedRun.summary.id, selectedRun.summary.recording_id, changes);
     } finally {
       setBulkCandidatePending(false);
     }
@@ -1461,6 +1509,88 @@ export function AnalysisScreen({
     onSetTaskFilter: setTaskFilter,
     onToggleTaskSelection: toggleTaskSelection,
   });
+
+  // ── the right-click menu of the steps ──
+  function openStepMenu(candidateId: string, x: number, y: number) {
+    hoverClips.stop();
+    setPhaseNaming(null);
+    // One of several selected steps stands for all of them; any other is the one it is about.
+    if (!(selectedShownCandidateIds.length > 1 && selectedShownCandidateIds.includes(candidateId))) setActiveCandidateId(candidateId);
+    setStepMenu({ id: candidateId, x, y });
+  }
+
+  /** For all the views: a card, a row or a thumbnail, or in the gallery the large screenshot and what is beside it. */
+  function handleStepContextMenu(event: React.MouseEvent<HTMLElement>) {
+    const target = event.target instanceof Element ? event.target : null;
+    const own = target?.closest('[data-step-id], [id^="candidate-"]');
+    if (!target || !own || (shouldIgnoreContextMenu(target) && !target.closest('input[type="checkbox"]'))) return;
+    if (pressedTextRef.current) return;
+    event.preventDefault();
+    window.getSelection()?.removeAllRanges(); // the word the click selected
+    openStepMenu(own.getAttribute('data-step-id') ?? own.id.slice('candidate-'.length), event.clientX, event.clientY);
+  }
+
+  /** The accepted steps from one to another, in a phase or ('') in none; `null` asks for the name of a new one. */
+  async function setPhaseOfSteps(first: CandidateFrame, last: CandidateFrame, name: string) {
+    if (!selectedRun) return;
+    await setRunPhase(selectedRun.summary.id, { name, first_step: first.id, last_step: last.id });
+    await Promise.all(
+      [['run', selectedRun.summary.id], ['pathway', selectedRun.summary.id], ['recording', selectedRun.summary.recording_id]].map((queryKey) =>
+        queryClient.invalidateQueries({ queryKey }),
+      ),
+    );
+  }
+
+  function stepMenuContext(step: CandidateFrame, at: { x: number; y: number }): Omit<StepMenuContext, 'returns'> {
+    const steps = selectedRun?.candidates ?? [];
+    const selected = new Set(selectedShownCandidateIds);
+    return {
+      step,
+      selected: steps.filter((each) => selected.has(each.id)),
+      steps,
+      view: stepLayout.view,
+      annotating: expandedAnnotationCandidateId === step.id,
+      anchor: selectionAnchorRef.current,
+      phases: [...new Set((selectedRun?.phases ?? []).map((boundary) => boundary.name).filter(Boolean))],
+      phaseAt: (ms) => phaseAt(selectedRun?.phases, ms),
+      numberOf: (candidate) => stepNumbers.get(candidate.id) ?? candidateNumber(candidate.detector_index),
+      similar: candidateSimilarityLinks.get(step.id),
+      back: backLinks.get(step.id),
+      thumbOf: (imageUrl) => screenshotUrl(imageUrl, 34),
+      isPopup: isPopupStep,
+      popupChange,
+      actions: {
+        setStatus: handleCandidateStatusChange,
+        setStatusOfSelected: (status) => void handleBulkCandidateStatusChange(status),
+        update: onUpdateCandidate,
+        updateSeveral: (changes) => void handleUpdateSelectedCandidates(changes),
+        setPhase: (first, last, name) => {
+          if (name === null) setPhaseNaming({ first, last, ...at });
+          else {
+            void setPhaseOfSteps(first, last, name).catch((error: unknown) =>
+              setPhaseNaming({ first, last, ...at, problem: error instanceof Error ? error.message.toLocaleLowerCase() : 'could not save the phase.' }),
+            );
+          }
+        },
+        playFromHere: handlePlayFromHere,
+        openScreenshot: (candidate) => window.open(screenshotUrl(candidate.image_url), '_blank', 'noopener'),
+        annotate: (candidate) => {
+          if (stepLayout.view === 'grid') handleToggleCandidateAnnotation(candidate.id);
+          else {
+            const field = stepLayout.view === 'list' ? `#candidate-${CSS.escape(candidate.id)} .candidate-row-title input` : '.candidate-gallery-title-field';
+            window.setTimeout(() => document.querySelector<HTMLElement>(field)?.focus(), 0);
+          }
+        },
+        jumpTo: (targetId) => activateCandidate(targetId.slice('candidate-'.length), { reveal: true }),
+        toggleSelection: toggleCandidateSelection,
+        invertSelection: () => setSelectedCandidateIds(invertSelection(selectedCandidateIds, shownCandidateIds)),
+        clearSelection: () => {
+          selectionAnchorRef.current = null;
+          setSelectedCandidateIds([]);
+        },
+      },
+    };
+  }
 
   function handleStepCandidate(direction: -1 | 1) {
     if (!filteredCandidates.length) {
@@ -2367,8 +2497,9 @@ export function AnalysisScreen({
                     </div>
                     {canReviewCandidates && (
                       <span
-                        aria-label="keyboard shortcuts: a to accept, r to reject, u to reset to undecided, x to select (shift+x for a range), p to play from the step, arrow keys to step"
+                        aria-label="keyboard shortcuts: a to accept, r to reject, u to reset to undecided, x to select (shift+x for a range), p to play from the step, arrow keys to step, shift+F10 for a menu of every action"
                         className="candidate-review-key-hint"
+                        title="right-click a step for a menu of every action, or one of several selected steps for all of them"
                       >
                         <span><span className="candidate-key-badge">a</span> accept</span>
                         <span><span className="candidate-key-badge">r</span> reject</span>
@@ -2527,6 +2658,8 @@ export function AnalysisScreen({
                   <CandidateGallery
                     activeCandidateId={activeCandidateId}
                     allSteps={selectedRun.candidates}
+                    onContextMenu={handleStepContextMenu}
+                    backLinks={backLinks}
                     aspect={stepAspect}
                     candidates={filteredCandidates}
                     durationMs={selectedRecordingSummary?.duration_ms}
@@ -2557,6 +2690,7 @@ export function AnalysisScreen({
                     aria-label="steps"
                     className="candidate-list"
                     id="analysis-candidate-review"
+                    onContextMenu={handleStepContextMenu}
                     role="table"
                     style={{ '--candidate-thumb-width': `${stepThumb.width}px` } as CSSProperties}
                   >
@@ -2598,6 +2732,7 @@ export function AnalysisScreen({
                           isSelected={selectedShown.has(candidate.id)}
                           key={candidate.id}
                           phases={stepPhases}
+                          backLink={backLinks.get(candidate.id)}
                           similarLink={candidateSimilarityLinks.get(candidate.id)}
                           steps={selectedRun.candidates}
                           thumbHeight={stepThumb.height}
@@ -2610,6 +2745,7 @@ export function AnalysisScreen({
                   <div
                     className={`candidate-grid sized ${fittedStepGrid ? 'fitted' : ''} ${filteredCandidates.length < 3 ? 'sparse' : ''}`}
                     id="analysis-candidate-review"
+                    onContextMenu={handleStepContextMenu}
                     style={
                       fittedStepGrid
                         ? ({ '--candidate-columns': fittedStepGrid.columns } as CSSProperties)
@@ -2632,6 +2768,7 @@ export function AnalysisScreen({
                           phases={stepPhases}
                           recordingHeight={selectedRecordingSummary?.height}
                           recordingWidth={selectedRecordingSummary?.width}
+                          backLink={backLinks.get(candidate.id)}
                           similarLink={candidateSimilarityLinks.get(candidate.id)}
                           steps={selectedRun.candidates}
                         />
@@ -2649,6 +2786,25 @@ export function AnalysisScreen({
                         : `no ${activeCandidateFilter} steps in this view.`}
                   </p>
                 )}
+                {(() => {
+                  const step = stepMenu ? selectedRun.candidates.find((candidate) => candidate.id === stepMenu.id) : undefined;
+                  if (!stepMenu || !step) return null;
+                  return <StepMenu context={stepMenuContext(step, stepMenu)} onClose={closeStepMenu} run={selectedRun} x={stepMenu.x} y={stepMenu.y} />;
+                })()}
+                {phaseNaming ? (
+                  <PhaseNamePopover
+                    label={
+                      phaseNaming.first.id === phaseNaming.last.id
+                        ? stepNumbers.get(phaseNaming.first.id)?.name ?? 'this step'
+                        : `from ${stepNumbers.get(phaseNaming.first.id)?.name ?? 'step'} to ${stepNumbers.get(phaseNaming.last.id)?.name ?? 'step'}`
+                    }
+                    onClose={closePhaseNaming}
+                    onSave={(name) => setPhaseOfSteps(phaseNaming.first, phaseNaming.last, name)}
+                    problem={phaseNaming.problem}
+                    x={phaseNaming.x}
+                    y={phaseNaming.y}
+                  />
+                ) : null}
               </StepNumbersProvider>
             ) : null}
           </section>

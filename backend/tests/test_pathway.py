@@ -11,7 +11,7 @@ from app.services.pathway import _letters, _mark_detours, _set_continuations, bu
 
 def _candidate(index: int, label: str | None, *, status: str = 'accepted', similar_to: int | None = None,
                title: str | None = None, origin: str = 'detected', dwell: int | None = 1_000,
-               link: int | str | None = None, kind: str | None = None) -> dict:
+               link: int | str | None = None, kind: str | None = None, back: int | None = None) -> dict:
     return {
         'id': f'c{index}',
         'detector_index': index,
@@ -28,6 +28,7 @@ def _candidate(index: int, label: str | None, *, status: str = 'accepted', simil
         'similar_to_candidate_id': None if similar_to is None else f'c{similar_to}',
         'screen_link': f'c{link}' if isinstance(link, int) else link,
         'screen_kind': kind,
+        'returns_to': None if back is None else f'c{back}',
     }
 
 
@@ -565,3 +566,133 @@ def test_the_numbers_start_at_the_opening_screen_only_when_it_is_there() -> None
     rows = build_all_candidate_rows('demo', [_candidate(2, 'opening_screen', status='rejected'), *journey[1:]])
     assert [(row['step_id'], row['step_index']) for row in rows] == [('candidate-000', 0), ('candidate-001', 1), ('candidate-002', 2)]
     assert [row['step_index'] for row in build_all_candidate_rows('demo', journey[1:])] == [1, 2]
+
+
+def _ways(pathway: dict) -> list[str]:
+    return [step['path_step'] for step in pathway['steps']]
+
+
+def test_the_reviewer_can_say_that_a_step_goes_back_to_an_earlier_screen() -> None:
+    # Home, List, Help, Detail, Done: nothing shows it, but from Help the user went back to the List
+    candidates = [_candidate(1, 'opening_screen'), _candidate(2, 'navigation'), _candidate(3, 'navigation', back=2),
+                  _candidate(4, 'navigation'), _candidate(5, 'navigation')]
+    pathway = _pathway(candidates)
+    assert [screen['reached_from'] for screen in pathway['screens']] == [None, 'screen-01', 'screen-02', 'screen-02', 'screen-04']
+    assert _moves(pathway) == [
+        ('screen-01', 'screen-02', 'forward', [1]),
+        ('screen-02', 'screen-03', 'forward', [2]),
+        ('screen-03', 'screen-02', 'return', [None]),
+        ('screen-02', 'screen-04', 'forward', [3]),
+        ('screen-04', 'screen-05', 'forward', [4]),
+    ]
+    back = pathway['transitions'][2]['passes'][0]
+    assert back == {'step_id': None, 'step_index': None, 'from_step_id': 'step-002', 'at_ms': None, 'transition_type': None,
+                    'origin': 'researcher'}
+    assert pathway['transitions'][3]['passes'][0]['origin'] == 'recorded'
+    assert [step['returns_to'] for step in pathway['steps']] == [None, None, 'screen-02', None, None]
+    # so Help is an optional detour from the main way, and no step is added
+    assert [screen['main'] for screen in pathway['screens']] == [True, True, False, True, True]
+    assert _ways(pathway) == ['0', '1', '1a', '2', '3']
+    assert (pathway['step_count'], pathway['main_step_count']) == (4, 3)
+    # the same with a box per step
+    assert _moves(_pathway(candidates, 'steps')) == _moves(pathway)
+
+    # without it, Help is on the way to the Detail
+    without = _pathway([{**candidate, 'returns_to': None} for candidate in candidates])
+    assert _ways(without) == ['0', '1', '2', '3', '4'] and all(screen['main'] for screen in without['screens'])
+
+
+def test_a_trip_the_reviewer_said_comes_back_is_never_the_main_way() -> None:
+    # Home, List, then A, B, C and back to the List: longer than what follows (Done)
+    def journey(back: int | None, **last) -> list[dict]:
+        return [_candidate(1, 'opening_screen'), _candidate(2, 'navigation'), _candidate(3, 'navigation'), _candidate(4, 'navigation'),
+                _candidate(5, 'navigation', back=back), _candidate(6, 'navigation', **last)]
+
+    pathway = _pathway(journey(2))
+    assert [screen['continues_with'] for screen in pathway['screens']][:2] == ['screen-02', 'screen-06']
+    assert _ways(pathway) == ['0', '1', '1a', '1b', '1c', '2']
+
+    # with a step that shows the List again, the return is recorded: there is no move besides it, and it is a detour too
+    shown = [*journey(None, similar_to=2), _candidate(7, 'navigation')]
+    assert _ways(_pathway(shown)) == ['0', '1', '2', '3', '4', '5', '6']  # the trip is the longer way on
+    said = _pathway([*journey(2, similar_to=2), _candidate(7, 'navigation')])
+    assert _ways(said) == ['0', '1', '1a', '1b', '1c', '1d', '2']
+    assert _moves(said)[4] == ('screen-05', 'screen-02', 'return', [5]) and len(said['transitions']) == 6
+
+    # a trip the recording ends on comes back as well, when the reviewer says so
+    ends = _pathway(journey(2)[:5])
+    assert _ways(ends) == ['0', '1', '1a', '1b', '1c'] and _moves(ends)[-1] == ('screen-05', 'screen-02', 'return', [None])
+    assert _ways(_pathway(journey(None)[:5])) == ['0', '1', '2', '3', '4']
+
+    # ... unless they put it on the row: then that is the main way
+    on_the_row = journey(2)
+    on_the_row[2]['pathway_row'] = 'continue'
+    assert _ways(_pathway(on_the_row)) == ['0', '1', '2', '3', '4', '5']
+    assert _moves(_pathway(on_the_row))[4] == ('screen-05', 'screen-02', 'return', [None])
+
+    # a pop-up in the way is not optional, also when it goes back
+    popup = [_candidate(1, 'opening_screen'), _candidate(2, 'modal', back=1), _candidate(3, 'navigation')]
+    assert _ways(_pathway(popup)) == ['0', '1', '2']
+    assert _moves(_pathway(popup))[1:] == [('screen-02', 'screen-01', 'return', [None]), ('screen-01', 'screen-03', 'forward', [2])]
+
+
+def test_going_back_needs_a_screen_seen_before() -> None:
+    def moves(**step) -> list:
+        return _moves(_pathway([_candidate(1, 'opening_screen'), _candidate(2, 'navigation'), _candidate(3, 'scroll', **step),
+                                _candidate(4, 'navigation')]))
+
+    plain = moves()
+    assert moves(back=2) == plain  # its own screen
+    assert moves(back=4) == plain  # a later one
+    assert moves(back=1)[1] == ('screen-02', 'screen-01', 'return', [None])
+    # the step pointed at was rejected: another that shows its screen will do, or else there is nothing to go back to
+    rejected = [_candidate(1, 'opening_screen', status='rejected'), _candidate(2, 'navigation'), _candidate(3, 'navigation', back=1)]
+    assert _pathway(rejected)['steps'][-1]['returns_to'] is None
+    twin = [_candidate(1, 'opening_screen', status='rejected'), _candidate(2, 'scroll'), _candidate(3, 'navigation', back=1)]
+    assert _pathway(twin)['steps'][-1]['returns_to'] == 'screen-01'
+    # a step that was rejected goes nowhere
+    gone = [_candidate(1, 'opening_screen'), _candidate(2, 'navigation', status='rejected', back=1), _candidate(3, 'navigation')]
+    assert len(_moves(_pathway(gone))) == 1
+    # back, and then on the same screen once more: a visit of its own
+    again = _pathway([_candidate(1, 'opening_screen'), _candidate(2, 'navigation', back=1), _candidate(3, 'scroll')])
+    assert [visit['step_ids'] for visit in again['screens'][1]['visits']] == [['step-001'], ['step-002']]
+    assert _moves(again) == [('screen-01', 'screen-02', 'forward', [1, 2]), ('screen-02', 'screen-01', 'return', [None])]
+
+
+def test_a_return_is_saved_checked_and_exported(client: TestClient, video_factory, wait_for_run) -> None:
+    detail = _import_run(client, video_factory, wait_for_run)
+    run_id = detail['summary']['id']
+    first, second, third = (candidate['id'] for candidate in sorted(detail['candidates'], key=lambda c: c['timestamp_ms']))
+    for candidate in (first, second, third):
+        client.patch(f'/candidates/{candidate}', json={'status': 'accepted'})
+    client.patch(f'/candidates/{third}', json={'screen_link': 'new'})  # red again, but a screen of its own
+
+    assert client.patch(f'/candidates/{second}', json={'returns_to': first}).json()['returns_to'] == first
+    for other in ('missing', second, third):  # no such step, itself, a later one
+        assert client.patch(f'/candidates/{second}', json={'returns_to': other}).status_code == 422
+    pathway = client.get(f'/runs/{run_id}/pathway').json()
+    assert [screen['reached_from'] for screen in pathway['screens']] == [None, 'screen-01', 'screen-01']
+    assert pathway['steps'][1]['returns_to'] == 'screen-01'
+    assert [(p['origin'], p['step_id'], p['from_step_id']) for t in pathway['transitions'] for p in t['passes']] == [
+        ('recorded', 'step-001', 'step-000'), ('researcher', None, 'step-001'), ('recorded', 'step-002', 'step-001')]
+
+    export = client.post(f'/runs/{run_id}/export', json={'mode': 'accepted'})
+    import app.storage as storage
+
+    bundle = storage.DATA_ROOT / export.json()['output_dir']
+    rows = list(csv.DictReader((bundle / 'steps.csv').open(encoding='utf-8')))
+    assert [row['returns_to_step_id'] for row in rows] == ['', 'step-000', '']
+    assert [row['path_step'] for row in rows] == ['0', '0a', '1'] and [row['detour'] for row in rows] == ['false', 'true', 'false']
+    manifest = json.loads((bundle / 'steps.json').read_text())
+    assert [step['returns_to_step_id'] for step in manifest['steps']] == [None, 'step-000', None]
+    assert 'returns_to_step_id' in manifest['field_notes']
+    exported = json.loads((bundle / 'pathway.json').read_text())
+    assert exported['transitions'] == pathway['transitions'] and exported['steps'][1]['returns_to'] == 'screen-01'
+    assert 'researcher' in exported['field_notes']['transitions.passes'] and 'steps.returns_to' in exported['field_notes']
+
+    # kept when a step is added by hand (the steps are numbered again), and taken back
+    client.post(f'/runs/{run_id}/candidates/manual', json={'timestamp_ms': 100})
+    kept = {candidate['id']: candidate for candidate in client.get(f'/runs/{run_id}').json()['candidates']}
+    assert kept[second]['returns_to'] == first
+    assert client.patch(f'/candidates/{second}', json={'returns_to': 'auto'}).json()['returns_to'] is None
+    assert client.get(f'/runs/{run_id}/pathway').json()['steps'][1]['returns_to'] is None

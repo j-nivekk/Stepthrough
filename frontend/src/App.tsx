@@ -1631,6 +1631,24 @@ function App({ session, onSessionChange }: AppProps) {
     return failedCandidateIds;
   }
 
+  /** A change to each of several steps, in their order, and then one look at the result. */
+  async function handleUpdateCandidates(runId: string, recordingId: string, changes: Array<[string, CandidateChanges]>): Promise<void> {
+    clearAnalysisMessages();
+    let done = 0;
+    try {
+      for (const [candidateId, payload] of changes) {
+        await updateCandidate(candidateId, payload);
+        done += 1;
+      }
+      setAnalysisActionMessage(`changed ${done} ${done === 1 ? 'step' : 'steps'}.`);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Could not update the selected steps.';
+      setAppError(done ? `${reason} ${done} of ${changes.length} steps were changed.` : reason);
+    } finally {
+      await refreshRunQueries(runId, recordingId);
+    }
+  }
+
   async function handleExportTaskRuns(runIds: string[]): Promise<void> {
     const uniqueRunIds = Array.from(new Set(runIds));
     const tasks = uniqueRunIds
@@ -1990,6 +2008,7 @@ function App({ session, onSessionChange }: AppProps) {
         onSelectRun={handleSelectTaskRun}
         onStartRun={handleStartAnalysisRun}
         onUpdateCandidate={(candidateId, payload) => updateCandidateMutation.mutate({ candidateId, payload })}
+        onUpdateCandidates={handleUpdateCandidates}
         ocrAvailable={ocrAvailable}
         ocrStatus={ocrStatus}
         ocrStatusMessage={ocrStatusMessage}

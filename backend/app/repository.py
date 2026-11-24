@@ -884,6 +884,7 @@ def duplicate_run_record(
                     "screen_link": candidate.get("screen_link"),
                     "screen_kind": candidate.get("screen_kind"),
                     "pathway_row": candidate.get("pathway_row"),
+                    "returns_to": candidate.get("returns_to"),
                     "score_breakdown": (
                         candidate.get("score_breakdown")
                         if isinstance(candidate.get("score_breakdown"), str)
@@ -944,12 +945,12 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
                     id, run_id, recording_id, detector_index, candidate_origin, timestamp_ms, timestamp_tc, image_path,
                     scene_score, status, title, notes, image_hash, perceptual_hash, histogram_signature, ocr_text,
                     revisit_group_id, similar_to_candidate_id, similarity_distance, score_breakdown, screen_link, screen_kind,
-                    pathway_row, created_at, updated_at
+                    pathway_row, returns_to, created_at, updated_at
                 ) VALUES (
                     :id, :run_id, :recording_id, :detector_index, :candidate_origin, :timestamp_ms, :timestamp_tc, :image_path,
                     :scene_score, :status, :title, :notes, :image_hash, :perceptual_hash, :histogram_signature, :ocr_text,
                     :revisit_group_id, :similar_to_candidate_id, :similarity_distance, :score_breakdown, :screen_link, :screen_kind,
-                    :pathway_row, :created_at, :updated_at
+                    :pathway_row, :returns_to, :created_at, :updated_at
                 )
                 """,
                 [
@@ -961,6 +962,7 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
                         "screen_link": candidate.get("screen_link"),
                         "screen_kind": candidate.get("screen_kind"),
                         "pathway_row": candidate.get("pathway_row"),
+                        "returns_to": candidate.get("returns_to"),
                         "score_breakdown": (
                             candidate.get("score_breakdown")
                             if isinstance(candidate.get("score_breakdown"), str)

@@ -28,6 +28,8 @@ const CORRECTION_NAMES: Record<string, string> = {
   popup: 'a pop-up',
   not_popup: 'not a pop-up',
   popup_automatic: 'pop-up back to automatic',
+  return: 'returns to an earlier screen',
+  no_return: 'return taken away',
 };
 
 /** The grid's shades, for minutes making changes on a day: checked with the dataviz validator (ordinal, one hue,

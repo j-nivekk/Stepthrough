@@ -600,6 +600,7 @@ def _serialize_candidate(row: dict) -> CandidateFrameResponse:
         screen_link=row.get("screen_link"),
         screen_kind=row.get("screen_kind"),
         pathway_row=row.get("pathway_row"),
+        returns_to=row.get("returns_to"),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -1536,6 +1537,7 @@ def runs_duplicate(run_id: str, user: CurrentUser, client: SharedClient = None) 
                         "image_path": image_path,
                         "similar_to_candidate_id": id_map.get(candidate.get("similar_to_candidate_id")),
                         "screen_link": screen_link if screen_link in (None, "new") else id_map.get(screen_link),
+                        "returns_to": id_map.get(candidate.get("returns_to")),
                     }
                 )
 
@@ -1729,6 +1731,7 @@ def candidates_update(
     corrections = [
         *([{"auto": "automatic", "new": "new_screen"}.get(updates["screen_link"], "same_screen")] if "screen_link" in updates else []),
         *([{"auto": "popup_automatic", "screen": "not_popup", "popup": "popup"}[updates["screen_kind"]]] if "screen_kind" in updates else []),
+        *(["no_return" if updates["returns_to"] == "auto" else "return"] if "returns_to" in updates else []),
     ]
     if "title" in updates:
         updates["title"] = updates["title"].strip() or None
@@ -1759,6 +1762,12 @@ def candidates_update(
             updates["screen_kind"] = None
         if updates.get("pathway_row") == "auto":
             updates["pathway_row"] = None
+        if updates.get("returns_to") == "auto":
+            updates["returns_to"] = None
+        elif "returns_to" in updates:
+            other = get_candidate(updates["returns_to"])
+            if not other or other["run_id"] != candidate["run_id"] or other["timestamp_ms"] >= candidate["timestamp_ms"]:
+                raise HTTPException(status_code=422, detail="Choose an earlier step of the same run.")
         serialized = _serialize_candidate(update_candidate(candidate_id, **updates))
         if updates.get("status") in ("accepted", "rejected"):
             usage.record("step_decided", user, status=updates["status"])
@@ -1943,6 +1952,10 @@ def runs_carry_over_review(run_id: str, payload: ReviewCarryOver, user: CurrentU
                     choice = True
             if after.get("pathway_row") is None and before.get("pathway_row"):
                 updates["pathway_row"] = before["pathway_row"]
+                choice = True
+            back_at = pairs.get(before.get("returns_to"))
+            if after.get("returns_to") is None and back_at and targets[back_at]["timestamp_ms"] < after["timestamp_ms"]:
+                updates["returns_to"] = back_at
                 choice = True
             counts["screen_choices"] += int(choice)
             if updates:

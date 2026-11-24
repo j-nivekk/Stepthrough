@@ -65,7 +65,7 @@ STEP_FIELDS = (
     "id", "detector_index", "candidate_origin", "timestamp_ms", "timestamp_tc", "scene_score", "status", "title",
     "notes", "image_hash", "perceptual_hash", "histogram_signature", "ocr_text", "revisit_group_id",
     "similar_to_candidate_id", "similarity_distance", "score_breakdown", "screen_link", "screen_kind", "pathway_row",
-    "created_at", "updated_at",
+    "returns_to", "created_at", "updated_at",
 )
 
 # Steps that bring a project.json of one version up to the next: UPGRADES[1] turns a version 1 file into version 2,
@@ -449,7 +449,7 @@ def _unpack_recording(
         if not all(isinstance(step, dict) for step in steps):
             raise ProjectFileError(DAMAGED)
         new_ids = [uuid4().hex for _ in steps]
-        # the file's ids only say which step another one points at (its screen, or the one it looks like)
+        # the file's ids only say which step another one points at (its screen, one it goes back to or looks like)
         ids = {step["id"]: new_id for step, new_id in zip(steps, new_ids) if isinstance(step.get("id"), str)}
         taken: set[str] = set()
         for step, new_id in zip(steps, new_ids):
@@ -471,6 +471,7 @@ def _unpack_recording(
                         "image_path": image_path,
                         "similar_to_candidate_id": ids.get(step.get("similar_to_candidate_id")),
                         "screen_link": screen_link if screen_link in (None, "new") else ids.get(screen_link),
+                        "returns_to": ids.get(step.get("returns_to")),
                     },
                 )
             )

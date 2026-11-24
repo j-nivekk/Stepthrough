@@ -281,6 +281,23 @@ export function CandidateDecisionButtons({
   );
 }
 
+/** That the user went back to an earlier screen after this step, as the reviewer said in the pathway. */
+export function BackLink({ link, onJump }: { link: SimilarLink; onJump: () => void }) {
+  return (
+    <button
+      className="inline-link-button candidate-back-link"
+      onClick={(event) => {
+        event.stopPropagation();
+        onJump();
+      }}
+      title="after this step the user went back to that screen, as said in the pathway: jump to it"
+      type="button"
+    >
+      {link.label}
+    </button>
+  );
+}
+
 export interface CandidateCardProps {
   candidate: CandidateFrame;
   isActive: boolean;
@@ -300,6 +317,9 @@ export interface CandidateCardProps {
   recordingHeight?: number | null;
   recordingWidth?: number | null;
   similarLink?: SimilarLink | undefined;
+  /** Where the user went back to after the step, as the reviewer said. */
+  backLink?: SimilarLink | undefined;
+  onJumpBack?: (() => void) | undefined;
   /** Every step of the run, in order, for choosing which screen this one shows. */
   steps: CandidateFrame[];
   onUpdate: (payload: CandidateChanges) => void;
@@ -323,6 +343,8 @@ export function CandidateCard({
   onActivate,
   onHoverChange,
   onJumpToSimilar,
+  backLink,
+  onJumpBack,
   onPaintStart,
   onPaintEnter,
   onSetStatus,
@@ -395,7 +417,7 @@ export function CandidateCard({
                 // shift-click selects a range of steps; pointerdown without shift starts drag-to-paint selection
                 onMouseDown={(event) => event.shiftKey && event.preventDefault()}
                 onPointerDown={(event) => {
-                  if (event.button === 0 && !event.shiftKey && onPaintStart) {
+                  if (event.button === 0 && !event.shiftKey && !event.ctrlKey && onPaintStart) {
                     paintedDownRef.current = true;
                     onPaintStart();
                   }
@@ -535,6 +557,12 @@ export function CandidateCard({
           </div>
         )}
 
+        {backLink && onJumpBack ? (
+          <div className="candidate-secondary-row">
+            <BackLink link={backLink} onJump={onJumpBack} />
+          </div>
+        ) : null}
+
         {screenSummary && !showAnnotation ? (
           <div className="candidate-secondary-row candidate-screen-summary" title="your choice for the pathway">
             stacking: {screenSummary}
@@ -615,6 +643,8 @@ export interface CandidateRowProps {
   onToggleSelection: (shift: boolean) => void;
   onUpdate: CandidateCardProps['onUpdate'];
   similarLink?: SimilarLink | undefined;
+  backLink?: SimilarLink | undefined;
+  onJumpBack?: (() => void) | undefined;
   steps: CandidateFrame[];
   phases?: CandidateCardProps['phases'];
   thumbHeight: number;
@@ -632,6 +662,8 @@ export function CandidateRow({
   onActivate,
   onHoverChange,
   onJumpToSimilar,
+  backLink,
+  onJumpBack,
   onPaintStart,
   onPaintEnter,
   onSetStatus,
@@ -682,7 +714,7 @@ export function CandidateRow({
             onMouseDown={(event) => event.shiftKey && event.preventDefault()}
             onPointerDown={(event) => {
               stop(event);
-              if (event.button === 0 && !event.shiftKey && onPaintStart) {
+              if (event.button === 0 && !event.shiftKey && !event.ctrlKey && onPaintStart) {
                 paintedDownRef.current = true;
                 onPaintStart();
               }
@@ -727,6 +759,7 @@ export function CandidateRow({
             {similarLink.label}
           </button>
         ) : null}
+        {backLink && onJumpBack ? <BackLink link={backLink} onJump={onJumpBack} /> : null}
         <ScreenChoice candidate={candidate} onUpdate={onUpdate} prefix="stacking: " steps={steps} />
         {phases && candidate.status === 'accepted' ? (
           <PhaseChoice candidate={candidate} phases={phases.boundaries} prefix="phase: " runId={phases.runId} />

@@ -6011,6 +6011,16 @@ button:disabled {
   color: #af5b13;
 }
 
+/* Going back, in the colour of returns in the pathway. */
+.inline-link-button.candidate-back-link {
+  color: #2c5f8a;
+}
+
+.inline-link-button.candidate-back-link:hover,
+.inline-link-button.candidate-back-link:focus-visible {
+  color: #1d4566;
+}
+
 .accepted-step-chip:focus-visible,
 .candidate-card:focus-visible {
   outline: 2px solid rgba(72, 175, 124, 0.32);
@@ -7083,6 +7093,7 @@ button:disabled {
   max-width: min(360px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 4px;
   background: #d9d9d9;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
@@ -7101,6 +7112,14 @@ button:disabled {
 }
 
 /* A rule between groups of a menu, such as the presets'. */
+/* What the actions of a menu are for. */
+.pathway-menu-heading {
+  margin: 0;
+  padding: 4px 8px 5px;
+  color: rgba(0, 0, 0, 0.55);
+  font-size: 11px;
+}
+
 .pathway-menu-divider {
   height: 1px;
   margin: 3px 6px;

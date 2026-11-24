@@ -42,7 +42,8 @@ FIELD_NOTES = {
     "screens.kind": "popup when the reviewer marked its first step as one or, without their say, when that step "
                     "was reached by a change labelled modal; otherwise screen",
     "screens.title": "the title of the first step on the screen that has one (title_step_id), otherwise Screen N",
-    "screens.reached_from": "the screen the user was on when they first arrived; null for the first screen",
+    "screens.reached_from": "the screen the user was on when they first arrived, also when they had gone back to it "
+                            "without a step of its own (steps.returns_to); null for the first screen",
     "screens.visits": "each stay on the screen: the steps taken there before moving to another screen",
     "screens.row_choice": "where the reviewer put the box in the figure: automatic, continue (on the row of the "
                           "screen it was reached from) or below (on a row of its own under it)",
@@ -53,14 +54,18 @@ FIELD_NOTES = {
     "steps.path_step": "the step's number along the main way through, leaving out optional detours: 13, or 13a, 13b "
                        "and so on for the steps of a detour taken after step 13, with the step that comes back",
     "steps.detour": "the step is part of an optional detour: a trip off the main way through that comes back to it "
-                    "(with the step that comes back); a trip that never comes back, or that only shows pop-ups, "
-                    "is not optional",
+                    "(with the step that comes back, when there is one; see steps.returns_to); a trip that never "
+                    "comes back, or that only shows pop-ups, is not optional",
+    "steps.returns_to": "the reviewer's say that after this step the user went back to an earlier screen (the screen's "
+                        "id): when no step shows the return, it is drawn and counted as a move all the same, and the "
+                        "next step leaves from that screen; null without one",
     "step_count": "how many steps were taken: the opening screen (step 0) is where they start and not counted, here "
                   "and in phases",
     "main_step_count": "how many steps there are without the optional detours (main_screen_count: on how many screens)",
     "screens.continues_with": "the screen that carries this one's row on in the figure: the one the reviewer put on "
                               "the row, or else the one with the most screens reached after it (the long way on "
-                              "stays on the row, side trips go below); null where the row ends",
+                              "stays on the row, side trips go below, and a trip the reviewer said returns here "
+                              "comes last); null where the row ends",
     "steps.phase": "the phase of the walkthrough the step is in, as the reviewer named it; null outside every phase",
     "phases": "stretches of consecutive steps that the reviewer named, such as sign up or verify identity, in order",
     "phases.screen_count": "how many different screens the steps of the phase are on",
@@ -69,7 +74,9 @@ FIELD_NOTES = {
     "time_on_screen_ms": "the time the screens of these steps stayed still, added up; null when a step has no timing",
     "transitions": "moves between two different screens, in order of the first move",
     "transitions.kind": "return when the move goes to a screen that was first visited earlier than the one it leaves",
-    "transitions.passes": "each time the move was made; step_id is the step it arrives at",
+    "transitions.passes": "each time the move was made; step_id is the step it arrives at. origin is recorded, or "
+                          "researcher for a return the reviewer added (steps.returns_to of from_step_id), which no "
+                          "step arrives at: its step_id, step_index and at_ms are null",
 }
 
 
@@ -272,11 +279,27 @@ def _phase_stretches(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return phases
 
 
-def _set_continuations(screens: list[dict[str, Any]]) -> None:
+def _closed_trips(steps: list[dict[str, Any]], screens: list[dict[str, Any]]) -> set[str]:
+    """The screens a trip begins with that the reviewer said comes back: on the way from the screen returned to
+    (``returns_to``) down to the screen it is left from, the first one after it."""
+    parent = {screen["id"]: screen["reached_from"] for screen in screens}
+    closed: set[str] = set()
+    for step in steps:
+        at = step["screen_id"]
+        while step.get("returns_to") and at is not None:
+            if parent.get(at) == step["returns_to"]:
+                closed.add(at)
+                break
+            at = parent.get(at)
+    return closed
+
+
+def _set_continuations(screens: list[dict[str, Any]], closed: set[str] | frozenset[str] = frozenset()) -> None:
     """Give every screen the one that carries its row on in the figure (``continues_with``), or None where the row
     ends: the screen the reviewer put on the row, or else the one with the most screens reached after it, so the
     long way on stays on the row and a side trip goes below (ties: the first reached). A screen the reviewer put
-    below never carries a row on."""
+    below never carries a row on, and one that begins a trip they said comes back (``closed``) only where no other
+    does."""
     kids: dict[str, list[dict[str, Any]]] = {}
     for screen in screens:  # in the order they were first reached
         if screen["reached_from"]:
@@ -288,7 +311,7 @@ def _set_continuations(screens: list[dict[str, Any]]) -> None:
         candidates = [kid for kid in kids.get(screen["id"], []) if kid["row_choice"] != "below"]
         chosen = next((kid for kid in candidates if kid["row_choice"] == "continue"), None)
         if chosen is None and candidates:
-            chosen = max(candidates, key=lambda kid: sizes[kid["id"]])  # max keeps the first of equals
+            chosen = max(candidates, key=lambda kid: (kid["id"] not in closed, sizes[kid["id"]]))  # the first of equals
         screen["continues_with"] = chosen["id"] if chosen else None
 
 
@@ -301,14 +324,18 @@ def _letters(count: int) -> str:
     return letters
 
 
-def _mark_detours(steps: list[dict[str, Any]], screens: list[dict[str, Any]]) -> None:
+def _mark_detours(
+    steps: list[dict[str, Any]], screens: list[dict[str, Any]], closed: set[str] | frozenset[str] = frozenset(),
+) -> None:
     """Mark the main way through and the optional detours from it.
 
     The main way through is the chain of screens that carry the rows on (``continues_with``) from the first screen:
-    the long way on, or what the reviewer put on the rows. A detour is a run of steps on screens off that way that
+    the long way on, or what the reviewer put on the rows. It does not go on into a trip they said comes back
+    (``closed``), unless they put that on the row themselves. A detour is a run of steps on screens off that way that
     comes back to it; its steps, and the step that comes back, are optional (``detour``): without the trip the user
-    would still be where they left. A run that never comes back (the recording ends there) is part of what was
-    done, and so is a trip that only shows pop-ups, which the app puts in the way rather than the user choosing them.
+    would still be where they left. It may also come back without a step, where the reviewer said so (``returns_to``).
+    A run that never comes back (the recording ends there) is part of what was done, and so is a trip that only shows
+    pop-ups, which the app puts in the way rather than the user choosing them.
     Every step gets its number along the main way (``path_step``), so that the numbers add up without the detours: the
     other steps count on from the first one's number, and the steps of a detour have a letter after the number of the
     step they leave from (13a, 13b), up to the next step of the main way."""
@@ -318,21 +345,30 @@ def _mark_detours(steps: list[dict[str, Any]], screens: list[dict[str, Any]]) ->
     while screen is not None and screen["id"] not in main:
         main.add(screen["id"])
         screen = by_id.get(screen["continues_with"] or "")
+        if screen is not None and screen["id"] in closed and screen["row_choice"] != "continue":
+            break
     for screen in screens:
         screen["main"] = screen["id"] in main
     for step in steps:
         step["detour"] = False
+
+    def mark(trip: list[dict[str, Any]], back: list[dict[str, Any]]) -> None:
+        if any(by_id[each["screen_id"]]["kind"] != "popup" for each in trip):
+            for each in [*trip, *back]:
+                each["detour"] = True
+
     start: int | None = None
     for index, step in enumerate(steps):
-        if step["screen_id"] not in main:
-            if start is None:
-                start = index
+        if step["screen_id"] in main:
+            if start is not None:
+                mark(steps[start:index], [step])  # with the step that comes back
+            start = None
             continue
-        if start is not None:
-            trip = steps[start:index]
-            if any(by_id[each["screen_id"]]["kind"] != "popup" for each in trip):
-                for each in [*trip, step]:
-                    each["detour"] = True
+        if start is None:
+            start = index
+        arrives = steps[index + 1]["screen_id"] if index + 1 < len(steps) else None
+        if step.get("returns_to") in main and arrives != step["returns_to"]:
+            mark(steps[start:index + 1], [])  # comes back, and no step shows it
             start = None
     number = steps[0]["step_index"] - 1 if steps else 0
     aside = 0
@@ -364,8 +400,25 @@ def build_pathway(
     steps: list[dict[str, Any]] = []
     screens: list[dict[str, Any]] = []
     screen_of_group: dict[str, dict[str, Any]] = {}
+    index_of: dict[str, int] = {}  # each screen's, by its id
     transitions: dict[tuple[str, str], dict[str, Any]] = {}
     previous: dict[str, Any] | None = None
+
+    def move(source: str, target: str, made: dict[str, Any]) -> None:
+        transition = transitions.setdefault((source, target), {
+            "from_screen": source,
+            "to_screen": target,
+            "kind": "return" if index_of[target] < index_of[source] else "forward",
+            "passes": [],
+        })
+        transition["passes"].append(made)
+
+    def go_back(step: dict[str, Any]) -> None:
+        """The return the reviewer added after ``step``: a move that no step arrives at."""
+        move(step["screen_id"], step["returns_to"], {
+            "step_id": None, "step_index": None, "from_step_id": step["step_id"], "at_ms": None, "transition_type": None,
+            "origin": "researcher",
+        })
 
     for row in rows:
         candidate = by_id.get(row["source_candidate_id"], {})
@@ -373,6 +426,12 @@ def build_pathway(
         label = breakdown.get("transition_type")
         group = group_of.get(row["source_candidate_id"], row["source_candidate_id"])
         screen = screen_of_group.get(group)
+        # The screen the user was on before this step: the one of the step before, or the one the reviewer said they
+        # went back to from there (unless this step shows it, so that the return was recorded).
+        came_from = previous["screen_id"] if previous else None
+        if previous is not None and previous["returns_to"] and (screen is None or screen["id"] != previous["returns_to"]):
+            go_back(previous)
+            came_from = previous["returns_to"]
         starts_screen = screen is None
         if screen is None:
             screen = {
@@ -381,13 +440,14 @@ def build_pathway(
                 "title": f"Screen {len(screens) + 1}",
                 "title_step_id": None,
                 "kind": "popup" if _popup(candidate) else "screen",
-                "reached_from": previous["screen_id"] if previous else None,
+                "reached_from": came_from,
                 "image_step_id": row["step_id"],
                 "visits": [],
                 "time_on_screen_ms": None,
                 "row_choice": "automatic",
             }
             screens.append(screen)
+            index_of[screen["id"]] = screen["index"]
             screen_of_group[group] = screen
         # the first of the box's steps with a say about its row has it
         if screen["row_choice"] == "automatic" and candidate.get("pathway_row") in ROW_CHOICES:
@@ -396,27 +456,21 @@ def build_pathway(
             screen["title"] = candidate["title"].strip()
             screen["title_step_id"] = row["step_id"]
 
-        if previous is None or previous["screen_id"] != screen["id"]:
+        if came_from != screen["id"]:
             screen["visits"].append({"visit": len(screen["visits"]) + 1, "step_ids": [], "arrived_ms": row["timestamp_ms"],
                                      "time_on_screen_ms": None})
-            if previous is not None:
-                key = (previous["screen_id"], screen["id"])
-                source = next(item for item in screens if item["id"] == previous["screen_id"])
-                transition = transitions.setdefault(key, {
-                    "from_screen": key[0],
-                    "to_screen": key[1],
-                    "kind": "return" if screen["index"] < source["index"] else "forward",
-                    "passes": [],
-                })
-                transition["passes"].append({
+            if previous is not None and came_from is not None:
+                move(came_from, screen["id"], {
                     "step_id": row["step_id"],
                     "step_index": row["step_index"],
                     "from_step_id": previous["step_id"],
                     "at_ms": row["timestamp_ms"],
                     "transition_type": label,
+                    "origin": "recorded",
                 })
         visit = screen["visits"][-1]
         visit["step_ids"].append(row["step_id"])
+        back_at = screen_of_group.get(group_of.get(candidate.get("returns_to") or "", ""))  # only one seen before
 
         step = {
             "step_id": row["step_id"],
@@ -438,18 +492,22 @@ def build_pathway(
             "screen_choice": _SCREEN_CHOICES.get(candidate.get("screen_link"), "same_screen"),
             "kind_choice": candidate.get("screen_kind") or "automatic",
             "phase": phase_at(phases, row["timestamp_ms"]),
+            "returns_to": back_at["id"] if back_at and back_at["id"] != screen["id"] else None,
             "source_candidate_id": row["source_candidate_id"],
         }
         steps.append(step)
         previous = step
+    if previous is not None and previous["returns_to"]:
+        go_back(previous)
 
     time_of = {step["step_id"]: step["time_on_screen_ms"] for step in steps}
     for screen in screens:
         for visit in screen["visits"]:
             visit["time_on_screen_ms"] = _total([time_of[step_id] for step_id in visit["step_ids"]])
         screen["time_on_screen_ms"] = _total([visit["time_on_screen_ms"] for visit in screen["visits"]])
-    _set_continuations(screens)
-    _mark_detours(steps, screens)
+    closed = _closed_trips(steps, screens)
+    _set_continuations(screens, closed)
+    _mark_detours(steps, screens, closed)
     main_steps = [step for step in steps if not step["detour"]]
 
     return {

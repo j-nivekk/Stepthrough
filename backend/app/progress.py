@@ -84,7 +84,7 @@ def report(tag: str | None = None) -> dict[str, Any]:
                     SUM(status = 'pending') AS pending,
                     SUM(status = 'accepted' AND (TRIM(COALESCE(title, '')) != '' OR TRIM(COALESCE(notes, '')) != ''))
                         AS described,
-                    SUM(status = 'accepted' AND (screen_link IS NOT NULL OR screen_kind IS NOT NULL)) AS corrections,
+                    SUM(status = 'accepted' AND (screen_link IS NOT NULL OR screen_kind IS NOT NULL OR returns_to IS NOT NULL)) AS corrections,
                     MAX(updated_at) AS last_change
                 FROM candidate_frames GROUP BY run_id
                 """,

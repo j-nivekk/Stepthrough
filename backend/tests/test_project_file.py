@@ -34,6 +34,7 @@ def a_project(client, video_factory) -> tuple[str, str, list[str]]:
     ok(client.patch(f"/candidates/{steps[0]}", json={"title": "home", "notes": "first screen"}))
     ok(client.patch(f"/candidates/{steps[1]}", json={"screen_kind": "popup", "pathway_row": "below"}))
     ok(client.patch(f"/candidates/{steps[2]}", json={"screen_link": steps[0]}))
+    ok(client.patch(f"/candidates/{steps[1]}", json={"returns_to": steps[0]}))
     ok(client.patch(f"/runs/{run_id}", json={"name": "first try"}))
     ok(client.put(f"/runs/{run_id}/phases", json={"name": "sign up", "first_step": steps[0], "last_step": steps[1]}))
     return project_id, run_id, steps
@@ -90,6 +91,7 @@ def test_a_project_comes_back_as_it_was(client, video_factory):
         # links between steps point at the new steps
         if old[index]["screen_link"] in old_ids:
             assert new_ids[step["screen_link"]] == old_ids[old[index]["screen_link"]]
+        assert new_ids.get(step["returns_to"]) == old_ids.get(old[index]["returns_to"])
         assert storage.absolute_data_path(step["image_path"]).is_file()
 
     # the same file can come in twice

@@ -29,12 +29,13 @@ interface ReviewStepProps {
   isCrossHovered: boolean;
   isSelected: boolean;
   similarLink: SimilarLink | undefined;
+  backLink: SimilarLink | undefined;
   steps: CandidateFrame[];
   phases: CandidateCardProps['phases'];
 }
 
 /** The actions of one step, as its card or row takes them. */
-function actionsOf({ actions, candidate, hoverState, isSelected, similarLink }: ReviewStepProps) {
+function actionsOf({ actions, backLink, candidate, hoverState, isSelected, similarLink }: ReviewStepProps) {
   return {
     hover: {
       state: hoverState,
@@ -45,6 +46,7 @@ function actionsOf({ actions, candidate, hoverState, isSelected, similarLink }: 
     onActivate: () => actions.activate(candidate.id),
     onHoverChange: (hovering: boolean) => actions.hoverChange(candidate.id, hovering),
     onJumpToSimilar: similarLink ? () => actions.jumpTo(similarLink.targetId) : undefined,
+    onJumpBack: backLink ? () => actions.jumpTo(backLink.targetId) : undefined,
     onPaintEnter: () => actions.paintEnter(candidate.id),
     onPaintStart: () => actions.paintStart(candidate.id, isSelected),
     onSetStatus: (status: CandidateStatus) => actions.setStatus(candidate, status),

@@ -80,6 +80,11 @@ _COMMON_NOTES = {
         "way that come back to it, see pathway.json): 13, or 13a, 13b and so on for the steps of a detour taken after "
         "step 13, where detour is true"
     ),
+    "returns_to_step_id": (
+        "the reviewer's say that after this step the user went back to an earlier screen: the first step of that "
+        "screen; empty without one. When no step shows the return, pathway.json has it as a move that no step arrives "
+        "at (origin researcher), and the next step leaves from that screen"
+    ),
     "origin": (
         "detected: found by the analysis; manual: added by hand by the reviewer, so it has no change, "
         "timing or label"
@@ -279,9 +284,10 @@ def create_export_bundle(
     images_dir.mkdir(parents=True, exist_ok=True)
 
     # The same steps as a pathway: the screens they show and the moves between them; it also says which steps are
-    # optional detours from the main way through.
+    # optional detours from the main way through, and where the reviewer said the user went back.
     pathway = build_pathway(export_rows, candidates, phases=phases)
     way = {step["step_id"]: step for step in pathway["steps"]}
+    first_step_of = {screen["id"]: screen["image_step_id"] for screen in pathway["screens"]}
 
     exported_manifest_rows = []
     for row in export_rows:
@@ -296,6 +302,7 @@ def create_export_bundle(
             "phase": phase_at(phases, row["timestamp_ms"]),
             "path_step": way[row["step_id"]]["path_step"],
             "detour": way[row["step_id"]]["detour"],
+            "returns_to_step_id": first_step_of.get(way[row["step_id"]]["returns_to"]),
             **_timing_columns(row),
         })
 
@@ -341,6 +348,7 @@ def create_export_bundle(
                 "step_index",
                 "path_step",
                 "detour",
+                "returns_to_step_id",
                 "timestamp_ms",
                 "timestamp_tc",
                 "image_path",

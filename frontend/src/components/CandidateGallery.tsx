@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { screenshotUrl } from '../lib/screenshots';
 import type { SimilarLink } from '../lib/analysis';
 import { formatPathwayTime } from '../lib/pathwayFigure';
@@ -6,6 +6,7 @@ import type { GalleryLayoutSizing } from '../lib/stepLayout';
 import { START } from '../lib/stepNumbers';
 import type { CandidateChanges, CandidateFrame, CandidateStatus } from '../types';
 import {
+  BackLink,
   CandidateDecisionButtons,
   CandidateLabel,
   EDITED_ELSEWHERE,
@@ -30,6 +31,8 @@ export interface CandidateGalleryProps {
   hoveredCandidateId: string | null;
   selectedCandidateIds: string[];
   similarityLinks: Map<string, SimilarLink>;
+  /** Where the user went back to after a step, as the reviewer said in the pathway. */
+  backLinks: Map<string, SimilarLink>;
   phases?: { runId: string; boundaries: Array<{ start_ms: number; name: string }> | undefined };
   durationMs?: number | null;
   aspect: number;
@@ -44,6 +47,8 @@ export interface CandidateGalleryProps {
   onSetStatus: (candidate: CandidateFrame, status: CandidateStatus) => void;
   onToggleSelection: (candidateId: string, shift: boolean) => void;
   onUpdate: (candidateId: string, payload: CandidateChanges) => void;
+  /** A right click on a thumbnail, the large screenshot or the panel beside it. */
+  onContextMenu: (event: MouseEvent<HTMLElement>) => void;
 }
 
 interface FilmstripPhaseGroup {
@@ -71,6 +76,7 @@ export function CandidateGallery({
   hoveredCandidateId,
   selectedCandidateIds,
   similarityLinks,
+  backLinks,
   phases,
   durationMs,
   aspect,
@@ -85,6 +91,7 @@ export function CandidateGallery({
   onSetStatus,
   onToggleSelection,
   onUpdate,
+  onContextMenu,
 }: CandidateGalleryProps) {
   const activeIndex = useMemo(() => {
     if (!candidates.length) return -1;
@@ -149,12 +156,14 @@ export function CandidateGallery({
   const activePhase = phaseInfoAt(phases?.boundaries, activeCandidate.timestamp_ms, stepsToCount, durationMs);
   const activeHover = hoverFor(activeCandidate);
   const activeSimilar = similarityLinks.get(activeCandidate.id);
+  const activeBack = backLinks.get(activeCandidate.id);
 
   return (
     <div
       aria-label="steps gallery"
       className="candidate-gallery"
       id="analysis-candidate-review"
+      onContextMenu={onContextMenu}
       style={
         {
           '--gallery-stage-height': sizing.stageHeightCss,
@@ -180,6 +189,8 @@ export function CandidateGallery({
         <GalleryInspector
           activePhase={activePhase}
           candidate={activeCandidate}
+          backLink={activeBack}
+          onJumpBack={activeBack ? () => onJumpToSimilar(activeBack.targetId) : undefined}
           onJumpToSimilar={activeSimilar ? () => onJumpToSimilar(activeSimilar.targetId) : undefined}
           onUpdate={(payload) => onUpdate(activeCandidate.id, payload)}
           phases={phases}
@@ -198,7 +209,7 @@ export function CandidateGallery({
             setStripPanning(false);
           }}
           onPointerDown={(event) => {
-            if (event.button !== 0) return;
+            if (event.button !== 0 || event.ctrlKey) return; // with Control it is a right click on a Mac
             if (event.target instanceof Element && event.target.closest('input, label')) return;
             const strip = event.currentTarget;
             if (strip.scrollWidth <= strip.clientWidth) return;
@@ -332,7 +343,7 @@ export function CandidateGallery({
                             }}
                             onMouseDown={(event) => event.shiftKey && event.preventDefault()}
                             onPointerDown={(event) => {
-                              if (event.button === 0 && !event.shiftKey) {
+                              if (event.button === 0 && !event.shiftKey && !event.ctrlKey) {
                                 paintedDownIdRef.current = candidate.id;
                                 onPaintStart(candidate.id, isSelected);
                               }
@@ -387,7 +398,7 @@ function GalleryStage({
   const liveSlotRef = useRef<HTMLDivElement | null>(null);
 
   return (
-    <div className={`candidate-gallery-stage ${candidate.status} ${isSelected ? 'selected' : ''}`}>
+    <div data-step-id={candidate.id} className={`candidate-gallery-stage ${candidate.status} ${isSelected ? 'selected' : ''}`}>
       <div className="candidate-gallery-stage-top">
         <div className="candidate-gallery-stage-meta">
           <span className="candidate-timecode">{candidate.timestamp_tc}</span>
@@ -484,6 +495,8 @@ interface GalleryInspectorProps {
   activePhase: PhaseSpanInfo | null;
   similarLink?: SimilarLink;
   onJumpToSimilar?: () => void;
+  backLink?: SimilarLink;
+  onJumpBack?: () => void;
   steps: CandidateFrame[];
   phases?: { runId: string; boundaries: Array<{ start_ms: number; name: string }> | undefined };
   onUpdate: (payload: CandidateChanges) => void;
@@ -495,6 +508,8 @@ function GalleryInspector({
   activePhase,
   similarLink,
   onJumpToSimilar,
+  backLink,
+  onJumpBack,
   steps,
   phases,
   onUpdate,
@@ -536,7 +551,7 @@ function GalleryInspector({
   }, [title, candidate.id]);
 
   return (
-    <aside aria-label="step inspector" className={`candidate-gallery-inspector ${candidate.status}`}>
+    <aside aria-label="step inspector" className={`candidate-gallery-inspector ${candidate.status}`} data-step-id={candidate.id}>
       {editing.lockedElsewhere ? (
         <p className="live-band" role="status">
           {EDITED_ELSEWHERE}
@@ -567,6 +582,7 @@ function GalleryInspector({
             {similarLink.label}
           </button>
         ) : null}
+        {backLink && onJumpBack ? <BackLink link={backLink} onJump={onJumpBack} /> : null}
       </div>
 
       {activePhase ? (

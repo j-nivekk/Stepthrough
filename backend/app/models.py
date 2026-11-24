@@ -442,6 +442,8 @@ class CandidateFrameResponse(BaseModel):
     screen_kind: Literal["screen", "popup"] | None = None
     # Where the step's box goes in the pathway figure: None (automatic), "continue" or "below" (services/pathway.py).
     pathway_row: Literal["continue", "below"] | None = None
+    # After this step the user went back to an earlier screen: the id of a step that shows it.
+    returns_to: str | None = None
     created_at: str
     updated_at: str
 
@@ -483,6 +485,7 @@ class PathwayStepResponse(BaseModel):
     phase: str | None = None
     detour: bool = False
     path_step: str
+    returns_to: str | None = None
     source_candidate_id: str
 
 
@@ -509,11 +512,14 @@ class PathwayScreenResponse(BaseModel):
 
 
 class PathwayPassResponse(BaseModel):
-    step_id: str
-    step_index: int
+    """``origin`` researcher: a return the reviewer added, which no step arrives at."""
+
+    step_id: str | None = None
+    step_index: int | None = None
     from_step_id: str
-    at_ms: int
+    at_ms: int | None = None
     transition_type: str | None = None
+    origin: Literal["recorded", "researcher"] = "recorded"
 
 
 class PathwayTransitionResponse(BaseModel):
@@ -626,6 +632,8 @@ class CandidateUpdate(BaseModel):
     screen_kind: Literal["auto", "screen", "popup"] | None = None
     # Where the box goes in the pathway figure: "auto", on the row of the box it was reached from, or below it.
     pathway_row: Literal["auto", "continue", "below"] | None = None
+    # After this step the user went back to an earlier screen: "auto" (no say), or the id of an earlier step on it.
+    returns_to: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class PhaseSteps(BaseModel):

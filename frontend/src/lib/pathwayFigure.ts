@@ -22,7 +22,7 @@
  */
 import type { Pathway, PathwayPhase, PathwayScreen, PathwayStep, PathwayTransition } from '../types';
 import { BADGE_HEIGHT, BADGE_WIDTH, buildPathwayBadge } from './pathwayBadge';
-import { numberRange, pathwayNumber, START } from './stepNumbers';
+import { BACK, numberRange, pathwayNumber, START } from './stepNumbers';
 
 export type PathwayNotesPlacement = 'under' | 'key' | 'hidden';
 
@@ -671,7 +671,11 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
   // counts of the phases (from the server; a pathway made on the page has none).
   const leaveOut = options.countDetours === false;
   const numbersOf = (transition: PathwayTransition): string[] =>
-    transition.passes.map((pass) => pathwayNumber(steps.get(pass.step_id) ?? pass, leaveOut));
+    transition.passes.map((pass) => {
+      const step = pass.step_id ? steps.get(pass.step_id) : undefined;
+      if (step) return pathwayNumber(step, leaveOut);
+      return pass.step_index == null ? BACK : pathwayNumber({ step_index: pass.step_index }, leaveOut);
+    });
   const phaseSteps = (phase: PathwayPhase): number => (leaveOut ? phase.main_step_count ?? phase.step_count : phase.step_count);
   const phaseScreens = (phase: PathwayPhase): number => (leaveOut ? phase.main_screen_count ?? phase.screen_count : phase.screen_count);
   const { placed, rows, cols } = placeScreens(pathway.screens, maxCols);
@@ -1391,9 +1395,10 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
     const count = seenMoveIds.get(baseId) ?? 0;
     seenMoveIds.set(baseId, count + 1);
     const moveId = count === 0 ? baseId : `${baseId}-${count + 1}`;
-    const stepList = numbersOf(transition).join(', ');
+    const stepList = numbersOf(transition).filter((number) => number !== BACK).join(', ');
+    const added = transition.passes.some((pass) => pass.origin === 'researcher');
     const interactive = peek
-      ? ` data-move="" data-from="${esc(transition.from_screen)}" data-to="${esc(transition.to_screen)}" data-role="${role}" data-steps="${esc(stepList)}"`
+      ? ` data-move="" data-from="${esc(transition.from_screen)}" data-to="${esc(transition.to_screen)}" data-role="${role}" data-steps="${esc(stepList)}"${added ? ' data-added=""' : ''}`
       : '';
     body += `<g id="${esc(moveId)}"${interactive}>${move.svg}</g>`;
   }
@@ -1505,6 +1510,9 @@ export function buildPathwayFigure(input: PathwayFigureInput): PathwayFigure {
     ];
     if (hasBranch) items.push([arrow('branch'), 28, 'branch or detour to another path']);
     if (hasReturn) items.push([arrow('return'), 28, 'return to an earlier screen']);
+    if (pathway.transitions.some((transition) => transition.passes.some((pass) => pass.origin === 'researcher'))) {
+      items.push([(x, cy) => pill(x, cy, BACK, RETURN_COLOR), pillWidth(BACK), 'return without a step, added by the reviewer']);
+    }
     if (hasPortal) {
       items.push([
         (x, cy) =>
