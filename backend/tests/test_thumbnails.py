@@ -42,7 +42,9 @@ def test_an_image_no_wider_than_asked_is_used_as_it_is(tmp_path: Path) -> None:
         thumbnails.thumbnail(source, 500)
 
 
-def test_the_asset_route_hands_out_copies_of_screenshots(client: TestClient, video_factory, wait_for_run) -> None:
+def test_the_asset_route_hands_out_copies_of_screenshots(
+    client: TestClient, video_factory, wait_for_run, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     project = client.post('/projects', json={'name': 'Thumbnails'}).json()
     video = video_factory('thumbs.mp4', ['red', 'blue'])
     with video.open('rb') as handle:
@@ -62,6 +64,10 @@ def test_the_asset_route_hands_out_copies_of_screenshots(client: TestClient, vid
     # the copy is checked like the image: "not modified" when the browser's copy is current
     again = client.get(f'{url}?w=320', headers={'if-none-match': small.headers['etag']})
     assert again.status_code == 304
+    # the type is said by the route: not every system has WebP in its list of file types (the Docker image does not)
+    with monkeypatch.context() as without_list:
+        without_list.setattr('starlette.responses.guess_type', lambda *_args, **_kwargs: (None, None))
+        assert client.get(f'{url}?w=320').headers['content-type'] == 'image/webp'
     # the test video is 640 wide: asked for as wide, the screenshot itself comes back
     assert client.get(f'{url}?w=640').headers['content-type'] == 'image/png'
     assert client.get(f'{url}?w=500').status_code == 422

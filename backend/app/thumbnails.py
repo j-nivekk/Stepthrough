@@ -19,6 +19,8 @@ from PIL import Image
 WIDTHS = (320, 640, 1280)
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 FOLDER = ".thumbs"
+SUFFIX = ".webp"
+MEDIA_TYPE = "image/webp"
 # WebP of screenshots: about 25 KB at 640 wide, made in about 10 ms (method 2 is close to the smallest for a
 # fraction of the time).
 _QUALITY = 80
@@ -34,7 +36,7 @@ def thumbnail(path: Path, width: int) -> Path:
     than the image; the image itself when it is no wider than that."""
     if width not in WIDTHS:
         raise ValueError(f"width must be one of {WIDTHS}")
-    target = path.parent / FOLDER / f"{path.stem}.w{width}.webp"
+    target = path.parent / FOLDER / f"{path.stem}.w{width}{SUFFIX}"
     source_time = path.stat().st_mtime
     try:
         if target.stat().st_mtime >= source_time:

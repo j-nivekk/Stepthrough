@@ -195,11 +195,16 @@ def check_a_project() -> None:
 
         status, headers, image = call("GET", urlsplit(candidates[-1]["image_url"]).path)
         check(status == 200 and image[:8] == b"\x89PNG\r\n\x1a\n", "a screenshot is served")
+        status, headers, image = call("GET", candidates[0]["image_url"] + "?w=320")
+        kind = next((value for name, value in headers.items() if name.lower() == "content-type"), "")
+        check(status == 200 and kind == "image/webp" and image[8:12] == b"WEBP", f"a small copy of it is served ({kind})")
 
         for candidate in candidates:
             call_json("PATCH", f"/candidates/{candidate['id']}", {"status": "accepted"})
         pathway = call_json("GET", f"/runs/{run['id']}/pathway")
-        check(pathway['step_count'] == len(candidates), "the accepted steps appear in the pathway")
+        # the opening screen is where the steps start, and not one of them
+        check(len(pathway['steps']) == len(candidates) and pathway['step_count'] == len(candidates) - 1,
+              f"the accepted steps appear in the pathway ({pathway['step_count']} and the opening screen)")
         call_json("POST", f"/runs/{run['id']}/pathway/merge", {
             "source_candidate_id": candidates[-1]['id'], "target_candidate_id": candidates[0]['id'],
         })
@@ -215,7 +220,8 @@ def check_a_project() -> None:
         with zipfile.ZipFile(io.BytesIO(archive)) as exported:
             name = next(entry for entry in exported.namelist() if entry.endswith('pathway.json'))
             chart = json.loads(exported.read(name))
-        check(chart['step_count'] == len(candidates) and chart['screens'] == merged['screens'],
+        check(chart['steps'][0]['step_index'] == 0 and chart['step_count'] == len(candidates) - 1
+              and chart['screens'] == merged['screens'],
               "the bundle contains the reviewed pathway")
         if OCR:
             # Recognised text is not part of the API's step list; exports carry it in steps.csv.

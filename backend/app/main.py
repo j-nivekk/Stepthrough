@@ -2084,7 +2084,9 @@ def project_asset(asset_path: str, request: Request, user: CurrentUser) -> Respo
                 if width is not None and thumbnails.is_image(path):
                     path = thumbnails.thumbnail(path, width)
                 headers = {"Cache-Control": "private, no-cache"}
-                response = FileResponse(path, headers=headers, stat_result=path.stat())
+                # Said here for WebP: guessing it goes by the system's list of file types, which the Docker image lacks.
+                media_type = thumbnails.MEDIA_TYPE if path.suffix.lower() == thumbnails.SUFFIX else None
+                response = FileResponse(path, media_type=media_type, headers=headers, stat_result=path.stat())
                 if request.headers.get("if-none-match") == response.headers["etag"]:
                     return Response(status_code=304, headers={**headers, "ETag": response.headers["etag"]})
                 return response
