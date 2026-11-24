@@ -7,6 +7,7 @@ import type { StepHoverState } from '../features/analysis/useHoverClips';
 import type { CandidateChanges, CandidateFrame, CandidateStatus } from '../types';
 import { PhaseChoice } from './PhaseChoice';
 import { ScreenChoice, screenChoiceSummary } from './ScreenChoice';
+import { useStepNumbers } from './StepNumbers';
 
 /** Hover intent on a step's screenshot: wait, then the clip plays and "play from here" appears. */
 export interface StepHoverProps {
@@ -345,7 +346,9 @@ export function CandidateCard({
   const hasAnnotation = Boolean(candidate.title || candidate.notes);
   const showAnnotation = isAnnotationExpanded;
   const annotationToggleLabel = showAnnotation ? 'hide notes' : hasAnnotation ? 'edit notes' : 'annotate';
-  const screenSummary = screenChoiceSummary(candidate, steps);
+  const numberOf = useStepNumbers();
+  const called = numberOf(candidate);
+  const screenSummary = screenChoiceSummary(candidate, steps, numberOf);
 
   const imageAspectRatio =
     recordingWidth && recordingHeight && recordingWidth > 0 && recordingHeight > 0 ? recordingWidth / recordingHeight : 16 / 10;
@@ -366,7 +369,7 @@ export function CandidateCard({
         style={{ aspectRatio: String(imageAspectRatio) }}
         {...hoverHandlers(hover, liveSlotRef)}
       >
-        <img alt={`candidate screenshot at ${candidate.timestamp_tc}`} src={screenshotUrl(candidate.image_url, imageWidth)} />
+        <img alt={`candidate screenshot at ${candidate.timestamp_tc}`} loading="lazy" src={screenshotUrl(candidate.image_url, imageWidth)} />
         <div aria-hidden="true" className="candidate-live-slot" ref={liveSlotRef} />
         <span aria-hidden="true" className="candidate-hover-progress" />
         {hover?.state === 'armed' ? <PlayFromHereButton iconOnly={compact} onClick={hover.onPlayFromHere} /> : null}
@@ -379,7 +382,7 @@ export function CandidateCard({
               onPointerDown={(event) => event.stopPropagation()}
             >
               <input
-                aria-label={`select step ${candidate.detector_index}`}
+                aria-label={`select ${called.name}`}
                 checked={isSelected}
                 onChange={() => undefined}
                 onClick={(event) => {
@@ -419,7 +422,8 @@ export function CandidateCard({
         <div className="candidate-headline">
           <div className="candidate-heading-copy">
             <strong className="candidate-title">
-              {candidate.candidate_origin === 'manual' ? 'manual step' : 'candidate'} {candidate.detector_index}
+              {candidate.candidate_origin === 'manual' ? 'manual ' : ''}
+              {called.name}
             </strong>
             <div className="candidate-heading-meta">
               <span className={`candidate-status-copy ${candidate.status}`}>{candidate.status}</span>
@@ -643,6 +647,7 @@ export function CandidateRow({
   const noSlot = useRef<HTMLElement | null>(null);
   const paintedDownRef = useRef(false);
   const editing = useStepEditing(candidate);
+  const called = useStepNumbers()(candidate);
   const locked = editing.lockedElsewhere;
   const { title, setTitle, notes, setNotes, commit } = useAnnotationDrafts(candidate, onUpdate, locked);
   const onScreenMs = candidate.score_breakdown?.dwell_after_ms;
@@ -663,7 +668,7 @@ export function CandidateRow({
       <div className="candidate-row-select" role="cell">
         {isSelectable ? (
           <input
-            aria-label={`select step ${candidate.detector_index}`}
+            aria-label={`select ${called.name}`}
             checked={isSelected}
             onChange={() => undefined}
             onClick={(event) => {
@@ -701,9 +706,9 @@ export function CandidateRow({
         {hover?.state === 'armed' ? <PlayFromHereButton iconOnly onClick={hover.onPlayFromHere} /> : null}
       </div>
       <div className="candidate-row-step" role="cell">
-        <strong>
+        <strong className={candidate.status === 'accepted' ? '' : 'is-candidate'} title={called.name}>
           {candidate.candidate_origin === 'manual' ? 'manual ' : ''}
-          {candidate.detector_index}
+          {candidate.status === 'accepted' ? called.number : called.name}
         </strong>
         <span>{candidate.timestamp_tc}</span>
       </div>
@@ -732,7 +737,7 @@ export function CandidateRow({
       </div>
       <div className="candidate-row-title" role="cell">
         <input
-          aria-label={`title of step ${candidate.detector_index}`}
+          aria-label={`title of ${called.name}`}
           className="candidate-field"
           onBlur={(event) => {
             commit('title', event.target.value);
@@ -749,7 +754,7 @@ export function CandidateRow({
       </div>
       <div className="candidate-row-notes" role="cell">
         <input
-          aria-label={`notes on step ${candidate.detector_index}`}
+          aria-label={`notes on ${called.name}`}
           className="candidate-field"
           onBlur={(event) => {
             commit('notes', event.target.value);

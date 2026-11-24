@@ -3,7 +3,7 @@ import test from 'node:test';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { BADGE_HEIGHT, BADGE_WIDTH } from '../src/lib/pathwayBadge';
 import { BADGE_QR } from '../src/lib/pathwayBadgeData';
-import { buildPathwayFigure, pathwayColumnsFor, type PathwayFigureInput } from '../src/lib/pathwayFigure';
+import { buildPathwayFigure, pathwayColumnsFor, pathwayFrameWidth, pathwayScale, type PathwayFigureInput } from '../src/lib/pathwayFigure';
 import { pathwayQueryOptions } from '../src/lib/pathwayQuery';
 import { fitStepGrid, galleryLayoutSizing, STEP_SIZE_MAX, STEP_SIZE_MIN } from '../src/lib/stepLayout';
 import type { Pathway, PathwayScreen, PathwayStep, RunDetail } from '../src/types';
@@ -413,7 +413,7 @@ test('wrapped multi-row pathways label both ends on 1-row wraps and stay inside 
   const screens: PathwayScreen[] = [];
   const steps: PathwayStep[] = [];
   const transitions: Pathway['transitions'] = [];
-  // Desktop 16:9 fits 3 screens per row:
+  // Three screens per row:
   // Row 0: S1 -> S2 -> S3; Row 1: branch S5 below S2; Row 2: S4 (2-row wrap from S3) -> S6 -> S7; Row 3: S8 (1-row wrap from S7) -> S9.
   const add = (index: number, reachedFrom: string | null, rowChoice: PathwayScreen['row_choice'] = 'automatic') => {
     const id = `screen-${String(index).padStart(2, '0')}`;
@@ -460,7 +460,7 @@ test('wrapped multi-row pathways label both ends on 1-row wraps and stay inside 
   add(9, s8);
 
   const wrapped: Pathway = { ...pathway, step_count: steps.length, screen_count: screens.length, steps, screens, transitions };
-  const figure = buildPathwayFigure({ ...input, pathway: wrapped, aspect: 16 / 9, options: { notes: 'hidden', caption: true, times: false }, peek: true });
+  const figure = buildPathwayFigure({ ...input, pathway: wrapped, aspect: 16 / 9, columns: 3, options: { notes: 'hidden', caption: true, times: false }, peek: true });
 
   // S3 -> S4 wraps across 2 rows (row 0 -> row 2) so it uses paired wrap-portal chips.
   const multiWrap = moveGroup(figure.svg, 'move-screen-03-screen-04');
@@ -586,44 +586,170 @@ test('a branch of a box at the end of a row starts a row of its own, drawn as a 
   assert.ok(figure.encodings.hasPortal && figure.encodings.hasBranch);
 });
 
-test('on the page a row takes as many boxes as fit the space with little shrinking; a file keeps the usual width', () => {
-  const draw = treePathway(Array.from({ length: 12 }, (_, index): [number, number | null] => [index + 1, index ? index : null]));
-  const desktop = 3248 / 2122;
-  const file = buildPathwayFigure({ ...input, pathway: draw, aspect: desktop });
+/** A long pathway in one line, as a desktop recording has. */
+const line = (count: number) => treePathway(Array.from({ length: count }, (_, index): [number, number | null] => [index + 1, index ? index : null]));
+const DESKTOP = 3248 / 2122;
+const columnsFor = (draw: Pathway, space: number, zoom: number | null = null) =>
+  pathwayColumnsFor({ pathway: draw, options: input.options, aspect: DESKTOP }, space, zoom);
+const placesIn = (svg: string) =>
+  new Map([...svg.matchAll(/data-screen="([^"]+)"[^>]* transform="translate\(([\d.]+) ([\d.]+)\)"/g)].map((match) => [match[1], { x: Number(match[2]), y: Number(match[3]) }]));
+
+test('fitted to the page, a row takes as many boxes as fit with little shrinking, and a file made there the same', () => {
+  const draw = line(12);
+  const usual = buildPathwayFigure({ ...input, pathway: draw, aspect: DESKTOP });
   for (const space of [1000, 1340, 1600, 2400]) {
-    const columns = pathwayColumnsFor(space, desktop);
+    const columns = columnsFor(draw, space);
     assert.ok(columns >= 2);
-    const page = buildPathwayFigure({ ...input, pathway: draw, aspect: desktop, columns, peek: true });
-    assert.ok(space / page.width >= 0.84, `${space}: the figure is ${page.width} wide, shrunk below 85%`);
+    const page = buildPathwayFigure({ ...input, pathway: draw, aspect: DESKTOP, columns, peek: true });
+    assert.ok(space / page.width >= 0.78, `${space}: the figure is ${page.width} wide, shrunk below 78%`);
+    assert.equal(pathwayScale(page.width, space), Math.min(1, space / page.width));
+    // a file of it has the same rows and size, without what the page adds to its markup
+    const file = buildPathwayFigure({ ...input, pathway: draw, aspect: DESKTOP, columns });
+    assert.deepEqual([file.width, file.height], [page.width, page.height]);
+    assert.deepEqual(placesIn(file.svg), placesIn(page.svg));
+    assert.equal(placesIn(page.svg).size, 12);
+    assert.ok(!file.svg.includes('data-peek'));
     // and it uses the space: one more column would not fit
-    const wider = buildPathwayFigure({ ...input, pathway: draw, aspect: desktop, columns: columns + 1, peek: true });
-    assert.ok(space / wider.width < 0.85 || columns + 1 > 12, `${space}: room for ${columns + 1} columns`);
+    const wider = buildPathwayFigure({ ...input, pathway: draw, aspect: DESKTOP, columns: columns + 1, peek: true });
+    assert.ok(space / wider.width < 0.78 || columns + 1 > 12, `${space}: room for ${columns + 1} columns`);
   }
-  assert.ok(pathwayColumnsFor(1340, desktop) < pathwayColumnsFor(2400, desktop));
-  assert.equal(file.width, buildPathwayFigure({ ...input, pathway: draw, aspect: desktop }).width);
+  assert.ok(columnsFor(draw, 1340) < columnsFor(draw, 2400));
+  assert.equal(columnsFor(line(3), 2400), 3, 'never more than there are boxes');
   // the times under the screens are a size up from the other small labels
-  assert.ok(file.svg.includes('font-size="11" fill="#4a4a45"'));
+  assert.ok(usual.svg.includes('font-size="11" fill="#4a4a45"'));
 });
 
-test('with the optional detours left out, their numbers are hollow and the counts leave them out', () => {
-  // S2 -> S3 (a trip that comes back) and S2 -> S4 -> S5 (the main way); steps 3 and 4 are the trip and the way back
+test('at a chosen size a row takes as many boxes as fit at about that size; beyond 100% the rows stay', () => {
+  const draw = line(40);
+  for (const space of [760, 1000, 1180, 1340, 1700]) {
+    let before = 0;
+    for (let percent = 100; percent >= 25; percent -= 5) {
+      const zoom = percent / 100;
+      const columns = columnsFor(draw, space, zoom);
+      assert.ok(columns >= before, `${space} at ${percent}%: never fewer when smaller`);
+      before = columns;
+      const figure = buildPathwayFigure({ ...input, pathway: draw, aspect: DESKTOP, columns, peek: true });
+      const scale = pathwayScale(figure.width, space, zoom);
+      assert.ok(scale <= zoom && scale > zoom * 0.95, `${space} at ${percent}%: shown at ${scale}`);
+      // it fits without scrolling sideways, unless not even two boxes do
+      assert.ok(columns === 2 || figure.width * scale <= space + 0.01, `${space} at ${percent}%: ${columns} boxes make ${figure.width * scale}`);
+      const wider = buildPathwayFigure({ ...input, pathway: draw, aspect: DESKTOP, columns: columns + 1, peek: true });
+      assert.ok(wider.width * zoom > space * 1.05, `${space} at ${percent}%: room for ${columns + 1}`);
+    }
+    for (const zoom of [1.25, 1.5]) {
+      assert.equal(columnsFor(draw, space, zoom), columnsFor(draw, space, 1), `${space} at ${zoom}: looking closer moves nothing`);
+      assert.equal(pathwayScale(2000, space, zoom), zoom);
+    }
+  }
+});
+
+test('laying a figure out to see how wide it is gives the width it is drawn at', () => {
+  const branches = treePathway([[1, null], [2, 1], [3, 2], [4, 3], [5, 4], [6, 5], [7, 6], [8, 7], [9, 1], [10, 9], [11, 10], [12, 3], [13, 12], [14, 13], [15, 14]]);
+  for (const draw of [line(40), branches, line(1)]) {
+    for (let columns = 2; columns <= 12; columns += 1) {
+      const figure = { ...input, pathway: draw, aspect: DESKTOP, columns, peek: true };
+      const laidOut = buildPathwayFigure({ ...figure, widthOnly: true });
+      assert.equal(laidOut.width, buildPathwayFigure(figure).width, `${columns} columns`);
+      assert.equal(laidOut.svg, '');
+    }
+  }
+});
+
+test('between two boxes there is room for the numbers of the line, also beside a branch that runs down past it', () => {
+  // the main row S1 to S8; S9 to S11 branch from S1, S12 to S15 from S3: that branch runs down past the line S10 -> S11
+  const draw = treePathway([[1, null], [2, 1], [3, 2], [4, 3], [5, 4], [6, 5], [7, 6], [8, 7], [9, 1], [10, 9], [11, 10], [12, 3], [13, 12], [14, 13], [15, 14]]);
+  // the line S5 -> S6 is taken five times, so it has four numbers on it
+  const busy = draw.transitions.find((move) => move.from_screen === 'screen-05' && move.to_screen === 'screen-06');
+  assert.ok(busy);
+  busy.passes = [106, 121, 136, 151, 166].map((step) => ({ ...busy.passes[0], step_id: `busy-${step}`, step_index: step }));
+  const figure = buildPathwayFigure({ ...input, pathway: draw, aspect: DESKTOP, columns: 8, options: { notes: 'hidden', caption: false, times: false } });
+  const places = placesIn(figure.svg);
+  const width = pathwayFrameWidth(DESKTOP);
+  const id = (index: number) => `screen-${String(index).padStart(2, '0')}`;
+  const at = (index: number) => places.get(id(index)) ?? { x: 0, y: 0 };
+  const numbers = (from: number, to: number) => {
+    const rects = [...moveGroup(figure.svg, `move-${id(from)}-${id(to)}`).matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="([\d.]+)" height="15"/g)];
+    const left = Math.min(...rects.map((match) => Number(match[1])));
+    const right = Math.max(...rects.map((match) => Number(match[1]) + Number(match[2])));
+    return { left, right, count: rects.length };
+  };
+  for (const [from, to] of [[1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7], [7, 8], [9, 10], [10, 11], [12, 13], [13, 14], [14, 15]]) {
+    const { left, right, count } = numbers(from, to);
+    assert.ok(count >= 1);
+    assert.ok(left >= at(from).x + width + 16, `S${from} -> S${to}: line before the numbers`);
+    assert.ok(right <= at(to).x - 16, `S${from} -> S${to}: line and arrowhead after the numbers`);
+  }
+  assert.equal(numbers(5, 6).count, 4);
+  // only the gap that needs it is wider
+  const gap = (from: number, to: number) => at(to).x - at(from).x - width;
+  assert.ok(gap(5, 6) > gap(1, 2) + 40 && gap(6, 7) === 72 && gap(4, 5) === 72, [gap(1, 2), gap(4, 5), gap(5, 6), gap(6, 7)].join());
+
+  // the branch S3 -> S12 and the line S10 -> S11 share a gap: its numbers are clear of the branch
+  assert.ok(at(10).y > at(3).y && at(10).y < at(12).y && at(10).x === at(3).x);
+  const trunk = Number(/Q([\d.]+) /.exec(moveGroup(figure.svg, `move-${id(3)}-${id(12)}`))?.[1]);
+  assert.ok(trunk > at(3).x + width && numbers(10, 11).left >= trunk + 6, `branch at ${trunk}, numbers from ${numbers(10, 11).left}`);
+  const branch = numbers(3, 12);
+  assert.ok(branch.left >= trunk + 6 && branch.right <= at(12).x - 16);
+});
+
+test('with the optional detours left out, the numbers count on along the main way and the counts leave them out', () => {
+  // S1 is the opening screen; S2 -> S3 is a trip that comes back, S2 -> S4 -> S5 the main way
   const base = treePathway([[1, null], [2, 1], [3, 2], [4, 2], [5, 4]]);
-  const steps = base.steps.map((step) => ({ ...step, detour: step.step_index === 3, main_step: step.step_index === 3 ? null : step.step_index }));
-  const phase = { name: 'browse', first_step_id: 'step-1', last_step_id: 'step-5', first_step_index: 1, last_step_index: 5,
-    step_count: 5, screen_count: 5, main_step_count: 4, main_screen_count: 4, screen_ids: steps.map((step) => step.screen_id),
+  const ways = ['0', '1', '1a', '2', '3'];
+  const steps = base.steps.map((step, index) => ({ ...step, step_index: index, path_step: ways[index], detour: index === 2 }));
+  const phase = { name: 'browse', first_step_id: 'step-1', last_step_id: 'step-5', first_step_index: 0, last_step_index: 4,
+    step_count: 4, screen_count: 5, main_step_count: 3, main_screen_count: 4, screen_ids: steps.map((step) => step.screen_id),
     start_ms: 1000, end_ms: null, duration_ms: null };
-  const draw = { ...base, steps, phases: [phase], main_step_count: 4, main_screen_count: 4 } as Pathway;
+  const draw = { ...base, steps, phases: [phase], step_count: 4, main_step_count: 3, main_screen_count: 4 } as Pathway;
   const figure = (countDetours?: boolean) =>
     buildPathwayFigure({ ...input, pathway: draw, columns: 4, options: { notes: 'hidden', caption: true, times: false, countDetours } }).svg;
-  const hollow = /<rect [^>]*fill="#fff" stroke="#111" stroke-width="1.1"\/><text [^>]*>3<\/text>/;
+  // the numbers under the boxes and on the lines, without those of the key
+  const numbers = (svg: string, part: string) =>
+    [...(new RegExp(`<g id="${part}">.*?(?=<g id="(?:screens|legend|notes|phases)"|<line id="rule"|$)`, 's').exec(svg)?.[0] ?? '')
+      .matchAll(/font-weight="700"[^>]*>(start|\d+[a-z]*)<\/text>/g)].map((match) => match[1]);
 
   const counted = figure();
-  assert.ok(!hollow.test(counted), 'counted: every number is solid');
-  assert.ok(counted.includes('5 steps on 5 screens'), 'the phase counts every step');
+  assert.deepEqual(numbers(counted, 'screens').sort(), ['1', '2', '3', '4', 'start']);
+  assert.deepEqual(numbers(counted, 'moves').sort(), ['1', '2', '3', '4']);
+  assert.ok(counted.includes('4 steps on 5 screens'), 'the phase counts every step');
   assert.ok(!counted.includes('optional detour'));
+  assert.ok(counted.includes('step number, as in steps.csv'));
 
   const leftOut = figure(false);
-  assert.ok(hollow.test(leftOut), "the trip's number is hollow");
-  assert.ok(leftOut.includes('4 steps on 4 screens'), "the phase's counts leave the trip out");
-  assert.ok(leftOut.includes('step of an optional detour, left out of the counts'), 'the key says what hollow means');
+  assert.deepEqual(numbers(leftOut, 'screens').sort(), ['1', '1a', '2', '3', 'start'], 'no gap, and the last number is the count');
+  assert.deepEqual(numbers(leftOut, 'moves').sort(), ['1', '1a', '2', '3']);
+  assert.ok(leftOut.includes('3 steps on 4 screens'), "the phase's counts leave the trip out");
+  assert.ok(leftOut.includes('step of an optional detour, after step 1'), 'the key says what the letter means');
+  assert.ok(leftOut.includes('(path_step in steps.csv)'), 'and where to find these numbers');
+  // the opening screen has a key of its own, and none without it
+  assert.ok(leftOut.includes('opening screen (step 0)') && counted.includes('opening screen (step 0)'));
+  const later = buildPathwayFigure({ ...input, pathway: base, columns: 4 }).svg;
+  assert.ok(!later.includes('opening screen (step 0)') && !later.includes('>start<'));
+});
+
+test('the steps on one screen: the start stands apart, and a visit splits where it goes from a detour to the main way', () => {
+  // all on one screen: the opening screen, two steps, then the step that comes back from a trip and two more
+  const base = treePathway([[1, null], [2, 1]]);
+  const [home, trip] = base.screens;
+  const step = (index: number, screen: PathwayScreen, way: string, visit = 1) => ({
+    ...base.steps[0], step_id: `step-${index}`, step_index: index, screen_id: screen.id, path_step: way, detour: /[a-z]/.test(way), visit, timestamp_ms: index * 1000,
+  });
+  const steps = [step(0, home, '0'), step(1, home, '1'), step(2, home, '2'), step(3, trip, '2a'), step(4, trip, '2b'), step(5, home, '2c', 2), step(6, home, '3', 2), step(7, home, '4', 2)];
+  const visit = (number: number, ids: number[]) => ({ visit: number, step_ids: ids.map((id) => `step-${id}`), arrived_ms: ids[0] * 1000, time_on_screen_ms: 1000 });
+  const screens = [
+    { ...home, image_step_id: 'step-0', visits: [visit(1, [0, 1, 2]), visit(2, [5, 6, 7])] },
+    { ...trip, image_step_id: 'step-3', visits: [visit(1, [3, 4])] },
+  ];
+  const pass = (index: number) => ({ step_id: `step-${index}`, step_index: index, from_step_id: `step-${index - 1}`, at_ms: index * 1000, transition_type: 'tap' });
+  const draw = {
+    ...base, steps, screens, transitions: [
+      { from_screen: home.id, to_screen: trip.id, kind: 'forward', passes: [pass(3)] },
+      { from_screen: trip.id, to_screen: home.id, kind: 'return', passes: [pass(5)] },
+    ],
+  } as Pathway;
+  const peeks = (countDetours: boolean) =>
+    [...buildPathwayFigure({ ...input, pathway: draw, peek: true, options: { notes: 'hidden', caption: false, times: false, countDetours } }).svg
+      .matchAll(/<g data-peek="([^"]+)">.*?>([^<]+)<\/text><\/g>/g)].map((match) => [match[2], match[1].split(' ').length]);
+  assert.deepEqual(peeks(true), [['start', 1], ['1–2', 2], ['5–7', 3], ['3–4', 2]]);
+  assert.deepEqual(peeks(false), [['start', 1], ['1–2', 2], ['2c', 1], ['3–4', 2], ['2a–b', 2]]);
 });

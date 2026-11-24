@@ -1,5 +1,5 @@
 import { useIsMutating, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { getRunPathway, mergePathwayScreens, notePathwayFigure, restoreRunPhases, setRunPhase } from '../../api';
 import interItalicUrl from '../../assets/fonts/InterVariable-Italic.ttf?url';
@@ -8,7 +8,7 @@ import { markPathwayTutorialSeen, PathwayTutorial, pathwayTutorialSeen } from '.
 import { markWhatsNewSeen, WhatsNewTour, whatsNewSeen } from '../../components/WhatsNewTour';
 import { downloadBlob, downloadText } from '../../lib/accountLinks';
 import { APP_VERSION } from '../../lib/buildInfo';
-import { buildPathwayFigure, formatPathwayTime, pathwayColumnsFor, pathwayFrameWidth, type PathwayFigureOptions, type PathwayNotesPlacement } from '../../lib/pathwayFigure';
+import { buildPathwayFigure, formatPathwayTime, pathwayColumnsFor, pathwayFrameWidth, pathwayScale, type PathwayFigureOptions, type PathwayNotesPlacement } from '../../lib/pathwayFigure';
 import { screenshotUrl, screenshotWidth } from '../../lib/screenshots';
 import { renderPathwayPng } from '../../lib/pathwayPng';
 import {
@@ -25,6 +25,7 @@ import { recordingAspect } from '../../lib/stepLayout';
 import { splitFilename } from '../../lib/utils';
 import type { CandidateChanges, Pathway, PathwayDetail, PathwayStep, RecordingSummary, RunDetail } from '../../types';
 import { useElementWidth } from '../analysis/useElementWidth';
+import { holdPlace, keepPlace, type HeldPlace } from './holdPlace';
 import { PathwayCanvas, type PhaseRequest } from './PathwayCanvas';
 import { usePathwayPeek } from './usePathwayPeek';
 import { track } from '../../lib/usage';
@@ -68,8 +69,11 @@ const NOTES: Array<[PathwayNotesPlacement, string, string]> = [
 // are optional, so counting their steps would not say faithfully how many steps an activity takes.
 const DETOURS: Array<[boolean, string, string]> = [
   [true, 'counted', 'the steps of optional detours count as the others'],
-  [false, 'left out', 'leave the steps of optional detours (trips off the main way that come back to it) out of the counts; their numbers are hollow'],
+  [false, 'left out', 'leave the steps of optional detours (trips off the main way that come back to it) out of the counts and the numbers; they get letters, as in 13a'],
 ];
+
+/** The borders of the frame the figure is in (styles.css .pathway-scroll), in pixels. */
+const FRAME_BORDERS = 2;
 
 /** Today as YYYY-MM-DD, by the clock of this computer. */
 function localDate(): string {
@@ -157,16 +161,23 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   const filename = recording?.filename ?? run.summary.recording_id;
   const hasDetours = Boolean(pathway && pathway.main_step_count !== undefined && pathway.main_step_count < pathway.step_count);
 
-  // On the page, a row takes as many boxes as fit the space at full size, so its labels are not shrunk to fit; a
-  // downloaded figure keeps the usual width. Rebuilt only when that number changes, not with every pixel of a resize.
-  const columns = areaWidth > 0 ? pathwayColumnsFor(areaWidth, aspect) : undefined;
+  // On the page, a row takes as many boxes as fit the space with little shrinking, so its labels stay readable, or as
+  // many as fit at the smaller size the reader chose; a downloaded figure has the same rows. Drawn anew only when that
+  // number changes, not with every pixel of a resize.
+  const space = Math.max(0, areaWidth - FRAME_BORDERS);
+  const rowSize = view.zoom === null ? null : Math.min(1, view.zoom); // beyond 100% the rows stay
+  const columns = useMemo(
+    () => (pathway && space > 0 ? pathwayColumnsFor({ pathway, options, aspect }, space, rowSize) : undefined),
+    [pathway, options, aspect, space, rowSize],
+  );
   // The boxes draw a copy of each screenshot as wide as they are (at most at full size, or as zoomed in), not the
   // screenshot itself; the hovered step's preview shows in the same box. Only a different copy draws them again.
   const boxWidth = pathwayFrameWidth(aspect) * Math.max(1, view.zoom ?? 1);
   const copyWidth = screenshotWidth(boxWidth);
 
-  /** The figure of a pathway: on the page, its boxes and step numbers ready to be selected, dragged and previewed. */
-  function figureFor(source: Pathway, imageFor: (step: PathwayStep) => string, page?: { highlight: string | null; columns?: number }) {
+  /** The figure of a pathway, for a file or the page: there, its boxes and step numbers can be selected, dragged and
+   *  previewed. Both have the same rows. */
+  function figureFor(source: Pathway, imageFor: (step: PathwayStep) => string, page = false) {
     // With the optional detours left out, the counts are those of the main way through, and say what was left out.
     const detourSteps = source.main_step_count === undefined ? 0 : source.step_count - source.main_step_count;
     const counts =
@@ -184,22 +195,21 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
       date: localDate(),
       version: APP_VERSION,
       imageFor,
-      highlight: page?.highlight ?? null,
-      peek: Boolean(page),
-      columns: page?.columns,
+      peek: page,
+      columns,
     });
   }
 
   const figure = useMemo(
     () =>
       pathway && pathway.screens.length
-        ? figureFor(pathway, (step) => screenshotUrl(step.image_url, boxWidth), { highlight: null, columns })
+        ? figureFor(pathway, (step) => screenshotUrl(step.image_url, boxWidth), true)
         : null,
     // figureFor reads only what is listed here; the selection is drawn over the figure (PathwayCanvas)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- boxWidth matters only through copyWidth
     [pathway, options, aspect, filename, projectName, recording?.duration_ms, columns, copyWidth],
   );
-  const peek = usePathwayPeek(pathway, figure?.svg, boxWidth);
+  const peek = usePathwayPeek(pathway, figure?.svg, boxWidth, !view.countDetours);
   // One object per figure: React sets the markup again whenever it gets a new object, even with the same text, and
   // the analysis page renders every second for its clock. That would draw the chart anew each second and take
   // away the step a pointer is resting on.
@@ -211,8 +221,17 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
     return () => window.clearTimeout(timer);
   }, [hasFigure, invite]);
 
-  const fitScale = figure && areaWidth > 0 ? Math.min(1, areaWidth / figure.width) : 1;
-  const scale = view.zoom ?? fitScale;
+  const scale = figure ? pathwayScale(figure.width, space, view.zoom) : 1;
+  const heldRef = useRef<HeldPlace | null>(null);
+  /** The size of the figure on the page (null fits it), keeping the reader's place in it. */
+  function setSize(control: Element, zoom: number | null) {
+    heldRef.current = holdPlace(control, heldRef.current);
+    setView((current) => ({ ...current, zoom }));
+  }
+  useLayoutEffect(() => {
+    if (heldRef.current) keepPlace(heldRef.current);
+    // only when the size changed: the figure is drawn anew for other reasons as well, which hold nothing
+  }, [view.zoom]);
 
   async function handleDownload(format: FigureFormat) {
     if (!pathway || updating) return;
@@ -222,7 +241,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
       const shown = new Map(pathway.steps.map((step) => [step.step_id, step]));
       const images = new Map<string, string>();
       // Three times the size it is drawn at, so the screenshots stay sharp in print.
-      const maxWidth = Math.round(220 * Math.sqrt(aspect) * 3);
+      const maxWidth = pathwayFrameWidth(aspect) * 3;
       for (const screen of pathway.screens) {
         const step = shown.get(screen.image_step_id);
         // a copy at least that wide (not the screenshot itself, often many times larger), made smaller to fit
@@ -319,7 +338,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
     );
   }
 
-  const zoomPercent = Math.round(scale * 100);
+  const zoomPercent = Math.round((view.zoom ?? scale) * 100);
   const barNotes: ReactNode[] = [];
   if (pathwayQuery.isError) barNotes.push('could not load the pathway.');
   else if (!pathway) barNotes.push('loading the pathway…');
@@ -434,7 +453,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
         </div>
         <div className="pathway-controls-group pathway-controls-end">
           <div className="candidate-size-control">
-            <label className="candidate-size-slider" title={`size of the figure on the page: ${zoomPercent}%`}>
+            <label className="candidate-size-slider" title={`size of the figure on the page: ${zoomPercent}%. smaller fits more screens on a row`}>
               <svg aria-hidden="true" fill="currentColor" height="14" viewBox="0 0 14 14" width="14">
                 <rect height="6" rx="1" width="6" x="4" y="4" />
               </svg>
@@ -442,7 +461,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
                 aria-label="size of the figure on the page"
                 max={PATHWAY_ZOOM_MAX * 100}
                 min={PATHWAY_ZOOM_MIN * 100}
-                onChange={(event) => setView((current) => ({ ...current, zoom: clampPathwayZoom(Number(event.target.value) / 100) }))}
+                onChange={(event) => setSize(event.currentTarget, clampPathwayZoom(Number(event.target.value) / 100))}
                 step={5}
                 style={rangeFillStyle(zoomPercent, PATHWAY_ZOOM_MIN * 100, PATHWAY_ZOOM_MAX * 100)}
                 type="range"
@@ -455,7 +474,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
             <button
               aria-pressed={view.zoom === null}
               className={`candidate-filter-tab ${view.zoom === null ? 'active' : ''}`}
-              onClick={() => setView((current) => ({ ...current, zoom: null }))}
+              onClick={(event) => setSize(event.currentTarget, null)}
               title="size the figure to fill the width of the page"
               type="button"
             >
@@ -500,6 +519,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
           busy={updating}
           candidates={run.candidates}
           encodings={figure.encodings}
+          leaveOut={!view.countDetours}
           markup={figureMarkup}
           onMerge={async (sourceId, targetId) => (await mergeMutation.mutateAsync({ sourceId, targetId })).changed}
           onPhaseRequest={setPhases}
@@ -530,7 +550,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
           pathway={pathway}
           runId={runId}
           stickyHeader={controlsBar}
-          width={Math.round(figure.width * scale)}
+          width={Math.floor(figure.width * scale)}
         />
       ) : (
         controlsBar

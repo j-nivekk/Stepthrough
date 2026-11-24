@@ -172,8 +172,8 @@ export function DemoTimeline({ stage, t }: DemoTimelineProps) {
                   x={x(step.from)}
                   y={stepsRowY}
                 />
-                <text className="demo-step-label" x={x(step.groupFrom ?? step.from)} y={stepsRowY + (step.index % 2 ? 31 : 45)}>
-                  {step.index} {LABEL_TEXT[step.label]}
+                <text className="demo-step-label" x={x(step.groupFrom ?? step.from)} y={stepsRowY + (step.index % 2 ? 45 : 31)}>
+                  {step.index || ''} {LABEL_TEXT[step.label]}
                   {step.grouped ? ` ×${step.grouped}` : ''}
                 </text>
                 {stage >= 6 && t >= step.shot ? (

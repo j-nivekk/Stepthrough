@@ -3,7 +3,7 @@ import { busyElsewhere, busyRunIds } from '../../lib/live';
 import { useLive } from '../live/LiveProvider';
 import { absoluteApiUrl } from '../../api';
 import { screenshotUrl } from '../../lib/screenshots';
-import { CandidateCard, CandidateRow, DecisionIcon } from '../../components/CandidateCard';
+import { DecisionIcon } from '../../components/CandidateCard';
 import { CandidateGallery } from '../../components/CandidateGallery';
 import { EditableName } from '../../components/EditableName';
 import {
@@ -89,6 +89,10 @@ import { useHoverClips } from './useHoverClips';
 import { usePlaybackHighlight } from './usePlaybackHighlight';
 import { track } from '../../lib/usage';
 import { withPhaseHeaders } from '../../components/PhaseChoice';
+import { ReviewCard, ReviewRow } from '../../components/ReviewSteps';
+import { StepNumbersProvider } from '../../components/StepNumbers';
+import { reviewNumbers, START } from '../../lib/stepNumbers';
+import { useStable } from '../../lib/useStable';
 
 
 export interface AnalysisScreenProps {
@@ -538,6 +542,20 @@ export function AnalysisScreen({
   const stepPlaybackWindows = useMemo(
     () => playbackWindows(selectedRun?.candidates ?? [], runRecording?.duration_ms ?? 0),
     [runRecording?.duration_ms, selectedRun?.candidates],
+  );
+  // What each screenshot is called: accepted steps as in the pathway and the files, the others as candidates.
+  const stepNumbers = useMemo(
+    () => reviewNumbers(selectedRun?.candidates ?? [], selectedRun?.accepted_steps ?? []),
+    [selectedRun?.candidates, selectedRun?.accepted_steps],
+  );
+  const stepPhases = useMemo(
+    () => (selectedRun ? { runId: selectedRun.summary.id, boundaries: selectedRun.phases } : undefined),
+    [selectedRun?.summary.id, selectedRun?.phases],
+  );
+  // For the steps a phase holds: the opening screen is where they start and none of them.
+  const stepsToCount = useMemo(
+    () => (selectedRun?.candidates ?? []).filter((candidate) => stepNumbers.get(candidate.id)?.number !== START),
+    [selectedRun?.candidates, stepNumbers],
   );
   const timelineCandidates = useMemo(() => {
     if (!selectedRun) {
@@ -1409,6 +1427,41 @@ export function AnalysisScreen({
     };
   }
 
+  // Cards and rows get the same actions on every render, so that only those that look different are drawn again.
+  const stepActions = useStable({
+    activate: (candidateId: string) => setActiveCandidateId(candidateId),
+    hoverChange: (candidateId: string, hovering: boolean) =>
+      setHoveredCandidateId((current) => (hovering ? candidateId : current === candidateId ? null : current)),
+    jumpTo: jumpToAnchor,
+    paintEnter: continuePaintSelect,
+    paintStart: startPaintSelect,
+    setStatus: handleCandidateStatusChange,
+    toggleSelection: toggleCandidateSelection,
+    toggleAnnotation: handleToggleCandidateAnnotation,
+    update: onUpdateCandidate,
+    clipStart: hoverClips.start,
+    clipLeave: hoverClips.leave,
+    playFromHere: handlePlayFromHere,
+  });
+  const selectedShown = new Set(selectedShownCandidateIds);
+  const taskActions = useStable({
+    onAbortRun,
+    onCompareRuns: handleCompareRuns,
+    onDeleteRun: handleDeleteRun,
+    onDuplicateRun,
+    onRenameRun,
+    onDeleteSelectedTasks: () => void handleDeleteSelectedTasks(),
+    onEnterTaskSelectMode: handleEnterTaskSelectMode,
+    onExitTaskSelectMode: handleExitTaskSelectMode,
+    onExpandTaskRun: (runId: string) => setExpandedTaskRunId((current) => (current === runId ? null : runId)),
+    onExportAllCompletedTasks: () => void handleExportAllCompletedTasks(),
+    onExportSelectedTasks: () => void handleExportSelectedTasks(),
+    onReviewTaskOutputs: handleReviewTaskOutputs,
+    onSelectRun,
+    onSetTaskFilter: setTaskFilter,
+    onToggleTaskSelection: toggleTaskSelection,
+  });
+
   function handleStepCandidate(direction: -1 | 1) {
     if (!filteredCandidates.length) {
       return;
@@ -1589,9 +1642,9 @@ export function AnalysisScreen({
           />
 
           <AnalysisTasksPanel
+            {...taskActions}
             analysisTaskItems={analysisTaskItems}
             busyRunIds={runsBusyElsewhere}
-            onCompareRuns={handleCompareRuns}
             analysisMetadata={analysisMetadata}
             bulkDeletePending={bulkDeletePending}
             bulkExportPending={bulkExportPending}
@@ -1599,28 +1652,6 @@ export function AnalysisScreen({
             expandedTaskRunId={expandedTaskRunId}
             videoListFocus={videoListFocus}
             groupedTaskItems={groupedTaskItems}
-            onAbortRun={onAbortRun}
-            onDeleteRun={handleDeleteRun}
-            onDuplicateRun={onDuplicateRun}
-            onRenameRun={onRenameRun}
-            onDeleteSelectedTasks={() => {
-              void handleDeleteSelectedTasks();
-            }}
-            onEnterTaskSelectMode={handleEnterTaskSelectMode}
-            onExitTaskSelectMode={handleExitTaskSelectMode}
-            onExpandTaskRun={(runId) =>
-              setExpandedTaskRunId((current) => (current === runId ? null : runId))
-            }
-            onExportAllCompletedTasks={() => {
-              void handleExportAllCompletedTasks();
-            }}
-            onExportSelectedTasks={() => {
-              void handleExportSelectedTasks();
-            }}
-            onReviewTaskOutputs={handleReviewTaskOutputs}
-            onSelectRun={onSelectRun}
-            onSetTaskFilter={setTaskFilter}
-            onToggleTaskSelection={toggleTaskSelection}
             projectDefaultSettings={projectDefaultSettings}
             runNumberById={runNumberById}
             selectedRunId={selectedRunId}
@@ -2027,7 +2058,7 @@ export function AnalysisScreen({
             ) : null}
 
             {canReviewCandidates && !showPathway ? (
-              <>
+              <StepNumbersProvider numbers={stepNumbers}>
                 {selectedRun.accepted_steps.length > 0 && (
                   <div
                     className={`accepted-strip-shell ${stepLayout.hideAccepted ? 'collapsed' : ''}`}
@@ -2243,8 +2274,8 @@ export function AnalysisScreen({
                                   <span className="candidate-timeline-preview-head">
                                     <span className={`candidate-timeline-preview-dot ${timelineScrub.candidate.status}`} />
                                     <strong>
-                                      {timelineScrub.candidate.candidate_origin === 'manual' ? 'manual' : 'step'}{' '}
-                                      {timelineScrub.candidate.detector_index}
+                                      {timelineScrub.candidate.candidate_origin === 'manual' ? 'manual ' : ''}
+                                      {stepNumbers.get(timelineScrub.candidate.id)?.name ?? 'step'}
                                     </strong>
                                     <small>{timelineScrub.candidate.timestamp_tc}</small>
                                   </span>
@@ -2264,7 +2295,7 @@ export function AnalysisScreen({
                         </>
                       ) : null}
                       {timelineCandidates.map((candidate) => {
-                        const tooltip = `${candidate.candidate_origin === 'manual' ? 'manual' : 'candidate'} ${candidate.detector_index} • ${candidate.timestamp_tc} • ${candidate.status}`;
+                        const tooltip = `${candidate.candidate_origin === 'manual' ? 'manual ' : ''}${stepNumbers.get(candidate.id)?.name ?? 'step'} • ${candidate.timestamp_tc} • ${candidate.status}`;
                         const pinPct = Math.min(
                           100,
                           Math.max(
@@ -2557,34 +2588,23 @@ export function AnalysisScreen({
                       </span>
                     </div>
                     {withPhaseHeaders(filteredCandidates, selectedRun.phases, (candidate) => {
-                      const similarityLink = candidateSimilarityLinks.get(candidate.id);
                       return (
-                        <CandidateRow
+                        <ReviewRow
+                          actions={stepActions}
                           candidate={candidate}
+                          hoverState={hoverClips.hover?.id === candidate.id ? hoverClips.hover.state : null}
                           isActive={activeCandidateId === candidate.id}
                           isCrossHovered={hoveredCandidateId === candidate.id}
-                          isSelectable
-                          isSelected={selectedShownCandidateIds.includes(candidate.id)}
+                          isSelected={selectedShown.has(candidate.id)}
                           key={candidate.id}
-                          onActivate={() => setActiveCandidateId(candidate.id)}
-                          onHoverChange={(hovering) =>
-                            setHoveredCandidateId((current) => (hovering ? candidate.id : current === candidate.id ? null : current))
-                          }
-                          onJumpToSimilar={similarityLink ? () => jumpToAnchor(similarityLink.targetId) : undefined}
-                          onPaintEnter={() => continuePaintSelect(candidate.id)}
-                          onPaintStart={() => startPaintSelect(candidate.id, selectedShownCandidateIds.includes(candidate.id))}
-                          onSetStatus={(status) => handleCandidateStatusChange(candidate, status)}
-                          onToggleSelection={(shift) => toggleCandidateSelection(candidate.id, shift)}
-                          onUpdate={(payload) => onUpdateCandidate(candidate.id, payload)}
-                          similarLink={similarityLink}
+                          phases={stepPhases}
+                          similarLink={candidateSimilarityLinks.get(candidate.id)}
                           steps={selectedRun.candidates}
-                          phases={{ runId: selectedRun.summary.id, boundaries: selectedRun.phases }}
                           thumbHeight={stepThumb.height}
                           thumbWidth={stepThumb.width}
-                          hover={stepHover(candidate)}
                         />
                       );
-                    }, { list: true, allSteps: selectedRun.candidates, durationMs: selectedRecordingSummary?.duration_ms })}
+                    }, { list: true, allSteps: stepsToCount, durationMs: selectedRecordingSummary?.duration_ms })}
                   </div>
                 ) : filteredCandidates.length ? (
                   <div
@@ -2597,38 +2617,26 @@ export function AnalysisScreen({
                     }
                   >
                     {withPhaseHeaders(filteredCandidates, selectedRun.phases, (candidate) => {
-                      const similarityLink = candidateSimilarityLinks.get(candidate.id);
                       return (
-                        <CandidateCard
-                          imageWidth={stepCardWidth}
+                        <ReviewCard
+                          actions={stepActions}
                           candidate={candidate}
                           compact={stepCardWidth < 190}
-                          hover={stepHover(candidate)}
+                          hoverState={hoverClips.hover?.id === candidate.id ? hoverClips.hover.state : null}
+                          imageWidth={stepCardWidth}
                           isActive={activeCandidateId === candidate.id}
                           isAnnotationExpanded={expandedAnnotationCandidateId === candidate.id}
                           isCrossHovered={hoveredCandidateId === candidate.id}
-                          isSelected={selectedShownCandidateIds.includes(candidate.id)}
-                          isSelectable
+                          isSelected={selectedShown.has(candidate.id)}
                           key={candidate.id}
-                          onActivate={() => setActiveCandidateId(candidate.id)}
-                          onHoverChange={(hovering) =>
-                            setHoveredCandidateId((current) => (hovering ? candidate.id : current === candidate.id ? null : current))
-                          }
-                          onJumpToSimilar={similarityLink ? () => jumpToAnchor(similarityLink.targetId) : undefined}
-                          onPaintEnter={() => continuePaintSelect(candidate.id)}
-                          onPaintStart={() => startPaintSelect(candidate.id, selectedShownCandidateIds.includes(candidate.id))}
-                          onSetStatus={(status) => handleCandidateStatusChange(candidate, status)}
-                          onToggleSelection={(shift) => toggleCandidateSelection(candidate.id, shift)}
-                          onToggleAnnotation={() => handleToggleCandidateAnnotation(candidate.id)}
-                          onUpdate={(payload) => onUpdateCandidate(candidate.id, payload)}
+                          phases={stepPhases}
                           recordingHeight={selectedRecordingSummary?.height}
                           recordingWidth={selectedRecordingSummary?.width}
-                          similarLink={similarityLink}
+                          similarLink={candidateSimilarityLinks.get(candidate.id)}
                           steps={selectedRun.candidates}
-                          phases={{ runId: selectedRun.summary.id, boundaries: selectedRun.phases }}
                         />
                       );
-                    }, { list: false, allSteps: selectedRun.candidates, durationMs: selectedRecordingSummary?.duration_ms })}
+                    }, { list: false, allSteps: stepsToCount, durationMs: selectedRecordingSummary?.duration_ms })}
                   </div>
                 ) : (
                   <p className="entry-empty-copy candidate-empty-copy">
@@ -2641,7 +2649,7 @@ export function AnalysisScreen({
                         : `no ${activeCandidateFilter} steps in this view.`}
                   </p>
                 )}
-              </>
+              </StepNumbersProvider>
             ) : null}
           </section>
         ) : selectedRecording ? (

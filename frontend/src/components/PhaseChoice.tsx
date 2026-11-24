@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { setRunPhase } from '../api';
 import { formatPathwayTime } from '../lib/pathwayFigure';
 import type { CandidateFrame } from '../types';
+import { useStepNumbers } from './StepNumbers';
 
 type Boundary = { start_ms: number; name: string };
 
@@ -42,6 +43,7 @@ export function PhaseChoice({
   icon?: ReactNode;
 }) {
   const queryClient = useQueryClient();
+  const numberOf = useStepNumbers();
   const current = phaseAt(phases, candidate.timestamp_ms);
   const names = [...new Set((phases ?? []).map((boundary) => boundary.name).filter(Boolean))];
   const [open, setOpen] = useState(false);
@@ -139,7 +141,7 @@ export function PhaseChoice({
 
   const popover = open ? (
     <div
-      aria-label={`phase of step ${candidate.detector_index}`}
+      aria-label={`phase of ${numberOf(candidate).name}`}
       className="screen-choice-popover phase-choice-popover"
       onClick={stop}
       onPointerDown={stop}

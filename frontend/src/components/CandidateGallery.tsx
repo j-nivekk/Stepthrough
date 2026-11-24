@@ -3,6 +3,7 @@ import { screenshotUrl } from '../lib/screenshots';
 import type { SimilarLink } from '../lib/analysis';
 import { formatPathwayTime } from '../lib/pathwayFigure';
 import type { GalleryLayoutSizing } from '../lib/stepLayout';
+import { START } from '../lib/stepNumbers';
 import type { CandidateChanges, CandidateFrame, CandidateStatus } from '../types';
 import {
   CandidateDecisionButtons,
@@ -20,6 +21,7 @@ import {
 } from './CandidateCard';
 import { PhaseChoice, phaseInfoAt, type PhaseSpanInfo } from './PhaseChoice';
 import { ScreenChoice } from './ScreenChoice';
+import { useStepNumbers } from './StepNumbers';
 
 export interface CandidateGalleryProps {
   candidates: CandidateFrame[];
@@ -120,13 +122,7 @@ export function CandidateGallery({
     [phases?.boundaries],
   );
 
-  // Sequence numbering (1..N) across the run's chronological steps, independent of automatic vs manual origin.
-  const sequenceById = useMemo(() => {
-    const ordered = allSteps
-      .map((step, index) => ({ id: step.id, timestamp_ms: step.timestamp_ms, index }))
-      .sort((left, right) => left.timestamp_ms - right.timestamp_ms || left.index - right.index);
-    return new Map(ordered.map((entry, seq) => [entry.id, seq + 1]));
-  }, [allSteps]);
+  const numberOf = useStepNumbers();
 
   const filmstripGroups = useMemo<FilmstripPhaseGroup[]>(() => {
     if (!hasPhases) {
@@ -148,7 +144,9 @@ export function CandidateGallery({
 
   if (!activeCandidate) return null;
 
-  const activePhase = phaseInfoAt(phases?.boundaries, activeCandidate.timestamp_ms, allSteps, durationMs);
+  // the opening screen is where the steps start and none of them, so a phase does not count it
+  const stepsToCount = allSteps.filter((step) => numberOf(step).number !== START);
+  const activePhase = phaseInfoAt(phases?.boundaries, activeCandidate.timestamp_ms, stepsToCount, durationMs);
   const activeHover = hoverFor(activeCandidate);
   const activeSimilar = similarityLinks.get(activeCandidate.id);
 
@@ -175,7 +173,7 @@ export function CandidateGallery({
           onSetStatus={(status) => onSetStatus(activeCandidate, status)}
           onStep={onStep}
           onToggleSelection={(shift) => onToggleSelection(activeCandidate.id, shift)}
-          sequenceNumber={sequenceById.get(activeCandidate.id) ?? activeIndex + 1}
+          name={numberOf(activeCandidate).name}
           total={candidates.length}
         />
 
@@ -185,7 +183,7 @@ export function CandidateGallery({
           onJumpToSimilar={activeSimilar ? () => onJumpToSimilar(activeSimilar.targetId) : undefined}
           onUpdate={(payload) => onUpdate(activeCandidate.id, payload)}
           phases={phases}
-          sequenceNumber={sequenceById.get(activeCandidate.id) ?? activeIndex + 1}
+          name={numberOf(activeCandidate).name}
           similarLink={activeSimilar}
           steps={allSteps}
         />
@@ -273,7 +271,7 @@ export function CandidateGallery({
                   const isActive = candidate.id === activeCandidate.id;
                   const isSelected = selectedSet.has(candidate.id);
                   const isCrossHovered = hoveredCandidateId === candidate.id;
-                  const sequenceNumber = sequenceById.get(candidate.id) ?? candidate.detector_index;
+                  const called = numberOf(candidate);
                   return (
                     <div
                       aria-selected={isActive}
@@ -307,11 +305,11 @@ export function CandidateGallery({
                       }}
                       role="option"
                       tabIndex={-1}
-                      title={`step ${sequenceNumber} · ${candidate.timestamp_tc}${candidate.title ? ` · ${candidate.title}` : ''}`}
+                      title={`${called.name} · ${candidate.timestamp_tc}${candidate.title ? ` · ${candidate.title}` : ''}`}
                     >
                       <div className="candidate-gallery-thumb-media">
                         <img
-                          alt={`step ${sequenceNumber} at ${candidate.timestamp_tc}`}
+                          alt={`${called.name} at ${candidate.timestamp_tc}`}
                           draggable={false}
                           loading="lazy"
                           src={screenshotUrl(candidate.image_url, sizing.thumbWidth)}
@@ -322,7 +320,7 @@ export function CandidateGallery({
                           onPointerDown={(event) => event.stopPropagation()}
                         >
                           <input
-                            aria-label={`select step ${sequenceNumber}`}
+                            aria-label={`select ${called.name}`}
                             checked={isSelected}
                             onChange={() => undefined}
                             onClick={(event) => {
@@ -345,7 +343,9 @@ export function CandidateGallery({
                         <span aria-hidden="true" className={`candidate-gallery-thumb-status ${candidate.status}`} />
                       </div>
                       <div className="candidate-gallery-thumb-caption">
-                        <span className="candidate-gallery-thumb-num">{sequenceNumber}</span>
+                        <span className={`candidate-gallery-thumb-num ${candidate.status === 'accepted' ? '' : 'is-candidate'}`}>
+                          {called.number}
+                        </span>
                         <span className="candidate-gallery-thumb-time">{candidate.timestamp_tc.slice(3, 8)}</span>
                       </div>
                     </div>
@@ -362,7 +362,8 @@ export function CandidateGallery({
 
 interface GalleryStageProps {
   candidate: CandidateFrame;
-  sequenceNumber: number;
+  /** What the step is called: "step 5", "candidate 7". */
+  name: string;
   activeIndex: number;
   total: number;
   isSelected: boolean;
@@ -374,7 +375,7 @@ interface GalleryStageProps {
 
 function GalleryStage({
   candidate,
-  sequenceNumber,
+  name,
   activeIndex,
   total,
   isSelected,
@@ -400,7 +401,7 @@ function GalleryStage({
           title="select this step for batch actions (x, or shift+x for a range)"
         >
           <input
-            aria-label={`select step ${sequenceNumber}`}
+            aria-label={`select ${name}`}
             checked={isSelected}
             onChange={() => undefined}
             onClick={(event) => onToggleSelection(event.shiftKey)}
@@ -478,7 +479,8 @@ function GalleryStage({
 
 interface GalleryInspectorProps {
   candidate: CandidateFrame;
-  sequenceNumber: number;
+  /** What the step is called: "step 5", "candidate 7". */
+  name: string;
   activePhase: PhaseSpanInfo | null;
   similarLink?: SimilarLink;
   onJumpToSimilar?: () => void;
@@ -489,7 +491,7 @@ interface GalleryInspectorProps {
 
 function GalleryInspector({
   candidate,
-  sequenceNumber,
+  name,
   activePhase,
   similarLink,
   onJumpToSimilar,
@@ -543,7 +545,7 @@ function GalleryInspector({
 
       <div className="candidate-gallery-inspector-head">
         <div className="candidate-gallery-inspector-title-row">
-          <strong className="candidate-title">step {sequenceNumber}</strong>
+          <strong className="candidate-title">{name}</strong>
           {hasFiniteNumber(onScreenMs) ? (
             <span className="candidate-gallery-dwell" title="time on screen">
               {formatSeconds(onScreenMs)}

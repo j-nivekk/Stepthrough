@@ -162,6 +162,7 @@ export const STILL: { from: number; to: number; note?: 'too short' | 'same scree
 ];
 
 export interface DemoStep {
+  /** As the app counts: 0 for the opening screen, which is where the steps start. */
   index: number;
   label: DemoLabel;
   from: number; // settled
@@ -174,10 +175,10 @@ export interface DemoStep {
 }
 
 export const STEPS: DemoStep[] = [
-  { index: 1, label: 'opening_screen', from: 0, to: 1.85, shot: SHOT_OFFSET, title: 'inbox', accepted: true },
-  { index: 2, label: 'navigation', from: 2.6, to: 4.2, shot: 2.6 + SHOT_OFFSET, title: 'open the chat', accepted: true },
+  { index: 0, label: 'opening_screen', from: 0, to: 1.85, shot: SHOT_OFFSET, title: 'inbox', accepted: true },
+  { index: 1, label: 'navigation', from: 2.6, to: 4.2, shot: 2.6 + SHOT_OFFSET, title: 'open the chat', accepted: true },
   {
-    index: 3,
+    index: 2,
     label: 'text_entry',
     from: 6.8,
     to: 7.6,
@@ -187,7 +188,7 @@ export const STEPS: DemoStep[] = [
     title: 'type a reply',
     accepted: true,
   },
-  { index: 4, label: 'content_update', from: 7.8, to: 9.8, shot: 7.8 + SHOT_OFFSET, title: 'reply sent', accepted: true },
-  { index: 5, label: 'scroll', from: 10.6, to: 12.0, shot: 10.6 + SHOT_OFFSET, title: 'older messages', accepted: false },
-  { index: 6, label: 'modal', from: 12.3, to: DURATION, shot: 12.3 + SHOT_OFFSET, title: 'delete dialog', accepted: true },
+  { index: 3, label: 'content_update', from: 7.8, to: 9.8, shot: 7.8 + SHOT_OFFSET, title: 'reply sent', accepted: true },
+  { index: 4, label: 'scroll', from: 10.6, to: 12.0, shot: 10.6 + SHOT_OFFSET, title: 'older messages', accepted: false },
+  { index: 5, label: 'modal', from: 12.3, to: DURATION, shot: 12.3 + SHOT_OFFSET, title: 'delete dialog', accepted: true },
 ];

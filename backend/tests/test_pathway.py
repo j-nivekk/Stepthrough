@@ -6,7 +6,7 @@ import json
 from fastapi.testclient import TestClient
 
 from app.services.export import build_accepted_steps, build_all_candidate_rows
-from app.services.pathway import _mark_detours, _set_continuations, build_pathway
+from app.services.pathway import _letters, _mark_detours, _set_continuations, build_pathway
 
 
 def _candidate(index: int, label: str | None, *, status: str = 'accepted', similar_to: int | None = None,
@@ -48,11 +48,13 @@ def test_a_linear_journey_is_one_screen_per_step() -> None:
 
     assert _screens_of(pathway) == ['screen-01', 'screen-02', 'screen-03']
     assert [screen['reached_from'] for screen in pathway['screens']] == [None, 'screen-01', 'screen-02']
+    # the opening screen is where the steps start: two steps lead on from it
+    assert [step['step_index'] for step in pathway['steps']] == [0, 1, 2]
     assert _moves(pathway) == [
-        ('screen-01', 'screen-02', 'forward', [2]),
-        ('screen-02', 'screen-03', 'forward', [3]),
+        ('screen-01', 'screen-02', 'forward', [1]),
+        ('screen-02', 'screen-03', 'forward', [2]),
     ]
-    assert pathway['step_count'] == 3 and pathway['screen_count'] == 3
+    assert pathway['step_count'] == 2 and pathway['screen_count'] == 3
 
 
 def test_popup_and_return_branch_and_scroll() -> None:
@@ -72,22 +74,22 @@ def test_popup_and_return_branch_and_scroll() -> None:
     assert _screens_of(pathway) == ['screen-01', 'screen-02', 'screen-03', 'screen-02', 'screen-01', 'screen-04',
                                     'screen-04', 'screen-05']
     assert _moves(pathway) == [
-        ('screen-01', 'screen-02', 'forward', [2]),
-        ('screen-02', 'screen-03', 'forward', [3]),
-        ('screen-03', 'screen-02', 'return', [4]),
-        ('screen-02', 'screen-01', 'return', [5]),
-        ('screen-01', 'screen-04', 'forward', [6]),
-        ('screen-04', 'screen-05', 'forward', [8]),
+        ('screen-01', 'screen-02', 'forward', [1]),
+        ('screen-02', 'screen-03', 'forward', [2]),
+        ('screen-03', 'screen-02', 'return', [3]),
+        ('screen-02', 'screen-01', 'return', [4]),
+        ('screen-01', 'screen-04', 'forward', [5]),
+        ('screen-04', 'screen-05', 'forward', [7]),
     ]
     home, settings, popup, explore, _post = pathway['screens']
     assert [screen['kind'] for screen in pathway['screens']] == ['screen', 'screen', 'popup', 'screen', 'screen']
     assert explore['reached_from'] == 'screen-01'  # the branch hangs off Home, not off the pop-up
-    assert [visit['step_ids'] for visit in home['visits']] == [['step-001'], ['step-005']]
-    assert [visit['step_ids'] for visit in explore['visits']] == [['step-006', 'step-007']]
+    assert [visit['step_ids'] for visit in home['visits']] == [['step-000'], ['step-004']]
+    assert [visit['step_ids'] for visit in explore['visits']] == [['step-005', 'step-006']]
     assert explore['time_on_screen_ms'] == 2_000 and home['time_on_screen_ms'] == 2_000
     # A screen is named after its first step that has a title, also when that is a later visit.
-    assert (home['title'], home['title_step_id']) == ('Home', 'step-001')
-    assert (settings['title'], settings['title_step_id']) == ('Settings', 'step-004')
+    assert (home['title'], home['title_step_id']) == ('Home', 'step-000')
+    assert (settings['title'], settings['title_step_id']) == ('Settings', 'step-003')
     assert (popup['title'], popup['title_step_id']) == ('Screen 3', None)
     assert [step['grouped_by'] for step in pathway['steps']] == [None, None, None, 'revisit', 'revisit', None, 'scroll', None]
 
@@ -102,8 +104,8 @@ def test_closing_a_popup_returns_to_the_screen_under_it() -> None:
     assert _screens_of(pathway) == ['screen-01', 'screen-02', 'screen-03', 'screen-03', 'screen-02', 'screen-04']
     assert pathway['steps'][4]['grouped_by'] == 'modal_close'
     assert [screen['kind'] for screen in pathway['screens']] == ['screen', 'screen', 'popup', 'screen']
-    assert _moves(pathway)[:2] == [('screen-01', 'screen-02', 'forward', [2]), ('screen-02', 'screen-03', 'forward', [3])]
-    assert ('screen-03', 'screen-02', 'return', [5]) in _moves(pathway)
+    assert _moves(pathway)[:2] == [('screen-01', 'screen-02', 'forward', [1]), ('screen-02', 'screen-03', 'forward', [2])]
+    assert ('screen-03', 'screen-02', 'return', [4]) in _moves(pathway)
     # By step, only the same screen state shares a box.
     assert len(set(_screens_of(_pathway(candidates, 'steps')))) == 6
 
@@ -227,7 +229,7 @@ def test_rejected_steps_still_decide_which_screen_a_step_is_on() -> None:
     # The rejected step went to a new screen; the accepted scroll after it is on that screen, not on the first.
     moved = [_candidate(1, 'opening_screen'), _candidate(2, 'navigation', status='rejected'), _candidate(3, 'scroll')]
     assert _screens_of(_pathway(moved)) == ['screen-01', 'screen-02']
-    assert _moves(_pathway(moved)) == [('screen-01', 'screen-02', 'forward', [2])]
+    assert _moves(_pathway(moved)) == [('screen-01', 'screen-02', 'forward', [1])]
 
     # A rejected scroll keeps the chain: the next scroll is still on the first screen.
     stayed = [_candidate(1, 'opening_screen'), _candidate(2, 'scroll', status='rejected'), _candidate(3, 'scroll')]
@@ -244,7 +246,7 @@ def test_a_step_added_by_hand_stands_alone_and_does_not_break_the_chain() -> Non
 
     # The scroll's label describes the change from the detected step before it, so it joins that screen.
     assert _screens_of(pathway) == ['screen-01', 'screen-02', 'screen-01']
-    assert _moves(pathway) == [('screen-01', 'screen-02', 'forward', [2]), ('screen-02', 'screen-01', 'return', [3])]
+    assert _moves(pathway) == [('screen-01', 'screen-02', 'forward', [1]), ('screen-02', 'screen-01', 'return', [2])]
     assert pathway['screens'][1]['time_on_screen_ms'] is None  # no timing for a step added by hand
 
 
@@ -253,8 +255,8 @@ def test_a_repeated_move_is_one_transition_with_two_passes() -> None:
                   _candidate(4, 'navigation', similar_to=2)]
 
     assert _moves(_pathway(candidates)) == [
-        ('screen-01', 'screen-02', 'forward', [2, 4]),
-        ('screen-02', 'screen-01', 'return', [3]),
+        ('screen-01', 'screen-02', 'forward', [1, 3]),
+        ('screen-02', 'screen-01', 'return', [2]),
     ]
 
 
@@ -266,8 +268,8 @@ def test_no_accepted_steps_is_an_empty_pathway() -> None:
 def test_every_candidate_can_be_a_step() -> None:
     candidates = [_candidate(1, 'opening_screen', status='rejected'), _candidate(2, 'navigation', status='pending')]
     pathway = build_pathway(build_all_candidate_rows('demo', candidates), candidates)
-    assert [step['step_id'] for step in pathway['steps']] == ['candidate-001', 'candidate-002']
-    assert _moves(pathway) == [('screen-01', 'screen-02', 'forward', [2])]
+    assert [step['step_id'] for step in pathway['steps']] == ['candidate-000', 'candidate-001']
+    assert _moves(pathway) == [('screen-01', 'screen-02', 'forward', [1])]
 
 
 def test_screen_choices_are_saved_checked_and_kept(client: TestClient, video_factory, wait_for_run) -> None:
@@ -356,10 +358,15 @@ def test_run_pathway_and_its_export(client: TestClient, video_factory, wait_for_
     assert all('image_url' not in step and 'export_filename' not in step for step in exported['steps'])
     assert 'the step it arrives at' in exported['field_notes']['transitions.passes']
     # each step's number along the main way, and whether it is an optional detour (here every step counts)
-    assert [(step['main_step'], step['detour']) for step in manifest['steps']] == [(1, False), (2, False), (3, False)]
-    assert exported['main_step_count'] == 3 and exported['step_count'] == 3
+    assert [(step['path_step'], step['detour']) for step in manifest['steps']] == [('0', False), ('1', False), ('2', False)]
+    # the opening screen is step 0, so there are two steps
+    assert [step['step_index'] for step in manifest['steps']] == [0, 1, 2]
+    assert [step['step_id'] for step in manifest['steps']] == ['step-000', 'step-001', 'step-002']
+    assert manifest['steps'][0]['export_filename'].split('__')[1] == 'step-000'
+    assert [step['title'] for step in manifest['steps']] == ['Opening screen', 'Step 1', 'Step 2']
+    assert exported['main_step_count'] == 2 and exported['step_count'] == 2
     rows = list(csv.DictReader((bundle / 'steps.csv').open(encoding='utf-8')))
-    assert [(row['main_step'], row['detour']) for row in rows] == [('1', 'false'), ('2', 'false'), ('3', 'false')]
+    assert [(row['path_step'], row['detour']) for row in rows] == [('0', 'false'), ('1', 'false'), ('2', 'false')]
 
 
 def test_phases_are_named_stretches_of_time() -> None:
@@ -386,8 +393,13 @@ def test_the_pathway_counts_the_steps_screens_and_time_of_each_phase() -> None:
     pathway = build_pathway(build_accepted_steps('demo', candidates), candidates, 'screens', phases)
     assert [step['phase'] for step in pathway['steps']] == [None, 'Sign up', 'Sign up', 'Sign up', 'Sign up', 'Finish']
     assert [(p['name'], p['first_step_index'], p['last_step_index'], p['step_count'], p['screen_count'], p['duration_ms'])
-            for p in pathway['phases']] == [('Sign up', 2, 5, 4, 2, 4_000), ('Finish', 6, 6, 1, 1, 1_500)]
+            for p in pathway['phases']] == [('Sign up', 1, 4, 4, 2, 4_000), ('Finish', 5, 5, 1, 1, 1_500)]
     assert pathway['phases'][0]['screen_ids'] == ['screen-02', 'screen-03']
+    # a phase from the opening screen on: its screen is in it, but no step led there
+    pathway = build_pathway(build_accepted_steps('demo', candidates), candidates, 'screens', [(1_000, 'Start'), (4_000, '')])
+    phase = pathway['phases'][0]
+    assert (phase['first_step_index'], phase['last_step_index'], phase['step_count'], phase['screen_count']) == (0, 2, 2, 2)
+    assert (phase['main_step_count'], phase['main_screen_count']) == (2, 2)
 
 
 def test_the_first_step_with_a_say_about_its_row_decides_for_its_box() -> None:
@@ -414,21 +426,21 @@ def test_phases_are_set_by_steps_and_exported(client: TestClient, video_factory,
 
     answer = client.put(f'/runs/{run_id}/phases', json={'name': ' Look ', 'first_step': first, 'last_step': second})
     assert answer.status_code == 200
-    assert named() == [('Look', 1, 2)]
+    assert named() == [('Look', 0, 1)]
     # the answer is every phase after the change, so a browser can take it back
     after_first = answer.json()['phases']
     assert [b['name'] for b in after_first] == ['Look', '']
     # changed: the old stretch is let go before the new one is named
     changed = {'name': 'Look', 'first_step': second, 'last_step': third, 'replacing': {'first_step': first, 'last_step': second}}
     assert client.put(f'/runs/{run_id}/phases', json=changed).status_code == 200
-    assert named() == [('Look', 2, 3)]
+    assert named() == [('Look', 1, 2)]
     # taken back as a whole, as long as nobody changed them since
     current = client.get(f'/runs/{run_id}').json()['phases']
     assert client.put(f'/runs/{run_id}/phases/all', json={'phases': after_first, 'expected': after_first}).status_code == 409
     assert client.put(f'/runs/{run_id}/phases/all', json={'phases': after_first, 'expected': current}).json()['phases'] == after_first
-    assert named() == [('Look', 1, 2)]
+    assert named() == [('Look', 0, 1)]
     assert client.put(f'/runs/{run_id}/phases/all', json={'phases': current}).status_code == 200
-    assert named() == [('Look', 2, 3)]
+    assert named() == [('Look', 1, 2)]
     # the run itself says where each phase starts, for the step review
     boundaries = client.get(f'/runs/{run_id}').json()['phases']
     assert [b['name'] for b in boundaries] == ['Look'] and boundaries[0]['start_ms'] == steps[1]['timestamp_ms']
@@ -473,12 +485,12 @@ def test_the_long_way_on_carries_the_row_and_the_reviewer_can_say_otherwise() ->
     assert screens([(1, None), (2, 1), (3, 1)])[0]['continues_with'] == 's2'
 
 
-def _walk(visits: list[str], tree: dict[str, str | None], popups: frozenset[str] = frozenset()) -> tuple[list[dict], list[dict]]:
-    """Steps on the screens in ``visits`` (one step each, in time), screens reached as in ``tree``."""
+def _walk(visits: list[str], tree: dict[str, str | None], popups: frozenset[str] = frozenset(), first: int = 0) -> tuple[list[dict], list[dict]]:
+    """Steps on the screens in ``visits`` (one step each, in time, from number ``first``), screens reached as in ``tree``."""
     screens = [{'id': screen, 'reached_from': parent, 'row_choice': 'automatic', 'kind': 'popup' if screen in popups else 'screen'}
                for screen, parent in tree.items()]
     _set_continuations(screens)
-    steps = [{'step_id': f'step-{index}', 'screen_id': screen} for index, screen in enumerate(visits, start=1)]
+    steps = [{'step_id': f'step-{index}', 'step_index': index, 'screen_id': screen} for index, screen in enumerate(visits, start=first)]
     _mark_detours(steps, screens)
     return steps, screens
 
@@ -488,9 +500,20 @@ def test_a_trip_off_the_main_way_that_comes_back_is_optional() -> None:
     tree = {'a': None, 'b': 'a', 'c': 'b', 'd': 'c', 'e': 'b', 'f': 'e', 'g': 'f'}
     steps, screens = _walk(['a', 'b', 'c', 'd', 'b', 'e', 'f', 'g'], tree)
     assert [screen['id'] for screen in screens if screen['main']] == ['a', 'b', 'e', 'f', 'g']
-    # the trip and the step that comes back are optional; the rest are numbered along the main way
+    # the trip and the step that comes back are optional: lettered after the step they leave from, so that the rest are
+    # numbered along the main way without a gap
     assert [step['detour'] for step in steps] == [False, False, True, True, True, False, False, False]
-    assert [step['main_step'] for step in steps] == [1, 2, None, None, None, 3, 4, 5]
+    assert [step['path_step'] for step in steps] == ['0', '1', '1a', '1b', '1c', '2', '3', '4']
+    # without the opening screen the numbers start at 1
+    steps, _ = _walk(['a', 'b', 'c', 'd', 'b', 'e', 'f', 'g'], tree, first=1)
+    assert [step['path_step'] for step in steps] == ['1', '2', '2a', '2b', '2c', '3', '4', '5']
+    # a second trip before the main way goes on takes the next letters; after a step of the main way they start again
+    steps, _ = _walk(['a', 'b', 'c', 'b', 'c', 'b', 'e', 'c', 'e', 'f', 'g'], tree)
+    assert [step['path_step'] for step in steps] == ['0', '1', '1a', '1b', '1c', '1d', '2', '2a', '2b', '3', '4']
+
+
+def test_the_letters_of_a_long_detour_go_on_after_z() -> None:
+    assert [_letters(count) for count in (1, 2, 26, 27, 52, 53, 702, 703)] == ['a', 'b', 'z', 'aa', 'az', 'ba', 'zz', 'aaa']
 
 
 def test_a_trip_that_never_comes_back_or_only_shows_popups_counts() -> None:
@@ -501,16 +524,44 @@ def test_a_trip_that_never_comes_back_or_only_shows_popups_counts() -> None:
     # a pop-up over b, dismissed (b -> p -> b), is in the way, not chosen: counted
     steps, _ = _walk(['a', 'b', 'p', 'b', 'c', 'd'], {'a': None, 'b': 'a', 'p': 'b', 'c': 'b', 'd': 'c'}, frozenset({'p'}))
     assert not any(step['detour'] for step in steps)
-    assert [step['main_step'] for step in steps] == [1, 2, 3, 4, 5, 6]
+    assert [step['path_step'] for step in steps] == ['0', '1', '2', '3', '4', '5']
 
 
 def test_the_pathway_and_its_phases_count_the_steps_with_and_without_detours() -> None:
-    candidates = [_candidate(index, 'tap', similar_to=similar) for index, similar in
-                  [(0, None), (1, None), (2, None), (3, 1), (4, None), (5, None)]]
-    pathway = _pathway(candidates)
-    by_index = {step['step_index']: step for step in pathway['steps']}
-    assert pathway['step_count'] == 6
-    assert pathway['main_step_count'] == sum(1 for step in pathway['steps'] if not step['detour'])
-    assert pathway['main_step_count'] + sum(step['detour'] for step in pathway['steps']) == 6
-    assert all((step['main_step'] is None) == step['detour'] for step in by_index.values())
+    # Home, List, a side trip to Help and back to the List, Detail, Form, Done
+    candidates = [
+        _candidate(1, 'opening_screen'), _candidate(2, 'navigation'), _candidate(3, 'navigation'),
+        _candidate(4, 'navigation', similar_to=2), _candidate(5, 'navigation'), _candidate(6, 'navigation'),
+        _candidate(7, 'navigation'),
+    ]
+    pathway = build_pathway(build_accepted_steps('demo', candidates), candidates, 'screens', [(2_000, 'Find it'), (6_000, '')])
+    assert [step['path_step'] for step in pathway['steps']] == ['0', '1', '1a', '1b', '2', '3', '4']
+    # the counts leave out the opening screen, and the last number is the count: with the detour and without it
+    assert (pathway['step_count'], pathway['screen_count']) == (6, 6)
+    assert (pathway['main_step_count'], pathway['main_screen_count']) == (4, 5)
+    assert pathway['steps'][-1]['step_index'] == pathway['step_count']
+    assert pathway['steps'][-1]['path_step'] == str(pathway['main_step_count'])
+    phase = pathway['phases'][0]
+    assert (phase['step_count'], phase['screen_count'], phase['main_step_count'], phase['main_screen_count']) == (4, 3, 2, 2)
 
+
+def test_the_numbers_start_at_the_opening_screen_only_when_it_is_there() -> None:
+    def numbers(candidates: list[dict]) -> list[int]:
+        return [step['step_index'] for step in build_accepted_steps('demo', candidates)]
+
+    journey = [_candidate(2, 'opening_screen'), _candidate(3, 'navigation'), _candidate(4, 'navigation')]
+    assert numbers(journey) == [0, 1, 2]
+    assert build_accepted_steps('demo', journey)[0]['title'] == 'Opening screen'
+    # rejected, it is not where the steps start: the others keep their numbers
+    assert numbers([_candidate(2, 'opening_screen', status='rejected'), *journey[1:]]) == [1, 2]
+    # turned off, or a run of another engine or made by hand: every step was reached by a change
+    assert numbers(journey[1:]) == [1, 2]
+    assert numbers([_candidate(1, None, origin='manual'), _candidate(2, None, origin='manual')]) == [1, 2]
+    # a step added by hand before the detected opening screen shows it too; one added after it does not
+    assert numbers([_candidate(1, None, origin='manual'), *journey]) == [0, 1, 2, 3]
+    assert numbers([_candidate(1, None, origin='manual'), _candidate(2, 'opening_screen', status='rejected'), *journey[1:]]) == [0, 1, 2]
+    assert numbers([journey[0], *[_candidate(3, None, origin='manual'), _candidate(4, 'navigation')]]) == [0, 1, 2]
+    # an export of every candidate starts there as well
+    rows = build_all_candidate_rows('demo', [_candidate(2, 'opening_screen', status='rejected'), *journey[1:]])
+    assert [(row['step_id'], row['step_index']) for row in rows] == [('candidate-000', 0), ('candidate-001', 1), ('candidate-002', 2)]
+    assert [row['step_index'] for row in build_all_candidate_rows('demo', journey[1:])] == [1, 2]

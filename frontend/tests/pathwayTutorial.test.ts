@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildMockPathway, jsonStep, reasonText, type Choices } from '../src/components/pathwayTutorial/tutorialModel';
+import { buildMockPathway, jsonStep, mockNumber, reasonText, type Choices } from '../src/components/pathwayTutorial/tutorialModel';
 
 // The tutorial teaches the app's rules, so its practice pathway must group the way backend/app/services/pathway.py does.
 const boxes = (choices: Choices = {}, mode: 'screens' | 'steps' = 'screens') =>
@@ -16,6 +16,10 @@ test('the automatic pathway has the two mistakes the lessons are about', () => {
   assert.equal(pathway.screens.find((screen) => screen.id === 4)?.popup, true);
   assert.match(reasonText(pathway, 5, {}), /modal closed/);
   assert.match(reasonText(pathway, 8, {}), /update/);
+  // called as in the app: the opening screen is the start, and the steps count from the change that leaves it
+  assert.deepEqual([1, 2, 8].map(mockNumber), ['start', '1', '7']);
+  assert.match(reasonText(pathway, 8, {}), /stays with 6\.$/);
+  assert.match(reasonText(buildMockPathway({ 6: { link: 1 } }), 6, { 6: { link: 1 } }), /the same screen as the start\.$/);
 });
 
 test('the corrections of the lesson put home together and give the second article a box', () => {
@@ -26,8 +30,8 @@ test('the corrections of the lesson put home together and give the second articl
   // The article branches off home: a row below, one column to the right.
   const article = pathway.screens.find((screen) => screen.id === 7);
   assert.deepEqual([article?.col, article?.row], [1, 1]);
-  assert.deepEqual(jsonStep(pathway, 6, fixed), { step_index: 6, screen_id: 'screen-01', grouped_by: 'researcher', screen_choice: 'same_screen' });
-  assert.deepEqual(jsonStep(pathway, 8, fixed), { step_index: 8, screen_id: 'screen-05', grouped_by: null, screen_choice: 'new_screen' });
+  assert.deepEqual(jsonStep(pathway, 6, fixed), { step_index: 5, screen_id: 'screen-01', grouped_by: 'researcher', screen_choice: 'same_screen' });
+  assert.deepEqual(jsonStep(pathway, 8, fixed), { step_index: 7, screen_id: 'screen-05', grouped_by: null, screen_choice: 'new_screen' });
 });
 
 test('settings before and after the pop-up can be made two screens', () => {

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { formatPathwayTime } from '../../lib/pathwayFigure';
+import { pathwayNumber, stretchName } from '../../lib/stepNumbers';
 import type { Pathway, PathwayPhase } from '../../types';
 import type { PhaseSteps } from '../../api';
 import type { PhaseRequest } from './PathwayCanvas';
@@ -13,6 +14,8 @@ interface PathwayPhasesProps {
   at?: { x: number; y: number };
   onClose: () => void;
   disabled: boolean;
+  /** The optional detours are left out of the numbers and counts. */
+  leaveOut: boolean;
   /** Name the steps from `first_step` to `last_step` (candidate ids) as a phase; '' takes them out of every phase.
    *  `label` says what was done, for the status line and the undo. */
   onSet: (phase: PhaseSteps & { name: string; replacing?: PhaseSteps | null }, label: string) => Promise<void>;
@@ -26,11 +29,6 @@ interface Draft {
   to: number;
 }
 
-const stepsLabel = (phase: Pick<PathwayPhase, 'first_step_index' | 'last_step_index'>): string =>
-  phase.first_step_index === phase.last_step_index
-    ? `step ${phase.first_step_index}`
-    : `steps ${phase.first_step_index}–${phase.last_step_index}`;
-
 /**
  * The phases of the walkthrough, in a small floating panel: named stretches of steps, such as "sign up" or "verify
  * identity". The figure draws each as a bracket over its boxes with how many steps and screens it takes, and the
@@ -38,10 +36,21 @@ const stepsLabel = (phase: Pick<PathwayPhase, 'first_step_index' | 'last_step_in
  * step after its last, so a step added by hand in between belongs to it. Opened from the toolbar's phases, from
  * the toolbox or menu of a selection (with its steps), or from a phase's bracket in the chart.
  */
-export function PathwayPhases({ pathway, request, at, onClose, disabled, onSet }: PathwayPhasesProps) {
+export function PathwayPhases({ pathway, request, at, onClose, disabled, onSet, leaveOut }: PathwayPhasesProps) {
   const phases = pathway.phases ?? [];
   const steps = pathway.steps;
   const byIndex = useMemo(() => new Map(steps.map((step) => [step.step_index, step])), [steps]);
+  // A step is known here by its index; its number is what the figure calls it.
+  const numberAt = (index: number): string => {
+    const step = byIndex.get(index);
+    return step ? pathwayNumber(step, leaveOut) : String(index);
+  };
+  const stepsLabel = (from: number, to: number): string => stretchName(numberAt(from), numberAt(to));
+  const countsOf = (phase: PathwayPhase): string => {
+    const count = leaveOut ? phase.main_step_count ?? phase.step_count : phase.step_count;
+    const screens = leaveOut ? phase.main_screen_count ?? phase.screen_count : phase.screen_count;
+    return `${count} ${count === 1 ? 'step' : 'steps'} on ${screens} ${screens === 1 ? 'screen' : 'screens'}`;
+  };
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -137,7 +146,7 @@ export function PathwayPhases({ pathway, request, at, onClose, disabled, onSet }
   function save() {
     if (!draft || !draft.name.trim()) return;
     const name = draft.name.trim();
-    const stretch = stepsLabel({ first_step_index: draft.from, last_step_index: draft.to });
+    const stretch = stepsLabel(draft.from, draft.to);
     const label = !draft.phase
       ? `named ${stretch} ${name}`
       : draft.phase.name === name
@@ -176,7 +185,7 @@ export function PathwayPhases({ pathway, request, at, onClose, disabled, onSet }
     const step = byIndex.get(index);
     return (
       <option key={index} value={index}>
-        {step ? `${index}, at ${formatPathwayTime(step.timestamp_ms)}` : index}
+        {step ? `${numberAt(index)}, at ${formatPathwayTime(step.timestamp_ms)}` : index}
       </option>
     );
   };
@@ -205,11 +214,11 @@ export function PathwayPhases({ pathway, request, at, onClose, disabled, onSet }
             disabled={disabled || saving}
             key={`${phase.first_step_id}-${phase.name}`}
             onClick={() => start(phase)}
-            title={`${phase.name}: ${phase.step_count} ${phase.step_count === 1 ? 'step' : 'steps'} on ${phase.screen_count} ${phase.screen_count === 1 ? 'screen' : 'screens'}; click to change it`}
+            title={`${phase.name}: ${countsOf(phase)}; click to change it`}
             type="button"
           >
             <span className="pathway-chip-name">{phase.name}</span>
-            <span className="pathway-chip-steps">{stepsLabel(phase)}</span>
+            <span className="pathway-chip-steps">{stepsLabel(phase.first_step_index, phase.last_step_index)}</span>
           </button>
         ))}
         {draft?.phase === null ? null : (

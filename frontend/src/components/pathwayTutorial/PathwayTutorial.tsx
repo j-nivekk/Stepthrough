@@ -9,6 +9,9 @@ import {
   buildMockPathway,
   isPopup,
   jsonStep,
+  mockName,
+  mockNames,
+  mockNumber,
   mockStep,
   reasonText,
   type BoxMode,
@@ -60,14 +63,14 @@ const LESSONS: Lesson[] = [
     title: 'follow the journey',
     guide: '#pathway',
     guideLabel: 'reading a pathway',
-    task: 'walk through the journey with ▶ until you reach step 8.',
+    task: 'walk through the journey with ▶ until you reach step 7.',
   },
   {
     name: 'why together',
     title: 'why steps share a box',
     guide: '#pathway',
     guideLabel: 'which steps count as the same screen',
-    task: 'click the step numbers 3, 5 and 8 under the boxes to see why each is where it is.',
+    task: 'click the step numbers 2, 4 and 7 under the boxes to see why each is where it is.',
   },
   {
     name: 'check it',
@@ -81,7 +84,7 @@ const LESSONS: Lesson[] = [
     title: 'correct it, step by step',
     guide: '#pathway',
     guideLabel: 'when the pathway gets it wrong',
-    task: 'put step 6 on home (box 1), and give step 8 a screen of its own.',
+    task: 'put step 5 on home (box 1), and give step 7 a screen of its own.',
   },
   {
     name: 'decide',
@@ -110,21 +113,21 @@ const VERDICTS: Array<[Verdict, string]> = [
   ['merged', 'no: different screens in one box'],
 ];
 
-const SPLIT = 'found it: home is in two boxes. 1 and 6 both show home, but 6 has a badge that 1 did not, so it was not the same picture and got a box of its own. one screen, split in two.';
+const SPLIT = 'found it: home is in two boxes. the start and step 5 both show home, but 5 has a badge that the start did not, so it was not the same picture and got a box of its own. one screen, split in two.';
 const MERGED =
-  'found it: 7 and 8 are two different articles, with another headline and another picture. reading a second article is going to another place in the app, so it needs a box of its own. stepthrough saw that the layout stayed and only the text and the picture changed, labelled 8 an update, and kept it with 7. two screens in one box.';
+  'found it: 6 and 7 are two different articles, with another headline and another picture. reading a second article is going to another place in the app, so it needs a box of its own. stepthrough saw that the layout stayed and only the text and the picture changed, labelled 7 an update, and kept it with 6. two screens in one box.';
 
 /** What each answer about each box of the automatic pathway means. */
 const ANSWERS: Record<number, Record<Verdict, { ok: boolean; text: string }>> = {
   1: {
     right: { ok: false, text: 'box 1 on its own is fine. but is there another box that shows home too?' },
     split: { ok: true, text: SPLIT },
-    merged: { ok: false, text: 'box 1 holds one step only, so it cannot hold two screens.' },
+    merged: { ok: false, text: 'box 1 holds one screenshot only, so it cannot hold two screens.' },
   },
   2: {
-    right: { ok: true, text: 'right: 2, 3 and 5 are all settings: opened, scrolled, and back after the pop-up with notifications on. one place.' },
+    right: { ok: true, text: 'right: 1, 2 and 4 are all settings: opened, scrolled, and back after the pop-up with notifications on. one place.' },
     split: { ok: false, text: 'no other box shows settings.' },
-    merged: { ok: false, text: '2, 3 and 5 look a little different, but all are the settings screen: scrolled, and with a switch now on. one place.' },
+    merged: { ok: false, text: '1, 2 and 4 look a little different, but all are the settings screen: scrolled, and with a switch now on. one place.' },
   },
   4: {
     right: { ok: true, text: 'right: a pop-up is a screen of its own, drawn with a dashed frame.' },
@@ -137,8 +140,8 @@ const ANSWERS: Record<number, Record<Verdict, { ok: boolean; text: string }>> = 
     merged: { ok: false, text: 'it holds one step only, so it cannot hold two screens. but which screen is it?' },
   },
   7: {
-    right: { ok: false, text: 'look inside: hover 7 and 8. are they the same article?' },
-    split: { ok: false, text: 'no other box shows these articles. but are 7 and 8 the same article?' },
+    right: { ok: false, text: 'look inside: hover 6 and 7. are they the same article?' },
+    split: { ok: false, text: 'no other box shows these articles. but are 6 and 7 the same article?' },
     merged: { ok: true, text: MERGED },
   },
 };
@@ -318,7 +321,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   }
 
   function inspect(n: number) {
-    setBubble((shown) => (shown?.step === n ? null : { step: n, text: `${n} · ${reasonText(pathway, n, choices)}` }));
+    setBubble((shown) => (shown?.step === n ? null : { step: n, text: `${mockNumber(n)} · ${reasonText(pathway, n, choices)}` }));
     setInspected((previous) => new Set(previous).add(n));
   }
 
@@ -530,7 +533,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
   const stepTool =
     lesson === 4 && chosenStep !== null ? (
       <>
-        <span className="pathway-tool-label">step {chosenStep}</span>
+        <span className="pathway-tool-label">{mockName(chosenStep)}</span>
         {canSplitOwn ? (
           <button className={`pathway-tool${shade('tool:own')}`} onClick={() => choose(chosenStep, 'new')} type="button">
             own screen
@@ -625,8 +628,9 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     body = (
       <>
         <p>
-          the black numbers are step numbers, as in the step list and <code>steps.csv</code>. each arrow carries the
-          number of the step it leads to, so you can read the journey straight through from 1 onwards.
+          the journey begins at <b>start</b>, the opening screen: nothing was done to get there, so it is not a step. the
+          black numbers are step numbers, as in <code>steps.csv</code>. each arrow carries the number of the step it leads
+          to, so you can read the journey straight through from 1 onwards.
         </p>
         <p>
           solid arrows move onwards (<b>amber</b> on a branch or detour), while <b>dashed blue</b> arrows return to a
@@ -641,7 +645,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
           ◀
         </button>
         <span className="pt-walk-text">
-          <b>step {current}</b> · {story?.story}
+          <b>{current ? mockName(current) : ''}</b> · {story?.story}
         </span>
         <button aria-label="next step" className={`demo-icon-button primary${shade('walk:next')}`} disabled={current === 8} onClick={() => setCurrent((n) => Math.min(8, (n ?? 0) + 1))} type="button">
           ▶
@@ -750,8 +754,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     below = inside ? (
       <div className="pt-inside-wrap">
         <p className="pt-inside-title">
-          {picked !== null ? `step ${picked} is in ` : 'inside '}box {inside.index}, <b>{inside.title}</b>
-          {inside.steps.length === 1 ? ': one step' : `: steps ${inside.steps.join(', ')}`}
+          {picked !== null ? `${mockName(picked)} is in ` : 'inside '}box {inside.index}, <b>{inside.title}</b>: {mockNames(inside.steps)}
           {picked !== null ? ' (in screens view)' : ''}
         </p>
         <div className="pt-inside">
@@ -762,7 +765,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
                 <rect fill="none" height={ART_HEIGHT} stroke="#111" strokeWidth={1} width={ART_WIDTH} />
               </svg>
               <figcaption>
-                <b>{n}</b> {mockStep(n).label}
+                <b>{mockNumber(n)}</b> {mockStep(n).label}
               </figcaption>
             </figure>
           ))}
@@ -813,12 +816,12 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     const targetBox = drag?.target !== undefined && drag?.target !== null && drag.target !== 'new' ? pathway.screens.find((screen) => screen.id === drag.target) : undefined;
     const status = drag?.moved
       ? drag.target === 'new'
-        ? `let go to give step ${drag.n} a screen of its own`
+        ? `let go to give ${mockName(drag.n)} a screen of its own`
         : targetBox
-          ? `let go to put step ${drag.n} on box ${targetBox.index}, ${targetBox.title}`
+          ? `let go to put ${mockName(drag.n)} on box ${targetBox.index}, ${targetBox.title}`
           : 'let go outside the chart, or press Escape, to leave it'
       : chosenStep !== null
-        ? `step ${chosenStep}: drag it onto a box, or use the toolbox`
+        ? `${mockName(chosenStep)}: drag it onto a box, or use the toolbox`
         : 'click a step number to select that step, or drag it onto a box';
     tools = (
       <div className="pt-status">
@@ -833,7 +836,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     if (done.has(4))
       after = (
         <p className="pt-feedback">
-          both fixed. each choice is stored on its step: the step list shows <code>stacking: same as 1</code>, and{' '}
+          both fixed. each choice is stored on its step: the step list shows <code>stacking: same as start</code>, and{' '}
           <code>pathway.json</code> marks the grouping as <code>researcher</code>.
         </p>
       );
@@ -841,7 +844,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
     body = (
       <>
         <p>
-          step 5 is settings again, with notifications now switched on. stepthrough put it with 2, because the
+          step 4 is settings again, with notifications now switched on. stepthrough put it with 1, because the
           pop-up closed. but is &ldquo;off&rdquo; and &ldquo;on&rdquo; one screen or two?
         </p>
         <p>
@@ -1053,7 +1056,7 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
             />
             {drag?.moved ? (
               <span aria-hidden="true" className="pathway-ghost" style={{ left: drag.x + 14, top: drag.y + 14 }}>
-                step {drag.n}
+                {mockName(drag.n)}
               </span>
             ) : null}
             {below ? <div className="pt-below">{below}</div> : null}

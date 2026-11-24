@@ -7605,6 +7605,18 @@ button:disabled {
   font-weight: 400;
 }
 
+/* A candidate that is no step (yet), where accepted steps are shown by their number alone. */
+.candidate-row-step strong.is-candidate {
+  font-size: 12px;
+}
+
+.candidate-row-step strong.is-candidate,
+.candidate-gallery-thumb-num.is-candidate,
+.screen-choice-step strong.is-candidate {
+  color: rgba(0, 0, 0, 0.55);
+  font-weight: 400;
+}
+
 .candidate-row-label {
   grid-area: label;
   display: flex;

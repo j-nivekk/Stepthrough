@@ -48,11 +48,15 @@ FIELD_NOTES = {
                           "screen it was reached from) or below (on a row of its own under it)",
     "screens.main": "the screen is on the main way through: the chain of screens that carry the rows on, from the "
                     "first screen (continues_with)",
-    "steps.main_step": "the step's number along the main way through, leaving out optional detours; null for a step "
-                       "of a detour",
+    "steps.step_index": "the step's number: 0 for the opening screen, which is where the walkthrough starts and no "
+                        "step of it, then 1, 2 and so on; without the opening screen, from 1",
+    "steps.path_step": "the step's number along the main way through, leaving out optional detours: 13, or 13a, 13b "
+                       "and so on for the steps of a detour taken after step 13, with the step that comes back",
     "steps.detour": "the step is part of an optional detour: a trip off the main way through that comes back to it "
                     "(with the step that comes back); a trip that never comes back, or that only shows pop-ups, "
                     "is not optional",
+    "step_count": "how many steps were taken: the opening screen (step 0) is where they start and not counted, here "
+                  "and in phases",
     "main_step_count": "how many steps there are without the optional detours (main_screen_count: on how many screens)",
     "screens.continues_with": "the screen that carries this one's row on in the figure: the one the reviewer put on "
                               "the row, or else the one with the most screens reached after it (the long way on "
@@ -217,6 +221,11 @@ def set_phase(boundaries: Sequence[tuple[int, str]], name: str, start_ms: int, e
     return tidy_phases(kept)
 
 
+def _steps_taken(steps: list[dict[str, Any]]) -> int:
+    """How many of these are steps: the opening screen (number 0) is where they start from."""
+    return sum(1 for step in steps if step["step_index"] > 0)
+
+
 def _phase_stretches(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Consecutive steps in the same phase, with how many steps and screens and how long."""
     stretches: list[dict[str, Any]] = []
@@ -244,16 +253,16 @@ def _phase_stretches(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             end_ms = None
         screen_ids = list(dict.fromkeys(step["screen_id"] for step in members))
-        main_members = [step for step in members if not step.get("detour")]
+        main_members = [step for step in members if not step["detour"]]
         phases.append({
             "name": stretch["name"],
             "first_step_id": first["step_id"],
             "last_step_id": last["step_id"],
             "first_step_index": first["step_index"],
             "last_step_index": last["step_index"],
-            "step_count": len(members),
+            "step_count": _steps_taken(members),
             "screen_count": len(screen_ids),
-            "main_step_count": len(main_members),
+            "main_step_count": _steps_taken(main_members),
             "main_screen_count": len({step["screen_id"] for step in main_members}),
             "screen_ids": screen_ids,
             "start_ms": first["timestamp_ms"],
@@ -283,6 +292,15 @@ def _set_continuations(screens: list[dict[str, Any]]) -> None:
         screen["continues_with"] = chosen["id"] if chosen else None
 
 
+def _letters(count: int) -> str:
+    """1 is a, 26 is z, 27 is aa, as the columns of a spreadsheet go."""
+    letters = ""
+    while count > 0:
+        count, rest = divmod(count - 1, 26)
+        letters = chr(ord("a") + rest) + letters
+    return letters
+
+
 def _mark_detours(steps: list[dict[str, Any]], screens: list[dict[str, Any]]) -> None:
     """Mark the main way through and the optional detours from it.
 
@@ -291,7 +309,9 @@ def _mark_detours(steps: list[dict[str, Any]], screens: list[dict[str, Any]]) ->
     comes back to it; its steps, and the step that comes back, are optional (``detour``): without the trip the user
     would still be where they left. A run that never comes back (the recording ends there) is part of what was
     done, and so is a trip that only shows pop-ups, which the app puts in the way rather than the user choosing them.
-    Every other step gets its number along the main way (``main_step``)."""
+    Every step gets its number along the main way (``path_step``), so that the numbers add up without the detours: the
+    other steps count on from the first one's number, and the steps of a detour have a letter after the number of the
+    step they leave from (13a, 13b), up to the next step of the main way."""
     by_id = {screen["id"]: screen for screen in screens}
     main: set[str] = set()
     screen = screens[0] if screens else None
@@ -314,13 +334,15 @@ def _mark_detours(steps: list[dict[str, Any]], screens: list[dict[str, Any]]) ->
                 for each in [*trip, step]:
                     each["detour"] = True
             start = None
-    number = 0
-    for step in steps:
+    number = steps[0]["step_index"] - 1 if steps else 0
+    aside = 0
+    for step in steps:  # the first is on the first screen, so always on the main way
         if step["detour"]:
-            step["main_step"] = None
+            aside += 1
+            step["path_step"] = f"{number}{_letters(aside)}"
         else:
-            number += 1
-            step["main_step"] = number
+            number, aside = number + 1, 0
+            step["path_step"] = str(number)
 
 
 def build_pathway(
@@ -433,9 +455,9 @@ def build_pathway(
     return {
         "format": PATHWAY_FORMAT,
         "detail": detail,
-        "step_count": len(steps),
+        "step_count": _steps_taken(steps),
         "screen_count": len(screens),
-        "main_step_count": len(main_steps),
+        "main_step_count": _steps_taken(main_steps),
         "main_screen_count": len({step["screen_id"] for step in main_steps}),
         "steps": steps,
         "screens": screens,

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, type PointerEvent } from 'react';
 
 import { screenshotUrl, screenshotWidth } from '../../lib/screenshots';
+import { pathwayNumber, stepName } from '../../lib/stepNumbers';
 import type { Pathway } from '../../types';
 
 /** How long each step of a number like `2–3` stays in the box while the pointer rests on it. */
@@ -19,12 +20,18 @@ interface Peek {
  * only its first step. The chart is markup from buildPathwayFigure with `peek`: this only changes attributes in it,
  * so nothing is drawn again, and leaving the number puts everything back.
  */
-export function usePathwayPeek(pathway: Pathway | undefined, markup: string | undefined, boxWidth: number) {
+export function usePathwayPeek(pathway: Pathway | undefined, markup: string | undefined, boxWidth: number, leaveOut: boolean) {
   // the same copy of each screenshot as the boxes draw (lib/screenshots.ts)
   const copyWidth = screenshotWidth(boxWidth);
   const steps = useMemo(
-    () => new Map((pathway?.steps ?? []).map((step) => [step.step_id, { url: screenshotUrl(step.image_url, copyWidth, 1), index: step.step_index }])),
-    [pathway, copyWidth],
+    () =>
+      new Map(
+        (pathway?.steps ?? []).map((step) => [
+          step.step_id,
+          { url: screenshotUrl(step.image_url, copyWidth, 1), name: stepName(pathwayNumber(step, leaveOut)) },
+        ]),
+      ),
+    [pathway, copyWidth, leaveOut],
   );
   const current = useRef<Peek | null>(null);
 
@@ -60,7 +67,7 @@ export function usePathwayPeek(pathway: Pathway | undefined, markup: string | un
       const label = tag?.querySelector('text');
       const back = tag?.querySelector('rect');
       if (tag && label && back) {
-        label.textContent = `step ${step.index}`;
+        label.textContent = step.name;
         const width = (label instanceof SVGTextContentElement ? label.getComputedTextLength() : 30) + 14;
         back.setAttribute('width', String(width));
         label.setAttribute('x', String(5 + width / 2));

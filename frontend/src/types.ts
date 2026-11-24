@@ -475,6 +475,7 @@ export type PathwayRowChoice = 'continue' | 'below';
 
 export interface PathwayStep {
   step_id: string;
+  /** 0 for the opening screen, which is where the steps start and none of them; see lib/stepNumbers.ts. */
   step_index: number;
   screen_id: string;
   visit: number;
@@ -495,10 +496,11 @@ export interface PathwayStep {
   phase?: string | null;
   /**
    * Part of an optional detour: a trip off the main way through that comes back to it, with the step that comes
-   * back (services/pathway.py). Such a step has no `main_step`, its number along the main way.
+   * back (services/pathway.py).
    */
   detour?: boolean;
-  main_step?: number | null;
+  /** The number along the main way: "13", or "13a" for the first step of a detour taken after step 13. */
+  path_step?: string;
   source_candidate_id: string;
 }
 
@@ -538,6 +540,7 @@ export interface PathwayPhase {
   last_step_id: string;
   first_step_index: number;
   last_step_index: number;
+  /** Without the opening screen, which no step led to. */
   step_count: number;
   screen_count: number;
   /** The same without the steps of optional detours (from the server). */
@@ -569,6 +572,7 @@ export interface PathwayTransition {
 export interface Pathway {
   format: string;
   detail: PathwayDetail;
+  /** Without the opening screen, which no step led to (it is in `steps`). */
   step_count: number;
   screen_count: number;
   /** The steps without the optional detours, and on how many screens they are (from the server). */

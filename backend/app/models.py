@@ -482,7 +482,7 @@ class PathwayStepResponse(BaseModel):
     kind_choice: Literal["automatic", "screen", "popup"] = "automatic"
     phase: str | None = None
     detour: bool = False
-    main_step: int | None = None
+    path_step: str
     source_candidate_id: str
 
 

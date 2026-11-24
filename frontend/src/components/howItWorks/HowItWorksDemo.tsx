@@ -248,7 +248,7 @@ export function HowItWorksDemo({ onClose }: HowItWorksDemoProps) {
                         </div>
                         <figcaption>
                           <span className="demo-thumb-swatch" style={{ background: LABEL_COLOURS[step.label] }} />
-                          {step.index} {LABEL_TEXT[step.label]}
+                          {step.index || ''} {LABEL_TEXT[step.label]}
                           {stage >= 7 && decided ? <em>{step.accepted ? step.title : 'rejected'}</em> : null}
                         </figcaption>
                       </figure>

@@ -49,7 +49,8 @@ To see this as an animation, open Stepthrough and choose **about → how it work
 | **project** | a folder for one study, app or topic; it holds the recordings and their runs |
 | **recording** | a screen recording you imported |
 | **run** (or task) | one analysis of a recording with one set of settings; you can analyse a recording as often as you like |
-| **step** | a screen that stayed still long enough to count, with one screenshot; until you review it, it is called a candidate |
+| **step** | a screen that stayed still long enough to count, with one screenshot; until you accept it, it is called a candidate |
+| **start** | the opening screen, which the recording starts on. Nothing was done to get there, so it is where the steps start and not one of them; it has a screenshot like the steps, and the number 0 in the files |
 | **accepted step** | a step you decided belongs in the walkthrough |
 | **label** | the kind of change that led to a step, such as navigation, scroll or typing |
 | **screen** | one or more steps that show the same screen of the app, such as a page before and after scrolling |
@@ -354,7 +355,7 @@ Labels describe the change. They never decide what counts as a step.
 
 | label | meaning |
 | --- | --- |
-| opening | the screen the recording starts on (step 0) |
+| opening | the screen the recording starts on (the start, step 0) |
 | navigation | most of the screen changed: a new page or view |
 | scroll | the content moved and then stopped |
 | modal | a pop-up or panel appeared over a dimmed screen |
@@ -394,7 +395,7 @@ settings for a short explanation of each one.
 | **phone status bar** | include or ignore the clock, battery and recording indicator | include it only if it matters for your question |
 | **scrolling** | **each stop**: every place where the page stops is a step; **merge stops**: only the first one is kept | merge stops when only the end of a long scroll matters |
 | **group typing** | a burst of typing with short pauses becomes one step | turn it off if every pause matters |
-| **opening screen** | include the screen the recording starts on as step 0 | turn it off if the first screen is not part of the task |
+| **opening screen** | include the screen the recording starts on, as step 0 | turn it off if the first screen is not part of the task |
 | **read text (ocr)** | reads the text in each screenshot into the export (`ocr_text`) | when you need the words themselves; it does not help find steps, and it makes runs slower |
 | **pixel threshold** (advanced) | how much a pixel must change, compared with the flicker measured in the recording | raise it for very grainy recordings |
 | **analysis rate** (advanced) | how many frames per second are compared | rarely; lower is faster |
@@ -440,8 +441,12 @@ While the video plays, the card of the step on screen is outlined, so you can se
 | change the layout | **grid**, **list** or **gallery**; the slider sets the size of the images, and **fit** goes back to fitting the view to the window |
 | select several steps | tick or drag across their boxes; shift-click a box (or shift/⌘/ctrl-click thumbnails in gallery view) to select a range or toggle items. **select: all**, **none** and **invert** above the steps act on the steps shown, as does the box above the list; `x` (and `shift+x`) does the same for the step in focus |
 | accept, reject or reset many steps at once | select them, then **accept**, **reject** or **reset** next to how many are selected. Steps that are so already are left as they are, and the selection stays, so a mistaken choice can be put right at once |
-| go to an earlier visit of the same screen | **similar to candidate N** on a revisit |
+| go to an earlier visit of the same screen | **similar to step N** on a revisit |
 | say which screen a step shows in the pathway | **stacking** under **annotate** on a card, in the **label, screen** column of the list, or in the gallery inspector |
+
+An accepted step has the number it has in the pathway and the export, **step 5**; a screenshot you have not accepted
+is a **candidate**, numbered in the order it was found. So rejecting a candidate leaves no gap: the steps after it
+count on. The opening screen is **start**.
 
 ### Comparing runs
 
@@ -476,7 +481,10 @@ it, and it stays under **about** as **what's new in 1.4**.
 
 How to read it:
 
-- The black numbers are step numbers, the same as in the step list and in `steps.csv`. A screen shows the
+- The journey begins at **start**, the opening screen. A step is a change of the screen, and nothing led to this one,
+  so it is not counted as a step: the first step is the change that leaves it. If you reject the opening screen, or
+  it is turned off in the settings, there is no start, and the journey begins at step 1.
+- The black numbers are step numbers, the same as on the accepted steps and in `steps.csv`. A screen shows the
   steps taken on it, each with its time. An arrow shows the number of the step it leads to, so you can
   follow the journey from 1 onwards.
 - A solid arrow goes onwards; a dashed arrow goes back to a screen that was first seen earlier.
@@ -570,19 +578,25 @@ of its first step up to the step after its last, so a step you add by hand in be
 | move one step to another box | drag its number onto that box, or **put it on…** |
 | take a change back | **⌘Z** (Ctrl+Z), or **undo** above the chart |
 | keep the main way through on one row | **row** for a box (under **⋯**): **next to** the screen before it, or **on a row below** |
-| count only the steps an activity needs | **detours: left out**: trips off the main way that come back to it drop out of the counts, and their step numbers turn hollow |
+| count only the steps an activity needs | **detours: left out**: trips off the main way that come back to it drop out of the counts and the numbers: their steps get letters, such as 13a |
 | name the parts of the walkthrough | select boxes and choose **phase…**, or **phases** above the chart |
 | move the notes | **notes: under screens**, **in a key** below the chart, or **off** |
 | leave out the times, or the title and legend | **show: times** and **title and legend** |
-| change the size on the page | the slider; **fit** fills the width of the window |
+| change the size on the page, and how many screens fit on a row | the slider: the smaller, the more screens on a row; **fit** goes back to the width of the window at a readable size. Beyond 100% the rows stay as they are, and the chart can be moved sideways |
 | save the chart | **download: svg** or **png** |
 
 The main way through is the row that carries on from the first screen: on its own, the way that leads on
 furthest, so a side trip that comes back goes below it; your **row** choices decide where you make them. Some
 interactions are optional, so a trip off the main way that comes back to it is an optional detour: with
 **detours: left out** the counts above the chart and of each phase are those of the main way, with how many steps
-the detours took. A trip that never comes back, or that only shows pop-ups the app put in the way, still counts.
-The export always has both: `main_step` numbers each step along the main way, and `detour` marks the others.
+the detours took. The numbers follow: they count on along the main way, so the last one is the count, and the steps
+of a detour have a letter after the step it leaves from. `13a`, `13b` and `13c` are the steps of a detour taken
+after step 13, with the step that comes back; the next step of the main way is 14. A trip that never comes back, or
+that only shows pop-ups the app put in the way, still counts. The export always has both numbers: `step_index`
+counts every step, `path_step` has the numbers without the detours, and `detour` marks the steps of one.
+
+A saved chart has the same rows as the one on the page, so set how many screens a row takes with the slider first. Its
+size does not change with the slider: the file is as large as the chart on the page at 100%.
 
 **svg** saves one SVG image with the screenshots inside it, so it needs no other files. Its text stays text
 and every screen is a group of its own, so you can finish the figure in a drawing program such as Inkscape,
@@ -637,6 +651,11 @@ Stepthrough keeps only the latest of each task: export again whenever you need i
 - `steps.json`: the same steps, plus everything about the run, for use in your own scripts;
 - `pathway.json`: the same steps as a pathway: which screen each step is on, the visits to each screen, and
   the moves between screens with the steps they lead to.
+
+The steps are numbered as in the pathway (`step_index`): 0 for the opening screen, which is where they start, then 1,
+2 and so on; without the opening screen, from 1. Screenshots and `step_id` have the same number. Before version
+1.4.4, the opening screen was number 1, so every number was one higher: use exports made with the same version
+when you compare steps by number. **export all** numbers the candidates in the same way.
 
 For each step, the export has its time, the screenshot's file name, its status, title and notes, whether
 Stepthrough found it or you added it by hand (`origin`: `detected` or `manual`), the phase you put it in
@@ -770,7 +789,8 @@ section could say, for example:
 > accepted and K added manually.
 
 The numbers for such a sentence are in the export: count the rows of `steps.csv` from **export all** by
-`status`, and the rows whose `origin` is `manual` for the steps you added. Copy the **preset text** of your
+`status`, and the rows whose `origin` is `manual` for the steps you added (the opening screen, `step_index` 0, is a
+row too, but not a step). Copy the **preset text** of your
 settings into an appendix, so that others can repeat the analysis. Use the
 same settings for all recordings you compare, and report the steps you added and rejected by hand. Name the
 version of Stepthrough as well: **about**, at the bottom right, shows it with the commit it was built from, and

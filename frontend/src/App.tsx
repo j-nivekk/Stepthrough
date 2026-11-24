@@ -60,6 +60,7 @@ import {
 import { downloadExportBundle, jumpToAnchor, sleep, triggerDownload } from './lib/utils';
 import { formatCalendarDate } from './lib/formatters';
 import { isSharedAccount } from './lib/live';
+import { reviewNumbers } from './lib/stepNumbers';
 import { formatSize, isVisitor, uploadProblem } from './lib/visitors';
 import {
   collectImportQueueItems,
@@ -662,6 +663,7 @@ function App({ session, onSessionChange }: AppProps) {
     }
 
     const candidatesById = new Map(selectedRun.candidates.map((candidate) => [candidate.id, candidate]));
+    const numbers = reviewNumbers(selectedRun.candidates, selectedRun.accepted_steps);
     const firstCandidateByGroup = new Map<string, CandidateFrame>();
 
     selectedRun.candidates.forEach((candidate) => {
@@ -677,7 +679,7 @@ function App({ session, onSessionChange }: AppProps) {
       if (target && target.id !== candidate.id) {
         links.set(candidate.id, {
           targetId: `candidate-${target.id}`,
-          label: `similar to candidate ${target.detector_index}`,
+          label: `similar to ${numbers.get(target.id)?.name ?? 'an earlier step'}`,
         });
       }
 

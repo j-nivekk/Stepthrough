@@ -1,17 +1,20 @@
 /**
  * The practice recording of the pathways tutorial, and how its steps fold into a pathway.
  *
- * The grouping follows the rules of backend/app/services/pathway.py, on eight made-up steps, so what the
- * tutorial shows is what the app does: the reviewer's choice first, then a revisit, a pop-up closing, and a
+ * The grouping follows the rules of backend/app/services/pathway.py, on a made-up opening screen and seven
+ * steps, so what the tutorial shows is what the app does: the reviewer's choice first, then a revisit, a pop-up closing, and a
  * label that stays on the screen. The automatic result has two mistakes on purpose, of the kinds the app
  * really makes: the same screen split in two (it changed a little), and two screens in one box (they look
  * alike).
  */
 
+import { START, stepName, stepsPhrase } from '../../lib/stepNumbers';
+
 export type MockLabel = 'opening' | 'navigation' | 'scroll' | 'modal' | 'modal closed' | 'update';
 export type MockArt = 'home' | 'homeBadge' | 'settings' | 'settingsScrolled' | 'dialog' | 'settingsOn' | 'articleA' | 'articleB';
 
 export interface MockStep {
+  /** Its place in the recording. What it is called is mockNumber(n): the first is the opening screen, so no step. */
   n: number;
   label: MockLabel;
   art: MockArt;
@@ -20,7 +23,7 @@ export interface MockStep {
   time: string;
   title?: string;
   note?: string;
-  /** The detector found the same screen state again (none here: step 6 has a badge the first visit lacked). */
+  /** The detector found the same screen state again (none here: the sixth has a badge the first visit lacked). */
   revisitOf?: number;
 }
 
@@ -42,6 +45,15 @@ export const MOCK_STEPS: MockStep[] = [
   { n: 7, label: 'navigation', art: 'articleA', time: '0:24', title: 'Article', note: 'Opened from the feed.', story: 'they open an article' },
   { n: 8, label: 'update', art: 'articleB', time: '0:31', story: 'they swipe to the next article' },
 ];
+
+/** Its number, as the app counts: the opening screen is the start, and the first step the change that leaves it. */
+export const mockNumber = (n: number): string => (n === 1 ? START : String(n - 1));
+/** "step 5", or "start". */
+export const mockName = (n: number): string => stepName(mockNumber(n));
+/** In a sentence: "5", or "the start". */
+const mockRef = (n: number): string => (n === 1 ? `the ${START}` : mockNumber(n));
+/** "steps 1–2 and 4". */
+export const mockNames = (steps: number[]): string => stepsPhrase(steps.map((n) => ({ step_index: n - 1 })));
 
 const STAYS: MockLabel[] = ['scroll', 'update'];
 
@@ -223,7 +235,7 @@ export function mockStep(n: number): MockStep {
 export function reasonText(pathway: MockPathway, n: number, choices: Choices): string {
   const step = mockStep(n);
   const reason = pathway.reasons.get(n);
-  const with_ = pathway.joinedTo.get(n);
+  const with_ = mockRef(pathway.joinedTo.get(n) ?? 1);
   if (reason === 'researcher') return `you put it here: the same screen as ${with_}.`;
   if (reason === 'revisit') return `a revisit: the same picture as ${with_} again.`;
   if (reason === 'modal closed') return 'modal closed: the pop-up went away, so it goes back to the screen under it.';
@@ -232,7 +244,7 @@ export function reasonText(pathway: MockPathway, n: number, choices: Choices): s
   if (choices[n]?.link === 'new') return 'you gave it a screen of its own.';
   if (isPopup(step, choices)) return 'a pop-up: it always starts a box of its own.';
   if (step.label === 'opening') return 'the opening screen starts the first box.';
-  if (n === 6) return 'navigation, and not the same picture as 1 (a badge appeared), so a new box.';
+  if (n === 6) return 'navigation, and not the same picture as the start (a badge appeared), so a new box.';
   return 'navigation: most of the screen changed, so a new box.';
 }
 
@@ -242,7 +254,7 @@ export function jsonStep(pathway: MockPathway, n: number, choices: Choices) {
   const link = choices[n]?.link;
   const reason = pathway.reasons.get(n);
   return {
-    step_index: n,
+    step_index: n - 1,
     screen_id: `screen-${String(screen?.index ?? 0).padStart(2, '0')}`,
     grouped_by: reason === 'modal closed' ? 'modal_close' : reason ?? null,
     screen_choice: link === 'new' ? 'new_screen' : typeof link === 'number' ? 'same_screen' : 'automatic',

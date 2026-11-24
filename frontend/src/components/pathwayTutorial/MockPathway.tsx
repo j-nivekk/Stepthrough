@@ -1,7 +1,7 @@
 import { useId, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 
 import { ART_HEIGHT as H, ART_WIDTH as W, MockArt } from './MockArt';
-import { MOCK_STEPS, mockStep, type MockPathway as Pathway, type MockScreen } from './tutorialModel';
+import { MOCK_STEPS, mockNumber, mockStep, type MockPathway as Pathway, type MockScreen } from './tutorialModel';
 
 export type MockNotes = 'under' | 'key' | 'hidden';
 export type ScreenMark = 'good' | 'bad';
@@ -64,9 +64,10 @@ function wrap(text: string, chars: number): string[] {
   return lines;
 }
 
-function Pill({ n, active = false }: { n: number | string; active?: boolean }) {
-  const label = String(n);
-  const width = label.length > 1 ? label.length * 6.2 + 9 : PILL;
+const pillWidth = (label: string): number => (label.length > 1 ? label.length * 6.2 + 9 : PILL);
+
+function Pill({ label, active = false }: { label: string; active?: boolean }) {
+  const width = pillWidth(label);
   return (
     <g>
       <rect fill={active ? ORANGE : INK} height={PILL} rx={7.5} width={width} />
@@ -150,7 +151,8 @@ export function MockPathway({
     if (!screen) return { x: 0, y: 0 };
     const k = screen.steps.indexOf(n);
     const y = rowTop(screen.row) + H + 12;
-    return times ? { x: boxX(screen), y: y + k * 15 } : { x: boxX(screen) + k * 18, y };
+    if (times) return { x: boxX(screen), y: y + k * 15 };
+    return { x: boxX(screen) + screen.steps.slice(0, k).reduce((sum, other) => sum + pillWidth(mockNumber(other)) + 3, 0), y };
   };
 
   // The moves, routed like the app's figure: along the tree between the sides of the boxes, everything else
@@ -254,7 +256,7 @@ export function MockPathway({
             practice recording: turning on notifications
           </text>
           <text fill="#6b6b66" fontSize={10} x={LEFT} y={44}>
-            8 steps on {pathway.screens.length} screens · 0:34
+            {MOCK_STEPS.length - 1} steps on {pathway.screens.length} screens · 0:34
           </text>
         </g>
       ) : null}
@@ -306,7 +308,7 @@ export function MockPathway({
                 <g transform={`translate(${route.px - (route.move.passes.length * 17 - 2) / 2} ${route.py - 7.5})`}>
                   {route.move.passes.map((n, index) => (
                     <g key={n} transform={`translate(${index * 17} 0)`}>
-                      <Pill active={n === current} n={n} />
+                      <Pill active={n === current} label={mockNumber(n)} />
                     </g>
                   ))}
                 </g>
@@ -378,6 +380,8 @@ export function MockPathway({
       {/* the step numbers, with the label (line) or the time (chart) */}
       {MOCK_STEPS.map((step) => {
         const at = pill(step.n);
+        const label = mockNumber(step.n);
+        const width = pillWidth(label);
         const handler = clickable === 'steps' && onStep ? activate(() => onStep(step.n)) : {};
         return (
           <g
@@ -392,15 +396,15 @@ export function MockPathway({
             style={{ transform: `translate(${at.x}px, ${at.y}px)` }}
             {...handler}
           >
-            {demo === `pill:${step.n}` ? <rect className="pt-demo-halo" height={PILL + 14} rx={(PILL + 14) / 2} width={PILL + 14} x={-7} y={-7} /> : null}
-            {chosen === step.n ? <rect fill="none" height={PILL + 6} rx={(PILL + 6) / 2} stroke={ORANGE} strokeWidth={1.5} width={PILL + 6} x={-3} y={-3} /> : null}
-            <Pill active={step.n === current || step.n === chosen || bubble?.step === step.n || (chart && step.n === hovered)} n={step.n} />
+            {demo === `pill:${step.n}` ? <rect className="pt-demo-halo" height={PILL + 14} rx={(PILL + 14) / 2} width={width + 14} x={-7} y={-7} /> : null}
+            {chosen === step.n ? <rect fill="none" height={PILL + 6} rx={(PILL + 6) / 2} stroke={ORANGE} strokeWidth={1.5} width={width + 6} x={-3} y={-3} /> : null}
+            <Pill active={step.n === current || step.n === chosen || bubble?.step === step.n || (chart && step.n === hovered)} label={label} />
             {!chart ? (
-              <text fill="#444" fontSize={9.5} x={PILL + 4} y={10.8}>
+              <text fill="#444" fontSize={9.5} x={width + 4} y={10.8}>
                 {step.label}
               </text>
             ) : times ? (
-              <text fill="#6b6b66" fontSize={9.5} x={PILL + 4} y={10.8}>
+              <text fill="#6b6b66" fontSize={9.5} x={width + 4} y={10.8}>
                 {step.time}
               </text>
             ) : null}
@@ -413,7 +417,7 @@ export function MockPathway({
         ? pathway.screens.map((screen) => {
             const lines = screen.steps
               .filter((n) => mockStep(n).note)
-              .flatMap((n) => wrap(`${screen.steps.length > 1 ? `${n} ` : ''}${mockStep(n).note}`, 20));
+              .flatMap((n) => wrap(`${screen.steps.length > 1 ? `${mockNumber(n)} ` : ''}${mockStep(n).note}`, 20));
             if (!lines.length) return null;
             const y = rowTop(screen.row) + H + 12 + pillsBlock + 12;
             return (
@@ -436,8 +440,8 @@ export function MockPathway({
           </text>
           {noted.map((step, index) => (
             <g key={step.n} transform={`translate(${LEFT} ${keyTop + 18 + index * 16})`}>
-              <Pill n={step.n} />
-              <text fontSize={10} x={PILL + 6} y={10.8}>
+              <Pill label={mockNumber(step.n)} />
+              <text fontSize={10} x={pillWidth(mockNumber(step.n)) + 6} y={10.8}>
                 <tspan fontWeight={700}>{screenOfStep(step.n)?.title}</tspan>
                 <tspan fill="#333">{`  ${step.note}`}</tspan>
               </text>
@@ -490,7 +494,7 @@ export function MockPathway({
         <g className="pt-fade" transform={`translate(0 ${legendTop})`}>
           <line stroke="#d6d6d1" x1={LEFT} x2={DESIGN_WIDTH - LEFT} y1={0} y2={0} />
           <g transform={`translate(${LEFT} 16)`}>
-            <Pill n={2} />
+            <Pill label="2" />
             <text fill="#444" fontSize={9.5} x={21} y={10.8}>
               step number
             </text>

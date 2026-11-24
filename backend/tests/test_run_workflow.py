@@ -525,7 +525,7 @@ def test_review_carries_over_to_a_new_run_of_the_same_recording(client: TestClie
     assert by_time[2500]['candidate_origin'] == 'manual'
     # the phases go by time, so the same moments are in them
     pathway = client.get(f"/runs/{second['summary']['id']}/pathway").json()
-    assert [(phase['name'], phase['first_step_index'], phase['last_step_index']) for phase in pathway['phases']] == [('Opening', 1, 1)]
+    assert [(phase['name'], phase['first_step_index'], phase['last_step_index']) for phase in pathway['phases']] == [('Opening', 0, 0)]
 
     # pairs must name steps of these two runs, each once
     bad = client.post(

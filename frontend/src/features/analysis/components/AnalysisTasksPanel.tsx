@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
 import { getRun } from '../../../api';
 import {
   ContextMenu,
@@ -93,7 +93,8 @@ export interface AnalysisTasksPanelProps {
   taskSelectMode: boolean;
 }
 
-export function AnalysisTasksPanel({
+/** The tasks, drawn again only when something about them changes: the page around it is, with every move over a step. */
+export const AnalysisTasksPanel = memo(function AnalysisTasksPanel({
   analysisTaskItems,
   analysisMetadata,
   bulkDeletePending,
@@ -621,7 +622,7 @@ export function AnalysisTasksPanel({
       ) : null}
     </section>
   );
-}
+});
 
 /** What the analysis of a run did, step by step, in its details: read with the run (the same request the page makes
  *  for the selected run), and again every two seconds while it works. */

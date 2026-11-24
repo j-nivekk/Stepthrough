@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { createPortal } from 'react-dom';
 
 import { screenshotUrl } from '../lib/screenshots';
+import type { ReviewNumber } from '../lib/stepNumbers';
 import type { CandidateChanges, CandidateFrame } from '../types';
+import { useStepNumbers } from './StepNumbers';
 
 /** Whether the step counts as a pop-up: the reviewer's say, or else the detector's label. */
 export function isPopupStep(candidate: CandidateFrame): boolean {
@@ -16,27 +18,21 @@ export function popupChange(candidate: CandidateFrame, popup: boolean): Candidat
   return { screen_kind: popup === automatic ? 'auto' : popup ? 'popup' : 'screen' };
 }
 
-function linkText(candidate: CandidateFrame, steps: CandidateFrame[], numberOf?: (step: CandidateFrame) => number | undefined): string | null {
+function linkText(candidate: CandidateFrame, steps: CandidateFrame[], numberOf: (step: CandidateFrame) => ReviewNumber): string | null {
   if (!candidate.screen_link) return null;
   if (candidate.screen_link === 'new') return 'a new screen';
   const same = steps.find((step) => step.id === candidate.screen_link);
   if (!same) return null;
-  return `same as ${numberOf?.(same) ?? same.detector_index}`;
-}
-
-/** In the pathway, where steps are numbered as in steps.csv (accepted steps only) and sit in boxes. */
-export interface PathwayPlaces {
-  /** The step's number in the pathway, for steps that are in it. */
-  number: Map<string, number>;
-  /** The box a step is in, as the pathway names it ("Screen 2"). */
-  box: Map<string, string>;
-  /** How many steps the box of this step holds. */
-  boxSize: number;
+  return `same as ${numberOf(same).short}`;
 }
 
 /** What the reviewer chose for the step's place in the pathway, or null when everything is automatic. */
-export function screenChoiceSummary(candidate: CandidateFrame, steps: CandidateFrame[]): string | null {
-  const parts = [linkText(candidate, steps), candidate.screen_kind === 'popup' ? 'pop-up' : candidate.screen_kind === 'screen' ? 'not a pop-up' : null];
+export function screenChoiceSummary(
+  candidate: CandidateFrame,
+  steps: CandidateFrame[],
+  numberOf: (step: CandidateFrame) => ReviewNumber,
+): string | null {
+  const parts = [linkText(candidate, steps, numberOf), candidate.screen_kind === 'popup' ? 'pop-up' : candidate.screen_kind === 'screen' ? 'not a pop-up' : null];
   const chosen = parts.filter(Boolean);
   return chosen.length ? chosen.join(' · ') : null;
 }
@@ -58,8 +54,6 @@ interface ScreenChoiceProps {
   anyStep?: boolean;
   /** Leave out the pop-up switch, where the place that shows the choice has its own. */
   hidePopup?: boolean;
-  /** In the pathway: its numbers and boxes, and only the steps that are in it. */
-  inPathway?: PathwayPlaces;
 }
 
 /**
@@ -67,7 +61,7 @@ interface ScreenChoiceProps {
  * give the step a screen of its own, or pick an earlier step that shows the same screen. A switch marks the
  * step as a pop-up.
  */
-export function ScreenChoice({ candidate, steps, onUpdate, prefix, icon, anyStep = false, hidePopup = false, inPathway }: ScreenChoiceProps) {
+export function ScreenChoice({ candidate, steps, onUpdate, prefix, icon, anyStep = false, hidePopup = false }: ScreenChoiceProps) {
   const [open, setOpen] = useState(false);
   // Where the list opens, in the window: it is not part of the card, which would cut it off.
   const [place, setPlace] = useState<CSSProperties>({});
@@ -107,17 +101,14 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, icon, anyStep
   // Nearest first: the screen a step belongs to is usually a recent one. Later steps come after the earlier ones.
   const earlier = useMemo(() => {
     if (!open) return [];
-    const others = steps.filter(
-      (step) => step.id !== candidate.id && step.status !== 'rejected' && (!inPathway || inPathway.number.has(step.id)),
-    );
+    const others = steps.filter((step) => step.id !== candidate.id && step.status !== 'rejected');
     const before = others.filter((step) => step.detector_index < candidate.detector_index).reverse();
     return anyStep ? [...before, ...others.filter((step) => step.detector_index > candidate.detector_index)] : before;
-  }, [open, steps, candidate.id, candidate.detector_index, anyStep, inPathway]);
+  }, [open, steps, candidate.id, candidate.detector_index, anyStep]);
 
   const popup = isPopupStep(candidate);
-  const numberOf = (step: CandidateFrame) => (inPathway ? inPathway.number.get(step.id) : undefined);
+  const numberOf = useStepNumbers();
   const link = linkText(candidate, steps, numberOf);
-  const ownNumber = numberOf(candidate) ?? candidate.detector_index;
   const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
 
   function toggle() {
@@ -144,7 +135,7 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, icon, anyStep
   const valueText = `${link ?? 'automatic'}${popup && !hidePopup ? ' · pop-up' : ''}`;
   const popover = open ? (
     <div
-      aria-label={`stacking of step ${candidate.detector_index} in the pathway`}
+      aria-label={`stacking of ${numberOf(candidate).name} in the pathway`}
       className="screen-choice-popover"
       onClick={stop}
       onPointerDown={stop}
@@ -174,13 +165,7 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, icon, anyStep
       {earlier.length > 0 ? (
         <>
           <p className="screen-choice-heading">the same screen as</p>
-          <p className="screen-choice-note">
-            {inPathway ? `moves step ${ownNumber} alone` : 'moves this step alone'}, with the steps that scroll or
-            type on from it.
-            {inPathway && inPathway.boxSize > 1
-              ? ` to move ${inPathway.boxSize === 2 ? 'both' : `all ${inPathway.boxSize}`} steps of its box together, use merge into.`
-              : ''}
-          </p>
+          <p className="screen-choice-note">moves this step alone, with the steps that scroll or type on from it.</p>
           <div className="screen-choice-steps">
             {earlier.map((step) => (
               <button
@@ -191,10 +176,10 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, icon, anyStep
                 type="button"
               >
                 <img alt="" loading="lazy" src={screenshotUrl(step.image_url, 34)} />
-                <strong>{numberOf(step) ?? step.detector_index}</strong>
+                <strong className={step.status === 'accepted' ? '' : 'is-candidate'}>{numberOf(step).number}</strong>
                 <span>
                   {step.title || step.timestamp_tc}
-                  {inPathway?.box.get(step.id) ? <small className="screen-choice-box">in {inPathway.box.get(step.id)}</small> : null}
+                  {step.status === 'accepted' ? null : <small className="screen-choice-box">candidate, {step.status}</small>}
                 </span>
               </button>
             ))}

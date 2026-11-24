@@ -71,10 +71,14 @@ _COMMON_NOTES = {
     "image_path": "the screenshot, inside this bundle",
     "status, title, notes": "the reviewer's decision and annotations",
     "phase": "the phase of the walkthrough the step is in, as the reviewer named it in the pathway; empty outside every phase",
-    "main_step, detour": (
+    "step_index": (
+        "the step's number, as in the pathway: 0 for the opening screen, which is where the walkthrough starts and no "
+        "step of it, then 1, 2 and so on; without the opening screen, from 1"
+    ),
+    "path_step, detour": (
         "the step's number along the main way through the pathway, leaving out optional detours (trips off the main "
-        "way that come back to it, see pathway.json); detour is true for a step of such a trip, which has no "
-        "main_step. Counting the main_step values gives the steps the walkthrough takes without them"
+        "way that come back to it, see pathway.json): 13, or 13a, 13b and so on for the steps of a detour taken after "
+        "step 13, where detour is true"
     ),
     "origin": (
         "detected: found by the analysis; manual: added by hand by the reviewer, so it has no change, "
@@ -144,13 +148,32 @@ def _origin(candidate: dict) -> str:
     return "manual" if candidate.get("candidate_origin") == "manual" else "detected"
 
 
+def _first_number(steps: list[dict], candidates: list[dict]) -> int:
+    """The number of the first of ``steps``: 0 when it shows the screen the recording starts on, else 1.
+
+    A step is a change of the screen. Nothing led to the opening screen, so it is where the steps start and not one of
+    them; the first step is the change that leaves it. Without the opening screen (turned off, or rejected), the first
+    step was reached by a change like any other, so the numbers of the others are the same either way. A step added by
+    hand before the detected opening screen shows it too.
+    """
+    opening = next(
+        (
+            candidate
+            for candidate in candidates
+            if (_normalized_score_breakdown(candidate) or {}).get("transition_type") == "opening_screen"
+        ),
+        None,
+    )
+    return 0 if steps and opening and steps[0]["timestamp_ms"] <= opening["timestamp_ms"] else 1
+
+
 def build_accepted_steps(recording_slug: str, candidates: list[dict]) -> list[dict]:
     accepted = [candidate for candidate in candidates if candidate["status"] == "accepted"]
     accepted_steps: list[dict] = []
     candidate_to_step: dict[str, str] = {}
     group_to_step: dict[str, str] = {}
 
-    for step_index, candidate in enumerate(accepted, start=1):
+    for step_index, candidate in enumerate(accepted, start=_first_number(accepted, candidates)):
         step_id = f"step-{step_index:03d}"
         revisit_group_id = candidate.get("revisit_group_id")
         similar_to_step_id = None
@@ -160,7 +183,7 @@ def build_accepted_steps(recording_slug: str, candidates: list[dict]) -> list[di
         elif revisit_group_id and revisit_group_id in group_to_step:
             similar_to_step_id = group_to_step[revisit_group_id]
 
-        title = (candidate.get("title") or "").strip() or f"Step {step_index}"
+        title = (candidate.get("title") or "").strip() or (f"Step {step_index}" if step_index else "Opening screen")
         step = {
             "step_id": step_id,
             "step_index": step_index,
@@ -192,7 +215,7 @@ def build_all_candidate_rows(recording_slug: str, candidates: list[dict]) -> lis
     ordered_candidates = sorted(candidates, key=lambda candidate: (candidate["detector_index"], candidate["timestamp_ms"]))
     export_rows: list[dict] = []
 
-    for row_index, candidate in enumerate(ordered_candidates, start=1):
+    for row_index, candidate in enumerate(ordered_candidates, start=_first_number(ordered_candidates, candidates)):
         export_rows.append(
             {
                 "step_id": f"candidate-{row_index:03d}",
@@ -203,7 +226,7 @@ def build_all_candidate_rows(recording_slug: str, candidates: list[dict]) -> lis
                 "image_url": asset_url(candidate["image_path"]),
                 "status": candidate["status"],
                 "origin": _origin(candidate),
-                "title": (candidate.get("title") or "").strip() or f"Candidate {row_index}",
+                "title": (candidate.get("title") or "").strip() or (f"Candidate {row_index}" if row_index else "Opening screen"),
                 "notes": candidate.get("notes"),
                 "scene_score": candidate["scene_score"],
                 "score_breakdown": _normalized_score_breakdown(candidate),
@@ -271,7 +294,7 @@ def create_export_bundle(
             **exported,
             "image_path": f"images/{row['export_filename']}",
             "phase": phase_at(phases, row["timestamp_ms"]),
-            "main_step": way[row["step_id"]]["main_step"],
+            "path_step": way[row["step_id"]]["path_step"],
             "detour": way[row["step_id"]]["detour"],
             **_timing_columns(row),
         })
@@ -316,7 +339,7 @@ def create_export_bundle(
             fieldnames=[
                 "step_id",
                 "step_index",
-                "main_step",
+                "path_step",
                 "detour",
                 "timestamp_ms",
                 "timestamp_tc",

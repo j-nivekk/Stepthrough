@@ -6,7 +6,9 @@ import { formatPathwayTime, type PathwayFigure } from '../../lib/pathwayFigure';
 import { record, undoChanges, type HistoryEntry } from '../../lib/pathwayHistory';
 import { unstackAllChanges, unstackByVisitChanges, unstackStepsChanges } from '../../lib/pathwayUnstack';
 import { screenshotUrl } from '../../lib/screenshots';
+import { pathwayNumber, stepName, stepsPhrase } from '../../lib/stepNumbers';
 import type { CandidateChanges, CandidateFrame, Pathway, PathwayPhase, PathwayRowChoice, PathwayScreen, PathwayStep } from '../../types';
+import { translateOf } from './holdPlace';
 import { PathwayPhases } from './PathwayPhases';
 
 /** What the phases panel opens with (a stretch of steps for a new phase, a phase to change, or the list), and where
@@ -54,6 +56,8 @@ interface PathwayCanvasProps {
   encodings?: PathwayFigure['encodings'];
   onPointerOver: (event: PointerEvent<HTMLDivElement>) => void;
   onPointerLeave: () => void;
+  /** The optional detours are left out of the numbers (PathwayFigureOptions.countDetours). */
+  leaveOut: boolean;
 }
 
 /** What is selected, kept as steps (candidate ids): boxes are numbered again whenever the grouping changes. */
@@ -65,6 +69,9 @@ interface Rect {
   width: number;
   height: number;
 }
+
+const sameRect = (a: Rect | null, b: Rect | null): boolean =>
+  a === b || Boolean(a && b && a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height);
 
 interface Drag {
   kind: 'box' | 'step';
@@ -126,11 +133,6 @@ function prefersStill(): boolean {
   }
 }
 
-function translateOf(element: Element): [number, number] | null {
-  const match = /translate\(\s*([-\d.]+)[ ,]+([-\d.]+)\s*\)/.exec(element.getAttribute('transform') ?? '');
-  return match ? [Number(match[1]), Number(match[2])] : null;
-}
-
 function typing(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
 }
@@ -175,6 +177,7 @@ export function PathwayCanvas({
   encodings,
   onPointerOver,
   onPointerLeave,
+  leaveOut,
 }: PathwayCanvasProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const figureRef = useRef<HTMLDivElement | null>(null);
@@ -226,12 +229,8 @@ export function PathwayCanvas({
     screen.title === `Screen ${screen.index}` ? `Screen ${screen.index}` : `Screen ${screen.index}, ${shorten(screen.title)}`;
   const stepsOf = (screen: PathwayScreen): PathwayStep[] =>
     screen.visits.flatMap((visit) => visit.step_ids).map((id) => stepById.get(id)).filter((step): step is PathwayStep => Boolean(step));
-  const numbersOf = (steps: PathwayStep[]): string => {
-    const numbers = steps.map((step) => step.step_index);
-    if (numbers.length < 2) return `step ${numbers[0] ?? ''}`;
-    const run = numbers.every((number, index) => !index || number === numbers[index - 1] + 1);
-    return run ? `steps ${numbers[0]}–${numbers[numbers.length - 1]}` : `steps ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`;
-  };
+  const numberOfStep = (step: PathwayStep): string => pathwayNumber(step, leaveOut);
+  const numbersOf = (steps: PathwayStep[]): string => stepsPhrase(steps, leaveOut);
 
   // The selection as boxes and steps of the pathway now; a step that left the pathway lets it go.
   const selectedBoxes = useMemo(
@@ -383,7 +382,8 @@ export function PathwayCanvas({
   };
   const stepMenuLabel = (step: PathwayStep): string => {
     const customTitle = candidateById.get(step.source_candidate_id)?.title?.trim();
-    return customTitle ? `step ${step.step_index}: ${shorten(customTitle)}` : `step ${step.step_index}, at ${formatPathwayTime(step.timestamp_ms)}`;
+    const called = stepName(numberOfStep(step));
+    return customTitle ? `${called}: ${shorten(customTitle)}` : `${called}, at ${formatPathwayTime(step.timestamp_ms)}`;
   };
   /** The steps of a box whose screen was chosen (stacked, unstacked or given a screen of its own), not left automatic. */
   const chosenScreens = (screen: PathwayScreen): PathwayStep[] =>
@@ -407,7 +407,7 @@ export function PathwayCanvas({
   const unstackOneStep = (screen: PathwayScreen, step: PathwayStep) => {
     const changes = unstackStepsChanges([step], stepsOf(screen), candidateById);
     if (!changes.length) return;
-    void act(`gave step ${step.step_index} a screen of its own`, changes);
+    void act(`gave ${numbersOf([step])} a screen of its own`, changes);
     setSelection({ kind: 'boxes', ids: [step.source_candidate_id] });
   };
   const editStepsOf = (screen: PathwayScreen) => {
@@ -433,8 +433,8 @@ export function PathwayCanvas({
     if (!titleStep || next === saved) return;
     void act(next ? `renamed ${name(screen)} to ${shorten(next)}` : `took the title of ${name(screen)} away`, [[titleStep.source_candidate_id, { title: next }]]);
   };
-  const phaseOfStep = (index: number): PathwayPhase | undefined =>
-    (pathway.phases ?? []).find((phase) => index >= phase.first_step_index && index <= phase.last_step_index);
+  const phaseOfStep = (step: PathwayStep | undefined): PathwayPhase | undefined =>
+    step && (pathway.phases ?? []).find((phase) => step.step_index >= phase.first_step_index && step.step_index <= phase.last_step_index);
   const phaseFor = (steps: PathwayStep[]) => {
     const numbers = steps.map((step) => step.step_index);
     if (!numbers.length) return;
@@ -528,7 +528,7 @@ export function PathwayCanvas({
       if (first?.screen_link) {
         items.push({ label: 'stack automatically', run: () => moveStep(selectedSteps, 'auto') });
       }
-      const phase = phaseOfStep(selectedSteps[0].step_index);
+      const phase = phaseOfStep(selectedSteps[0]);
       items.push(
         phase
           ? { label: `change the phase ${phase.name}…`, divider: items.length > 0, run: () => openPhases({ phase }) }
@@ -589,7 +589,7 @@ export function PathwayCanvas({
       if (parent) {
         items.push({ label: 'row', divider: true, items: rowChoiceItems(box, parent) });
       }
-      const phase = phaseOfStep(steps[0]?.step_index ?? 0);
+      const phase = phaseOfStep(steps[0]);
       items.push(
         phase
           ? { label: `change the phase ${phase.name}…`, divider: !parent, run: () => openPhases({ phase }) }
@@ -612,7 +612,7 @@ export function PathwayCanvas({
       }
       if (first?.screen_link) items.push({ label: 'stack automatically', run: () => moveStep(selectedSteps, 'auto') });
       if (first) items.push({ label: isPopupStep(first) ? 'not a pop-up' : 'a pop-up', hint: 'P', divider: true, run: () => togglePopup(first.id, numbersOf(selectedSteps)) });
-      const phase = phaseOfStep(selectedSteps[0].step_index);
+      const phase = phaseOfStep(selectedSteps[0]);
       items.push(phase ? { label: `change the phase ${phase.name}…`, run: () => openPhases({ phase }) } : { label: 'make a phase from here…', run: () => phaseFor(selectedSteps) });
     } else {
       items.push({ label: 'add a phase…', run: () => phaseFor(pathway.steps.slice(0, 1)) });
@@ -659,7 +659,16 @@ export function PathwayCanvas({
     const source = drag ? (drag.kind === 'box' && sourceScreen ? rectOf(imageOf(sourceScreen)) : rectOf(numberOf(drag.ids.map((id) => stepByCandidate.get(id)).filter((step): step is PathwayStep => Boolean(step))))) : null;
     const pulseScreen = jumpPulse ? screenById.get(jumpPulse.screenId) : undefined;
     const pulse = pulseScreen ? rectOf(imageOf(pulseScreen)) : null;
-    setRects({ selected, target, source, pulse });
+    // Only a change is drawn: with nothing selected, or everything where it was, there is none.
+    setRects((was) =>
+      was.selected.length === selected.length &&
+      selected.every((rect, index) => sameRect(rect, was.selected[index] ?? null)) &&
+      sameRect(target, was.target) &&
+      sameRect(source, was.source) &&
+      sameRect(pulse, was.pulse)
+        ? was
+        : { selected, target, source, pulse },
+    );
   }, [selectedBoxes, selectedSteps, drag, jumpPulse, rectOf, imageOf, numberOf, screenOf, screenById, stepByCandidate]);
   useLayoutEffect(measure, [measure, markup, width]);
   // While boxes glide to a new place (below), what is measured is where they are on the way, not where they land: a
@@ -1181,7 +1190,7 @@ export function PathwayCanvas({
       const box = selectedBoxes[0];
       const first = candidateById.get(firstOf(box));
       const steps = stepsOf(box);
-      const phase = phaseOfStep(steps[0]?.step_index ?? 0);
+      const phase = phaseOfStep(steps[0]);
       const otherBoxes = others([box]);
       const hasStacking = otherBoxes.length > 0 || steps.length > 1 || chosenScreens(box).length > 0;
       tools = (
@@ -1289,7 +1298,7 @@ export function PathwayCanvas({
                   title={`select ${stepMenuLabel(step)}`}
                   type="button"
                 >
-                  {step.step_index}
+                  {numberOfStep(step)}
                 </button>
               ))}
             </span>
@@ -1413,6 +1422,7 @@ export function PathwayCanvas({
         <PathwayPhases
           at={phaseRequest.underToolbox ? underToolbox ?? undefined : undefined}
           disabled={busy}
+          leaveOut={leaveOut}
           onClose={() => onPhaseRequest(null)}
           onSet={setPhase}
           pathway={pathway}
