@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { createPortal } from 'react-dom';
 
 /** The version whose changes the tour shows: it opens once per browser for each. */
-export const WHATS_NEW_VERSION = '1.4.3';
+export const WHATS_NEW_VERSION = '1.4.5';
 const SEEN_KEY = 'stepthrough.whats-new';
 
 export function whatsNewSeen(): boolean {
@@ -34,83 +34,83 @@ const one = (selector: string) => all(selector).slice(0, 1);
 /** The boxes of the pathway (their screenshots), in order. */
 const boxes = () => all('.pathway-figure [data-screen] image');
 
+/** The numbers under the boxes, in order; those of a box with several steps first. */
+const numbers = () => {
+  const found = all('.pathway-figure [data-peek]');
+  const several = (number: Element) => (number.getAttribute('data-peek') ?? '').includes(' ');
+  return [...found.filter(several), ...found.filter((number) => !several(number))];
+};
+
+/** The screenshot of the first box with several steps, or of the first box. */
+const stackedBox = () => {
+  const image = numbers()[0]?.closest('[data-screen]')?.querySelector('image');
+  return image ? [image] : boxes().slice(0, 1);
+};
+
 const STOPS: Stop[] = [
   {
-    title: 'view, and sticky controls',
+    title: 'screens are known again',
     text: (
       <>
-        <b>screens</b>: one box per page. <b>steps</b>: one box per step. the controls bar stays pinned at the top as
-        you scroll through tall charts.
+        a box now keeps its screen when it is scrolled, when something on it changed, and when someone comes back to
+        it later. menus, dialogs and sheets are told from pages, also when they dim nothing. runs analysed from now on
+        have this: run the analysis again for an older one. the steps stay the same.
       </>
     ),
-    find: () => one('[aria-label="view of the pathway"]'),
+    find: stackedBox,
   },
   {
-    title: 'click a box',
+    title: 'check it, then correct it',
     text: (
       <>
-        opens its toolbox: <b>title</b>, <b>pop-up</b>, <b>stacking…</b> (with screen thumbnails, unstacking and
-        automatic stacking), and <b>phase…</b>. renamed screens keep a compact <b>S#</b> tag. shift-click for several.
+        it goes by what a screen looks like: a feed with other posts can get a box of its own, and two products from
+        one template can share one. click a box or a step number for its toolbox, or <b>drag</b> it onto another box.
       </>
     ),
-    find: () => boxes().slice(1, 2).concat(boxes().length === 1 ? boxes() : []),
+    find: () => (boxes().length > 1 ? boxes().slice(1, 2) : boxes()),
   },
   {
-    title: 'click a step number',
+    title: 'they went back, and no step shows it',
     text: (
       <>
-        selects one step: <b>put it on…</b> another box (with thumbnails), or give a stacked step its <b>own screen</b>.
-        for 4–5, pick a step in its toolbox.
+        right-click the step they went back after and choose <b>return to</b>. the way back is dashed, with{' '}
+        <b>back</b> instead of a number, and the trip counts as a detour. no step is added.
+      </>
+    ),
+    find: () => numbers().slice(0, 1),
+  },
+  {
+    title: 'menus in the steps, too',
+    text: (
+      <>
+        in <b>steps</b>, right-click one in the grid, list or gallery for all you can do with it; with several selected,
+        the menu is for all of them. cards say <b>same screen as step 12</b> where someone came back, and jump there.
+      </>
+    ),
+    find: () => one('[aria-label="what to review"]'),
+  },
+  {
+    title: 'numbers, and optional detours',
+    text: (
+      <>
+        since 1.4.4, the opening screen is the <b>start</b> and the steps count from there. trips off the main way that
+        come back to it can be left out of the counts with <b>detours: left out</b>, which shows when there are any.
       </>
     ),
     find: () => {
-      const numbers = all('.pathway-figure [data-peek]');
-      const several = numbers.find((number) => (number.getAttribute('data-peek') ?? '').includes(' '));
-      return several ? [several] : numbers.slice(0, 1);
+      const control = one('[aria-label="optional detours"]');
+      return control.length ? control : one('.pathway-controls');
     },
   },
   {
-    title: 'paths, hover and pan',
+    title: 'screens on a row',
     text: (
       <>
-        branches are amber, returns are dashed blue, and distant jumps show clickable chips. hover any arrow to
-        spotlight its route, or drag empty space to pan the chart.
+        the slider sets how many screens fit on a row, and what you are looking at stays in place. downloads have the
+        same rows. this tour stays under <b>about</b>.
       </>
     ),
-    find: () => {
-      const legend = one('.pathway-status-legend');
-      return legend.length ? legend : one('.pathway-status');
-    },
-  },
-  {
-    title: 'drag',
-    text: (
-      <>
-        a box onto a box <b>stacks</b> them. a step number onto a box moves the step; off the boxes, it gets its own
-        screen.
-      </>
-    ),
-    find: () => boxes().slice(0, 2),
-  },
-  {
-    title: 'right-click, ⋯ and undo',
-    text: (
-      <>
-        right-click a box or step number for its menu (the toolbox steps out of the way). <b>⋯</b> holds rarer choices
-        like row placement. <b>undo</b> (⌘Z or Ctrl+Z) takes back only your own changes.
-      </>
-    ),
-    find: () => one('.pathway-status'),
-  },
-  {
-    title: 'phases, and gallery view',
-    text: (
-      <>
-        name parts of the walkthrough here, or with <b>phase…</b> on selected boxes — and try <b>gallery</b> in steps
-        for close-up per-screen review. this tour stays under <b>about</b>.
-      </>
-    ),
-    find: () => one('[data-phases-toggle]'),
+    find: () => all('[aria-label="size of the figure on the page"]').map((slider) => slider.closest('label') ?? slider),
   },
 ];
 
