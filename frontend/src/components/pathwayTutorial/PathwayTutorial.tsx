@@ -113,9 +113,10 @@ const VERDICTS: Array<[Verdict, string]> = [
   ['merged', 'no: different screens in one box'],
 ];
 
-const SPLIT = 'found it: home is in two boxes. the start and step 5 both show home, but 5 has a badge that the start did not, so it was not the same picture and got a box of its own. one screen, split in two.';
+const SPLIT =
+  'found it: home is in two boxes. the start and step 5 both show home, but by then the feed had other posts, so hardly anything of the first picture was left and it got a box of its own. one screen, split in two.';
 const MERGED =
-  'found it: 6 and 7 are two different articles, with another headline and another picture. reading a second article is going to another place in the app, so it needs a box of its own. stepthrough saw that the layout stayed and only the text and the picture changed, labelled 7 an update, and kept it with 6. two screens in one box.';
+  'found it: 6 and 7 are two different products, with another photo, name and price. opening a second product is going to another place in the app, so it needs a box of its own. but all the rest of the page is the same on both, so stepthrough found most of 6 again on 7, labelled 7 an update, and kept it with 6. two screens in one box.';
 
 /** What each answer about each box of the automatic pathway means. */
 const ANSWERS: Record<number, Record<Verdict, { ok: boolean; text: string }>> = {
@@ -140,8 +141,8 @@ const ANSWERS: Record<number, Record<Verdict, { ok: boolean; text: string }>> = 
     merged: { ok: false, text: 'it holds one step only, so it cannot hold two screens. but which screen is it?' },
   },
   7: {
-    right: { ok: false, text: 'look inside: hover 6 and 7. are they the same article?' },
-    split: { ok: false, text: 'no other box shows these articles. but are 6 and 7 the same article?' },
+    right: { ok: false, text: 'look inside: hover 6 and 7. are they the same product?' },
+    split: { ok: false, text: 'no other box shows these products. but are 6 and 7 the same product?' },
     merged: { ok: true, text: MERGED },
   },
 };
@@ -662,16 +663,14 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
             <b>your choice</b> (lesson 5);
           </li>
           <li>
-            a <b>revisit</b>: exactly the same picture as before;
+            a <b>revisit</b>: the same picture as before;
           </li>
           <li>
-            a pop-up <b>closing</b>: back to the screen under it;
-          </li>
-          <li>
-            a change that stays on the screen: <b>scroll</b>, typing, an <b>update</b> of part of it.
+            <b>what the screenshots show</b>: the pop-up over the screen closed, the content scrolled, something was
+            typed, or most of what is there was seen before.
           </li>
         </ol>
-        <p>a pop-up, and anything else, starts a box of its own.</p>
+        <p>a pop-up starts a box of its own, and so does a screen where hardly anything was seen before.</p>
       </>
     );
     tools = (
@@ -705,12 +704,12 @@ export function PathwayTutorial({ onClose }: PathwayTutorialProps) {
         </p>
         <ul className="pt-points">
           <li>
-            <b>one screen, split in two</b>: two boxes show the same screen, because something on it changed a
-            little (a badge, a counter, new content);
+            <b>one screen, split in two</b>: two boxes show the same screen, because what is on it was replaced (a feed
+            with other posts, dark mode);
           </li>
           <li>
-            <b>two screens in one box</b>: one box holds different places, because they share a layout (two
-            articles, two products, two profiles).
+            <b>two screens in one box</b>: one box holds different places, because most of what they show is the same
+            (two products, two profiles, two pages that are still empty).
           </li>
         </ul>
         <p>a box shows only its first step: rest the pointer on a step number to see the others.</p>

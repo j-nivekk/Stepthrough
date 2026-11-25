@@ -2,16 +2,16 @@
  * The practice recording of the pathways tutorial, and how its steps fold into a pathway.
  *
  * The grouping follows the rules of backend/app/services/pathway.py, on a made-up opening screen and seven
- * steps, so what the tutorial shows is what the app does: the reviewer's choice first, then a revisit, a pop-up closing, and a
- * label that stays on the screen. The automatic result has two mistakes on purpose, of the kinds the app
- * really makes: the same screen split in two (it changed a little), and two screens in one box (they look
- * alike).
+ * steps, so what the tutorial shows is what the app does: the reviewer's choice first, then a revisit, then what the
+ * engine found when it compared the screenshots. The automatic result has two mistakes on purpose, of the kinds the
+ * app really makes: the same screen split in two (what is on it was replaced), and two screens in one box (most of
+ * what they show is the same). backend/tests/test_screens.py has the engine look at this story, so that it stays true.
  */
 
 import { START, stepName, stepsPhrase } from '../../lib/stepNumbers';
 
 export type MockLabel = 'opening' | 'navigation' | 'scroll' | 'modal' | 'modal closed' | 'update';
-export type MockArt = 'home' | 'homeBadge' | 'settings' | 'settingsScrolled' | 'dialog' | 'settingsOn' | 'articleA' | 'articleB';
+export type MockArt = 'home' | 'homeNew' | 'settings' | 'settingsScrolled' | 'dialog' | 'settingsOn' | 'productA' | 'productB';
 
 export interface MockStep {
   /** Its place in the recording. What it is called is mockNumber(n): the first is the opening screen, so no step. */
@@ -23,14 +23,16 @@ export interface MockStep {
   time: string;
   title?: string;
   note?: string;
-  /** The detector found the same screen state again (none here: the sixth has a badge the first visit lacked). */
+  /** The detector found the same picture again (none here). */
   revisitOf?: number;
+  /** The earlier step that the engine found to show the same screen, and by what. */
+  found?: { as: number; by: Found };
 }
 
 export const MOCK_STEPS: MockStep[] = [
   { n: 1, label: 'opening', art: 'home', time: '0:00', title: 'Home', note: 'Opening screen.', story: 'the app opens on home' },
   { n: 2, label: 'navigation', art: 'settings', time: '0:04', title: 'Settings', story: 'the participant opens settings' },
-  { n: 3, label: 'scroll', art: 'settingsScrolled', time: '0:07', story: 'they scroll down the settings' },
+  { n: 3, label: 'scroll', art: 'settingsScrolled', time: '0:07', story: 'they scroll down the settings', found: { as: 2, by: 'scroll' } },
   {
     n: 4,
     label: 'modal',
@@ -40,10 +42,17 @@ export const MOCK_STEPS: MockStep[] = [
     note: 'Only "allow" stands out.',
     story: 'a pop-up asks to allow notifications',
   },
-  { n: 5, label: 'modal closed', art: 'settingsOn', time: '0:15', story: 'they allow; back on settings, notifications now on' },
-  { n: 6, label: 'navigation', art: 'homeBadge', time: '0:19', story: 'back to home, which now shows a badge' },
-  { n: 7, label: 'navigation', art: 'articleA', time: '0:24', title: 'Article', note: 'Opened from the feed.', story: 'they open an article' },
-  { n: 8, label: 'update', art: 'articleB', time: '0:31', story: 'they swipe to the next article' },
+  {
+    n: 5,
+    label: 'modal closed',
+    art: 'settingsOn',
+    time: '0:15',
+    story: 'they allow; back on settings, notifications now on',
+    found: { as: 2, by: 'overlay closed' },
+  },
+  { n: 6, label: 'navigation', art: 'homeNew', time: '0:19', story: 'back to home, where the feed now has other posts' },
+  { n: 7, label: 'navigation', art: 'productA', time: '0:24', title: 'Product', note: 'Opened from the feed.', story: 'they open a product' },
+  { n: 8, label: 'update', art: 'productB', time: '0:31', story: 'they go to the next product', found: { as: 7, by: 'same page' } },
 ];
 
 /** Its number, as the app counts: the opening screen is the start, and the first step the change that leaves it. */
@@ -55,13 +64,13 @@ const mockRef = (n: number): string => (n === 1 ? `the ${START}` : mockNumber(n)
 /** "steps 1–2 and 4". */
 export const mockNames = (steps: number[]): string => stepsPhrase(steps.map((n) => ({ step_index: n - 1 })));
 
-const STAYS: MockLabel[] = ['scroll', 'update'];
-
 export type BoxMode = 'screens' | 'steps';
 /** The reviewer's say on a step: `new` (a screen of its own), or the number of a step with the same screen. */
 export type ScreenLink = 'new' | number;
 export type Choices = Record<number, { link?: ScreenLink; popup?: boolean }>;
-export type Reason = 'researcher' | 'revisit' | 'modal closed' | 'scroll' | 'update';
+/** What the engine goes by, as far as it happens here (the app also has typing, swipes and small updates). */
+export type Found = 'overlay closed' | 'scroll' | 'same page';
+export type Reason = 'researcher' | 'revisit' | Found;
 
 export interface MockScreen {
   /** The number of the screen's first step: it stays the same while boxes are renumbered. */
@@ -112,8 +121,6 @@ export function buildMockPathway(choices: Choices, mode: BoxMode = 'screens', st
 
   const reasons = new Map<number, Reason>();
   const joinedTo = new Map<number, number>();
-  const openPopups: number[] = []; // the steps showing the screens under the pop-ups that are open
-  let previous: MockStep | null = null;
   for (const step of steps) {
     const link = choices[step.n]?.link;
     let target: number | null = null;
@@ -122,19 +129,15 @@ export function buildMockPathway(choices: Choices, mode: BoxMode = 'screens', st
       target = link;
       reason = 'researcher';
     }
-    const popup = isPopup(step, choices);
     if (target === null && link !== 'new') {
       if (step.revisitOf) {
         target = step.revisitOf;
         reason = 'revisit';
-      } else if (popup || mode !== 'screens') {
-        // a pop-up starts a box of its own; by step, only the same screen state shares a box
-      } else if (step.label === 'modal closed' && openPopups.length) {
-        target = openPopups[openPopups.length - 1] ?? null;
-        reason = 'modal closed';
-      } else if (STAYS.includes(step.label) && previous) {
-        target = previous.n;
-        reason = step.label as Reason;
+      } else if (mode !== 'screens') {
+        // by step, only the same picture again shares a box
+      } else if (step.found && !isPopup(step, choices)) {
+        target = step.found.as; // (a pop-up starts a box of its own)
+        reason = step.found.by;
       }
     }
     if (target !== null && reason) {
@@ -142,16 +145,6 @@ export function buildMockPathway(choices: Choices, mode: BoxMode = 'screens', st
       reasons.set(step.n, reason);
       joinedTo.set(step.n, target);
     }
-    if (popup) {
-      if (previous) openPopups.push(previous.n);
-    } else if (step.label === 'modal closed') {
-      openPopups.pop();
-    } else if (openPopups.length && target !== null && find(target) === find(openPopups[openPopups.length - 1] ?? 0)) {
-      openPopups.pop();
-    } else if (!STAYS.includes(step.label)) {
-      openPopups.length = 0;
-    }
-    previous = step;
   }
 
   // Boxes in order of first visit; moves between different boxes, in order of the first time they were made.
@@ -238,14 +231,14 @@ export function reasonText(pathway: MockPathway, n: number, choices: Choices): s
   const with_ = mockRef(pathway.joinedTo.get(n) ?? 1);
   if (reason === 'researcher') return `you put it here: the same screen as ${with_}.`;
   if (reason === 'revisit') return `a revisit: the same picture as ${with_} again.`;
-  if (reason === 'modal closed') return 'modal closed: the pop-up went away, so it goes back to the screen under it.';
-  if (reason === 'scroll') return `scroll: the screen moved, so it stays with ${with_}.`;
-  if (reason === 'update') return `update: only part of the screen changed (text and picture), so it stays with ${with_}.`;
+  if (reason === 'overlay closed') return 'modal closed: the pop-up went away, so it goes back to the screen under it.';
+  if (reason === 'scroll') return `scroll: the content moved, so it stays with ${with_}.`;
+  if (reason === 'same page') return `update: most of what it shows is on ${with_} as well, so it counts as the same screen.`;
   if (choices[n]?.link === 'new') return 'you gave it a screen of its own.';
-  if (isPopup(step, choices)) return 'a pop-up: it always starts a box of its own.';
+  if (isPopup(step, choices)) return 'a pop-up: it starts a box of its own.';
   if (step.label === 'opening') return 'the opening screen starts the first box.';
-  if (n === 6) return 'navigation, and not the same picture as the start (a badge appeared), so a new box.';
-  return 'navigation: most of the screen changed, so a new box.';
+  if (n === 6) return 'navigation: hardly anything it shows was seen before (the feed has other posts), so a new box.';
+  return 'navigation: hardly anything it shows was seen before, so a new box.';
 }
 
 /** How `pathway.json` describes a step, for the lesson on reporting. */
@@ -256,7 +249,7 @@ export function jsonStep(pathway: MockPathway, n: number, choices: Choices) {
   return {
     step_index: n - 1,
     screen_id: `screen-${String(screen?.index ?? 0).padStart(2, '0')}`,
-    grouped_by: reason === 'modal closed' ? 'modal_close' : reason ?? null,
+    grouped_by: reason?.replace(' ', '_') ?? null,
     screen_choice: link === 'new' ? 'new_screen' : typeof link === 'number' ? 'same_screen' : 'automatic',
   };
 }

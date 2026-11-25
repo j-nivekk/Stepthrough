@@ -201,3 +201,96 @@ def test_the_same_screenshots_give_the_same_answer_and_none_gives_none() -> None
     assert screens.describe([], [], {}, []) == []
     blank = np.full((HEIGHT, WIDTH, 3), 255, np.uint8)  # nothing to tell by
     assert [step.reason for step in _describe([blank, blank], ["opening_screen", "small_ui_change"])] == ["", "update"]
+
+
+# ── what the pathway tutorial says ──────────────────────────────────────────────────────────────────
+# frontend/src/components/pathwayTutorial/tutorialModel.ts tells what the engine finds in this story. It teaches two
+# mistakes that the engine really makes, so they are checked here as well: when one is gone, the lesson has to change.
+
+
+def _line(rng: random.Random, words: int) -> str:
+    return " ".join(rng.choice(WORDS) for _ in range(words)) + f" {rng.randint(100, 999)}"
+
+
+def _picture(image: np.ndarray, seed: int, x: int, y: int, width: int, height: int) -> None:
+    noise = np.random.default_rng(seed).integers(0, 255, (7, 9, 3), dtype=np.uint8)
+    image[y : y + height, x : x + width] = cv2.resize(noise, (width, height), interpolation=cv2.INTER_CUBIC)
+
+
+def _phone(tab: int, title: str) -> np.ndarray:
+    image = np.full((960, 444, 3), 250, np.uint8)
+    cv2.rectangle(image, (0, 0), (444, 70), (225,) * 3, -1)
+    _text(image, 20, 45, title, 0.8)
+    cv2.rectangle(image, (0, 884), (444, 960), (232,) * 3, -1)
+    for k, name in enumerate(("Home", "Find", "Saved", "You")):
+        _text(image, 24 + 110 * k, 926, name, 0.5, 0 if k == tab else 130)
+    return image
+
+
+def _home(posts: int, badge: bool = False) -> np.ndarray:
+    image, rng = _phone(0, "Daily"), random.Random(posts)
+    _picture(image, posts, 20, 90, 404, 180)
+    for k in range(7):
+        _picture(image, posts * 50 + k, 20, 300 + 82 * k, 60, 60)
+        _text(image, 96, 324 + 82 * k, _line(rng, 2), 0.55)
+        _text(image, 96, 350 + 82 * k, _line(rng, 2), 0.42, 110)
+    if badge:
+        cv2.circle(image, (424, 22), 11, (43, 57, 192), -1)
+    return image
+
+
+def _settings(scroll: int = 0, on: bool = False) -> np.ndarray:
+    image, rng = _phone(3, "Settings"), random.Random(900)
+    page = np.full((1500, 444, 3), 250, np.uint8)
+    for k in range(20):
+        _text(page, 24, 44 + 70 * k, _line(rng, 2), 0.55)
+        cv2.rectangle(page, (350, 26 + 70 * k), (404, 52 + 70 * k), (124, 175, 72) if on and k == 0 else (200,) * 3, -1)
+    image[70:884] = page[scroll : scroll + 814]
+    return image
+
+
+def _permission(under: np.ndarray) -> np.ndarray:
+    image = (under * 0.6).astype(np.uint8)
+    cv2.rectangle(image, (50, 360), (394, 560), (252,) * 3, -1)
+    _text(image, 80, 410, "Allow notifications?", 0.7)
+    _text(image, 80, 450, "so that nothing is missed")
+    _text(image, 90, 520, "Not now", 0.6)
+    cv2.rectangle(image, (250, 490), (370, 540), (95, 58, 31), -1)
+    _text(image, 280, 522, "Allow", 0.6, 250)
+    return image
+
+
+def _product(number: int) -> np.ndarray:
+    image, own, shared = _phone(1, "Find"), random.Random(300 + number), random.Random(5)
+    _picture(image, 700 + number, 20, 90, 404, 230)
+    _text(image, 24, 360, _line(own, 2), 0.75)
+    _text(image, 24, 395, f"EUR {own.randint(10, 99)}.95", 0.6)
+    for k, size in enumerate(("S", "M", "L", "XL")):
+        cv2.rectangle(image, (24 + 92 * k, 420), (100 + 92 * k, 460), (90,) * 3, 1)
+        _text(image, 54 + 92 * k, 446, size, 0.6)
+    cv2.rectangle(image, (24, 480), (420, 530), (60,) * 3, -1)
+    _text(image, 150, 512, "Add to basket", 0.65, 250)
+    for k in range(10):
+        _text(image, 24, 570 + 31 * k, _line(shared, 4))
+    return image
+
+
+def _story(home_again: np.ndarray) -> list[tuple[str, int | None, str]]:
+    pages = [_home(1), _settings(), _settings(90), _permission(_settings(90)), _settings(on=True), home_again, _product(1), _product(2)]
+    labels = ["opening_screen", "navigation", "scroll", "modal", "modal_close", "navigation", "navigation", "content_update"]
+    return [(step.label, step.same_as, step.reason) for step in _describe(pages, labels)]
+
+
+def test_the_story_of_the_pathway_tutorial() -> None:
+    assert _story(_home(2)) == [
+        ("opening_screen", None, ""),
+        ("navigation", None, "new"),
+        ("scroll", 1, "scroll"),
+        ("modal", None, "overlay"),
+        ("modal_close", 1, "overlay_closed"),
+        ("navigation", None, "new"),  # home, but its feed has other posts: one screen, split in two
+        ("navigation", None, "new"),
+        ("content_update", 6, "same_page"),  # the next product, most of which is the same: two screens in one box
+    ]
+    # a small change on home is no reason to split it
+    assert _story(_home(1, badge=True))[5] == ("navigation", 0, "same_page")

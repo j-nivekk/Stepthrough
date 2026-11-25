@@ -46,13 +46,13 @@ const DETAILS: Array<[PathwayDetail, string, string, string]> = [
     'screens',
     'screens',
     'for the journey as places: how many screens, in what order, and where people came back',
-    'by screens, a page stays one box while it is scrolled or typed in, and after a pop-up over it closes.',
+    'by screens, a page stays one box while it is scrolled or typed in, after a pop-up over it closes, and when it comes back.',
   ],
   [
     'steps',
     'steps',
     'for every action on its own, such as each scroll through a feed; also to check what screens put together',
-    'by steps, every step has a box of its own; only a return to an earlier screen, or your own correction, shares one.',
+    'by steps, every step has a box of its own; only the same picture again, or your own correction, shares one.',
   ],
 ];
 type FigureFormat = 'svg' | 'png';

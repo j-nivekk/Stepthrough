@@ -11,13 +11,12 @@ const SOFT = '#cfcfc8';
 const MID = '#a7a7a0';
 const DARK = '#7d7d76';
 
-function Header({ badge = false }: { badge?: boolean }) {
+function Header() {
   return (
     <>
       <rect fill={BAR} height={12} width={ART_WIDTH} />
       <rect fill={DARK} height={2.5} width={16} x={5} y={5} />
       <circle cx={45} cy={6} fill={MID} r={2.3} />
-      {badge ? <circle cx={47} cy={4} fill="#c0392b" r={3} stroke={BAR} strokeWidth={1} /> : null}
     </>
   );
 }
@@ -52,13 +51,35 @@ function SettingsRows({ widths, shift = 0, firstOn = false }: { widths: number[]
   );
 }
 
-function Article({ image, title, lines }: { image: string; title: number; lines: number[] }) {
+/** Home, with a feed: the same place whatever is in it. */
+function Home({ banner, thumbs, widths }: { banner: string; thumbs: string[]; widths: number[] }) {
+  return (
+    <>
+      <rect fill={banner} height={20} width={42} x={5} y={16} />
+      {thumbs.map((thumb, index) => (
+        <g key={index}>
+          <rect fill={thumb} height={9} width={9} x={5} y={41 + index * 13} />
+          <rect fill={MID} height={2.5} width={widths[index]} x={17} y={42.5 + index * 13} />
+          <rect fill={SOFT} height={2} width={18} x={17} y={46.5 + index * 13} />
+        </g>
+      ))}
+    </>
+  );
+}
+
+/** A product: its photo, name and price are its own, and all the rest is the same on every product. */
+function Product({ image, name, price }: { image: string; name: number; price: number }) {
   return (
     <>
       <rect fill={image} height={24} width={42} x={5} y={16} />
-      <rect fill={DARK} height={3} width={title} x={5} y={44} />
-      {lines.map((width, index) => (
-        <rect fill={SOFT} height={2} key={index} width={width} x={5} y={52 + index * 6} />
+      <rect fill={DARK} height={3} width={name} x={5} y={44} />
+      <rect fill={MID} height={2.5} width={price} x={5} y={49.5} />
+      {[5, 16, 27, 38].map((x) => (
+        <rect fill="none" height={6} key={x} rx={1} stroke={MID} strokeWidth={0.8} width={9} x={x} y={56} />
+      ))}
+      <rect fill="#1f3a5f" height={7} rx={2} width={42} x={5} y={66} />
+      {[40, 36, 41].map((width, index) => (
+        <rect fill={SOFT} height={2} key={index} width={width} x={5} y={78 + index * 5.5} />
       ))}
     </>
   );
@@ -68,19 +89,10 @@ function Article({ image, title, lines }: { image: string; title: number; lines:
 export function MockArt({ art }: { art: Art }) {
   let body: ReactNode;
   let tab = 0;
-  if (art === 'home' || art === 'homeBadge') {
-    body = (
-      <>
-        <rect fill={SOFT} height={20} width={42} x={5} y={16} />
-        {[0, 1, 2, 3].map((index) => (
-          <g key={index}>
-            <rect fill="#d6d6cf" height={9} width={9} x={5} y={41 + index * 13} />
-            <rect fill={MID} height={2.5} width={26 - ((index * 7) % 12)} x={17} y={42.5 + index * 13} />
-            <rect fill={SOFT} height={2} width={18} x={17} y={46.5 + index * 13} />
-          </g>
-        ))}
-      </>
-    );
+  if (art === 'home') {
+    body = <Home banner={SOFT} thumbs={['#d6d6cf', '#d6d6cf', '#d6d6cf', '#d6d6cf']} widths={[26, 19, 24, 17]} />;
+  } else if (art === 'homeNew') {
+    body = <Home banner="#b9a7c9" thumbs={['#c9b3a7', '#a7c0b0', '#c9c2a0', '#a9b4c9']} widths={[15, 27, 20, 25]} />;
   } else if (art === 'settings') {
     body = <SettingsRows widths={[18, 24, 14, 20, 16, 22]} />;
     tab = 3;
@@ -105,11 +117,11 @@ export function MockArt({ art }: { art: Art }) {
       </>
     );
     tab = 3;
-  } else if (art === 'articleA') {
-    body = <Article image="#9db7c9" lines={[40, 38, 41, 30, 39, 36, 20]} title={34} />;
+  } else if (art === 'productA') {
+    body = <Product image="#9db7c9" name={34} price={12} />;
     tab = 1;
   } else {
-    body = <Article image="#c9ab8c" lines={[39, 41, 35, 40, 33, 38, 26]} title={28} />;
+    body = <Product image="#c9ab8c" name={22} price={15} />;
     tab = 1;
   }
   // The dialog draws its own header and tabs, under the dimming.
@@ -120,7 +132,7 @@ export function MockArt({ art }: { art: Art }) {
       {body}
       {dialog ? null : (
         <>
-          <Header badge={art === 'homeBadge'} />
+          <Header />
           <Tabs active={tab} />
         </>
       )}
