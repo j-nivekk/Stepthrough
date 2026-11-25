@@ -346,8 +346,13 @@ What happens to a recording:
    you saw just before counts as the same step.
 6. **Typing.** Every pause while typing would otherwise look like a new screen. Instead, a burst of typing
    becomes one step that shows the finished text.
-7. **Labels and revisits.** Every step gets a label for the kind of change that led to it (see below). A step
-   that goes back to a screen seen earlier is marked as a revisit, with a link to the earlier step.
+7. **Labels and returns.** At the end, Stepthrough compares the screenshots with each other. It looks for areas whose
+   content moved up or down (also one pane of several), for something that lies over the screen (new edges all round
+   it, with the rest of the screen as it was, or dimmed), and for details that are found again on another screenshot.
+   From that, every step gets a label for the kind of change that led to it (see below), and a step that goes back to
+   a screen seen earlier gets a link to it: **similar to step N** when it is the same picture again, **same screen as
+   step N** when the screen is scrolled, or something on it changed. Details that many screens of the recording have,
+   such as a window frame or a side panel, count for little. This never changes which steps there are.
 
 ### Labels
 
@@ -357,9 +362,9 @@ Labels describe the change. They never decide what counts as a step.
 | --- | --- |
 | opening | the screen the recording starts on (the start, step 0) |
 | navigation | most of the screen changed: a new page or view |
-| scroll | the content moved and then stopped |
-| modal | a pop-up or panel appeared over a dimmed screen |
-| modal closed | a pop-up or panel went away, and the screen under it was still there |
+| scroll | the content moved and then stopped: of the whole screen, or of one pane |
+| modal | a menu, dialog, sheet or panel appeared over the screen, whether or not it dims it |
+| modal closed | it went away, and the screen under it was still there |
 | feed swap | a full-screen swipe to the next item, as in short-video apps |
 | update | part of the screen changed, for example because content loaded |
 | ui change | a small change, such as a switch, a badge or a button |
@@ -375,7 +380,8 @@ Labels describe the change. They never decide what counts as a step.
   blocks, so a change a little smaller than the setting can still count, but one much smaller does not. Lower
   the setting, or add the moment by hand.
 - **It sees pixels, not meaning.** Two screens that look alike count as the same screen. A big change that
-  means nothing, such as switching to dark mode, counts as a step.
+  means nothing, such as switching to dark mode, counts as a step, and as another screen. A long answer that
+  writes itself over a whole screen can count as another screen too.
 
 [`docs/evaluation.md`](docs/evaluation.md) describes how Stepthrough was tested, how well it does, and more
 cases where it goes wrong.
@@ -442,7 +448,7 @@ While the video plays, the card of the step on screen is outlined, so you can se
 | select several steps | tick or drag across their boxes; shift-click a box (or shift/⌘/ctrl-click thumbnails in gallery view) to select a range or toggle items. **select: all**, **none** and **invert** above the steps act on the steps shown, as does the box above the list; `x` (and `shift+x`) does the same for the step in focus |
 | accept, reject or reset many steps at once | select them, then **accept**, **reject** or **reset** next to how many are selected. Steps that are so already are left as they are, and the selection stays, so a mistaken choice can be put right at once |
 | do any of this from a menu | right-click a step, in any of the three views (or `shift+F10` for the step in focus). On one of several selected steps, the menu is for all of them |
-| go to an earlier visit of the same screen | **similar to step N** on a revisit |
+| go to an earlier visit of the same screen | **similar to step N** (the same picture) or **same screen as step N** (scrolled, or with something changed) |
 | go to the screen someone went back to | **then back to step N**, on a step you said so of |
 | say that someone went back to an earlier screen where no step shows it | right-click the step they went back after, **return to** (see [Pathway](#pathway)) |
 | say which screen a step shows in the pathway | **stacking** under **annotate** on a card, in the **label, screen** column of the list, or in the gallery inspector |
@@ -502,18 +508,19 @@ How to read it:
 - A doubled frame means several steps in a row on that screen (for example `6–7` after scrolling).
 - A box shows the screenshot of its first step. Rest the pointer on a step number under the box to see that
   step instead; a number for several steps in a row, such as `6–7`, shows them in turn.
-- A dashed frame is a pop-up, when the change that led to it was labelled as one (**modal**).
+- A dashed frame is a pop-up (a menu, dialog or sheet), when the change that led to it was labelled **modal**.
 - A screen takes the title of its first step that has one. Notes appear under the screen, with the step
   number in front when the screen has several steps.
 
-Which steps count as the same screen is decided automatically, from two things. A step that shows an earlier
-screen again (a revisit) always shares its box. A step reached by scrolling, typing, swiping to the next
-item of a feed or a small change stays in the box of the step before it. Choose **view: steps** to give
-every step its own box, so that only revisits share one. A step you added by hand always has its own box.
-When a pop-up closes (**modal closed**), the step after it goes back into the box of the screen under the
-pop-up, also when something on that screen changed in the meantime, such as a switch that is now on.
-As with labels, this goes by what the screen looks like: two screens that look alike count as one, and the
-same screen in a different state can count as two.
+Which steps count as the same screen is decided automatically, from what the screenshots show. The same picture
+again (a revisit) always shares its box. A step reached by scrolling, typing, swiping to the next item of a feed or a
+small change stays in the box of the step before it, and so does a step that clearly shows an earlier screen, also
+scrolled or with something changed on it. When something that lay over the screen goes away (**modal closed**), the
+step after it goes back into the box of the screen under it. Choose **view: steps** to give every step its own box, so
+that only the same picture again shares one. A step you added by hand always has its own box. As with labels, this goes
+by what the screen looks like: two screens that look alike count as one, and the same screen in a different state can
+count as two. In runs made with Stepthrough 1.4.4 or earlier, a screen had to look exactly the same to be known again;
+run the analysis again to have it compared.
 
 Both kinds of boxes are screens; they differ in how readily two steps count as one. Use **screens** for the
 journey as places: how many screens, in what order, and where people came back. Use **steps** to see every
@@ -696,7 +703,7 @@ field. That way, the export can be read and cited without the app.
 
 `pathway.json` uses the step numbers and image names of `steps.json`. For every step it gives the screen it
 is on and why it shares that screen with an earlier step (`grouped_by`: `researcher` when you chose it, a
-revisit, a pop-up closing, or a label such as scroll), and what you chose for the step (`screen_choice`,
+revisit, or what was found, such as `scroll` or `same_page`), and what you chose for the step (`screen_choice`,
 `kind_choice`), so your decisions and the automatic ones can be told apart. It has its own `field_notes`.
 The chart itself is not in the zip; save it with **download: svg** or **png**.
 

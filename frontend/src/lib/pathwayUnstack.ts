@@ -1,5 +1,10 @@
 import type { CandidateChanges, CandidateFrame, PathwayScreen, PathwayStep } from '../types';
 
+/** Does the step join one of these without anybody saying so: the same picture again, or the same screen as found? */
+function joinsBySelf(candidate: CandidateFrame | undefined, among: (id: string) => boolean): boolean {
+  return [candidate?.similar_to_candidate_id, candidate?.same_screen_as].some((id) => Boolean(id && among(id)));
+}
+
 /**
  * Computes candidate updates to unstack every step in `screen` into a screen of its own.
  * Every step after the first gets `screen_link: 'new'`; the first step is also cleared to `'new'` if it had an
@@ -62,12 +67,7 @@ export function unstackByVisitChanges(
       const candidate = candidateById.get(step.source_candidate_id);
       const link = candidate?.screen_link;
       const linkedOutsideVisit = Boolean(link && allMemberIds.has(link) && !visitIds.has(link));
-      const revisitOutsideVisit = Boolean(
-        !link &&
-          candidate?.similar_to_candidate_id &&
-          allMemberIds.has(candidate.similar_to_candidate_id) &&
-          !visitIds.has(candidate.similar_to_candidate_id),
-      );
+      const revisitOutsideVisit = !link && joinsBySelf(candidate, (id) => allMemberIds.has(id) && !visitIds.has(id));
       if (linkedOutsideVisit || revisitOutsideVisit || (!link && step.grouped_by === 'modal_close')) {
         changes.push([step.source_candidate_id, { screen_link: anchorId }]);
       }
@@ -119,7 +119,7 @@ export function unstackStepsChanges(
     const couldAutoJoinRemaining =
       !link &&
       (pos > firstRemainingPos ||
-        Boolean(candidate?.similar_to_candidate_id && remainingIds.has(candidate.similar_to_candidate_id)) ||
+        joinsBySelf(candidate, (id) => remainingIds.has(id)) ||
         step.grouped_by === 'modal_close');
     if (linkedToRemaining || couldAutoJoinRemaining) {
       changes.push([id, { screen_link: targetAnchorId }]);
@@ -142,7 +142,7 @@ export function unstackStepsChanges(
     const couldAutoJoinTarget =
       !link &&
       (pos > firstTargetPos ||
-        Boolean(candidate?.similar_to_candidate_id && targetIds.has(candidate.similar_to_candidate_id)) ||
+        joinsBySelf(candidate, (id) => targetIds.has(id)) ||
         step.grouped_by === 'modal_close');
     if (linkedToTarget || couldAutoJoinTarget) {
       changes.push([id, { screen_link: remainingAnchorId }]);

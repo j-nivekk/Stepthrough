@@ -97,11 +97,12 @@ points to, also those left by earlier versions. Anything else in `exports/`, and
 (an export may still be writing them), stays.
 
 The zip also has `pathway.json`: the same steps folded into the screens they show and the moves between
-those screens (`app/services/pathway.py`). Steps share a screen when one is a revisit of the other, or when
-the later one was reached by a change that stays on the screen (`scroll`, `text_entry`, `feed_card_swap`,
-`content_update`, `small_ui_change`), or when the later one was reached by a pop-up closing (`modal_close`),
-which leads back to the screen the pop-up opened over. Every candidate of the run takes part in that
-grouping, also rejected ones, because a label describes the change from the detector's previous step.
+those screens (`app/services/pathway.py`). Steps share a screen when one is a revisit of the other, or when the
+engine found them to show the same screen (`same_screen_as` and `same_screen_reason`, since engine 1.2.0; see
+`app/services/screens.py`). Runs of earlier engines go by the label: a step reached by a change that stays on the
+screen (`scroll`, `text_entry`, `feed_card_swap`, `content_update`, `small_ui_change`) joins the step before it, and
+one reached by a pop-up closing (`modal_close`) the screen the pop-up opened over. Every candidate of the run takes
+part in that grouping, also rejected ones, because a label describes the change from the detector's previous step.
 `GET /runs/{id}/pathway` returns the same for the accepted steps, and `?detail=steps` joins revisits only.
 `GET /runs/{id}` lists the run's `phases` too, as where each starts (`start_ms`, `name`; an empty name starts a
 stretch outside every phase), so the step review can show and set each step's phase. `PUT /runs/{id}/phases`
@@ -112,7 +113,8 @@ the pathway's undo, which leaves a change someone else made since.
 A reviewer can overrule the grouping per step (`PATCH /candidates/{id}`): `screen_link` is `auto`, `new` (a
 screen of its own) or the id of another step of the run that shows the same screen, and `screen_kind` is
 `auto`, `screen` or `popup`. A step joins another step, by the first that applies: the
-reviewer's choice, a revisit, a pop-up closing, a label that stays on the screen.
+reviewer's choice, a revisit, what the engine found (or, in older runs, a pop-up closing or a label that stays on
+the screen).
 
 `POST /runs/{id}/pathway/merge` takes `source_candidate_id`, `target_candidate_id` and `detail` (`screens`
 by default). It moves every member of the source box to the target together, including rejected members,

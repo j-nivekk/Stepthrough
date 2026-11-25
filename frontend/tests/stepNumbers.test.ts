@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { numberRange, pathwayNumber, returnLinks, reviewNumbers, stepName, stepsPhrase, stretchName } from '../src/lib/stepNumbers';
+import { numberRange, pathwayNumber, returnLinks, returnsTo, reviewNumbers, stepName, stepsPhrase, stretchName } from '../src/lib/stepNumbers';
 import type { AcceptedStep, CandidateFrame, CandidateStatus } from '../src/types';
 
 const candidate = (index: number, status: CandidateStatus, label = 'navigation') =>
@@ -75,4 +75,14 @@ test('an accepted step says where the user went back to after it, by the name of
     ['c4', { targetId: 'candidate-c1', label: 'then back to the start' }],
     ['c7', { targetId: 'candidate-c5', label: 'then back to candidate 4' }],
   ]);
+});
+
+test('a step that shows an earlier screen again says so, when there were others in between', () => {
+  const found = (index: number, as: number | null, reason: string) =>
+    ({ ...candidate(index, 'accepted'), same_screen_as: as === null ? null : `c${as}`, same_screen_reason: reason }) as CandidateFrame;
+  const steps = [candidate(1, 'accepted'), found(2, 1, 'scroll'), found(3, null, 'new'), found(4, 2, 'same_page'), found(5, 4, 'same_page'), found(6, null, 'overlay'), found(7, 5, 'overlay_closed')];
+  assert.deepEqual(steps.map((step) => returnsTo(step, steps)?.id), [undefined, undefined, undefined, 'c2', undefined, undefined, 'c5']);
+  // a step added by hand in between is none of the engine's
+  const added = { ...candidate(8, 'accepted'), candidate_origin: 'manual' } as CandidateFrame;
+  assert.equal(returnsTo(steps[4], [...steps.slice(0, 4), added, ...steps.slice(4)]), undefined);
 });

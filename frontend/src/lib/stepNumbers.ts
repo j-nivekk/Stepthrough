@@ -67,6 +67,18 @@ export function returnLinks(candidates: CandidateFrame[], numbers: Map<string, R
   return links;
 }
 
+/**
+ * The earlier step of which this one shows the screen again, with other screens in between, as the engine found it
+ * (a screen that is the same as just before, scrolled or changed a little, is no return).
+ */
+export function returnsTo(candidate: CandidateFrame, candidates: CandidateFrame[]): CandidateFrame | undefined {
+  if (candidate.same_screen_reason !== 'same_page' && candidate.same_screen_reason !== 'overlay_closed') return undefined;
+  const found = candidates.filter((each) => each.candidate_origin !== 'manual');
+  const position = found.findIndex((each) => each.id === candidate.id);
+  const earlier = found.findIndex((each) => each.id === candidate.same_screen_as);
+  return earlier >= 0 && earlier < position - 1 ? found[earlier] : undefined;
+}
+
 // ── in the pathway ──
 
 type Numbered = Pick<PathwayStep, 'step_index' | 'path_step'>;

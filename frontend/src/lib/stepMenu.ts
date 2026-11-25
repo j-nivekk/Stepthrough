@@ -153,7 +153,7 @@ function itemsOfOne(context: StepMenuContext): ActionItem[] {
   }
 
   const links: ActionItem[] = [];
-  if (similar) links.push({ label: `go to ${similar.label.replace(/^similar to /, '')}, which looks the same`, run: () => actions.jumpTo(similar.targetId) });
+  if (similar) links.push({ label: `go to ${similar.label.replace(/^(similar to|same screen as) /, '')}, which looks the same`, run: () => actions.jumpTo(similar.targetId) });
   if (back) links.push({ label: `go to ${back.label.replace(/^then back to /, '')}, where this went back`, run: () => actions.jumpTo(back.targetId) });
   links.forEach((item, index) => items.push({ ...item, divider: index === 0 }));
 

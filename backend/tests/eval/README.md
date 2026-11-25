@@ -28,8 +28,14 @@ tests/eval/
 ├── stress.py             ← uploads as they really arrive (H.264, phone-style VFR, overlays); CLI
 ├── cards.py              ← test cards: countdowns, colour-only change, size sweep, colour accuracy, long recording
 ├── wide.py               ← device sizes, upload formats and test cards; CLI
+├── web/                  ← the web tester: mock apps with scripted people, which say what they show
+├── webrec.py             ← records the web tester, frame by frame; CLI
+├── webreal.py            ← takes in a recording of it that a phone or a computer made; CLI
+├── webtruth.py           ← the steps a recording should give, from the tester's own log
+├── webscore.py           ← the engine on those recordings: steps, labels, boxes, returns; CLI
 ├── test_eval_stress.py   ← pytest regression gates for the stress matrix
 ├── test_eval_wide.py     ← pytest regression gates for the wider evaluation
+├── test_eval_web.py      ← pytest for the rules in webtruth.py
 └── results/              ← JSON summaries written with --json (gitignored except .gitkeep)
 ```
 
@@ -167,6 +173,55 @@ numbers, and `DIR/README.txt` explains the layout. Saving into an existing folde
 covers everything there. `tests/eval/results/videos/` is ignored by git.
 
 `test_eval_wide.py` gates a fast part of each section in `pytest`.
+
+## Web tester (`web/`, `webrec.py`, `webtruth.py`, `webscore.py`)
+
+The drawn scenarios above have exact timing but simple screens. The web tester is made of real ones: nine mock apps in
+HTML (an admin console, a window in two halves with an assistant at work, mail, documentation, a chat with answers that
+stream, a shop, phone settings, short videos, a feed), each with scripts in which somebody uses them, at a person's pace
+and with a person's slips.
+
+| covered | how |
+|---|---|
+| scrolling | flicks with momentum, wheel, slow; of a page, of one pane, of a list of rows that look alike |
+| typing | one field, several, a field that grows, a list that follows; pauses and slips; a phone keyboard with key pop-ups |
+| overlays | menus and submenus that dim nothing, pop-overs, dialogs, sheets, a drawer, a panel, toasts, a tooltip |
+| returns | back to a list where it was left, the same page scrolled elsewhere, with a menu closed, pages made alike |
+| what is no step | rows that light up, a moving pointer, scroll bars that fade, clips, spinners, a blinking caret |
+| the rest | answers that stream, pages that load, content pushed down, things folded open, switches, dark mode, swipes |
+
+**The app says what it shows.** At every frame it logs which screen it is, what lies over it, how far every pane is
+scrolled, what is in the fields and what is moving. `webtruth.py` works the expected steps out of that, for any minimum
+time on screen, so there is nothing to mark by hand. Recordings are made with the clock turned by hand, one frame at a
+time: a script gives the same log every time, and the same pictures but for a few pixels.
+
+```bash
+python -m tests.eval.webrec                      # record every script (22, about four minutes; needs Chrome)
+python -m tests.eval.webscore                    # and score the engine on them
+python -m tests.eval.webscore --set dev --steps --only workshop_a    # every step, and what it was
+```
+
+Script `a` of every app is there to develop with. Script `b`, with another theme and other texts, is kept apart: look at
+its totals only. The apps are the same in both, and drawn by the same project that makes the engine, so good numbers here
+say less than good numbers on real recordings.
+
+The results of the current engine are in [docs/evaluation.md](../../../docs/evaluation.md#4-labels-and-screens-the-web-tester).
+
+**Recorded by something else.** To record the tester with a phone, a Mac or a simulator: serve `web/`, open it there and
+choose *watch* (it plays a script) or *use it yourself*. Start the screen recording, press *start* when there is one, and
+*save the log* (*done*) at the end. A magenta and green flash at both ends ties the log to the video:
+
+```bash
+python -m http.server --directory tests/eval/web 8400
+python -m tests.eval.webreal recording.mov larder_a__phone__log.json
+python -m tests.eval.webscore --set real --steps
+```
+
+A new app is an entry in `Kit.apps` with a `build` and two scripts (`web/apps_computer.js`, `web/apps_phone.js`). It says
+what it shows through the kit: `Kit.show` and `Kit.at` for screens, `Kit.open` and `Kit.close` for what lies over them,
+`data-pane` and `data-field` on what scrolls and what is typed in, `Kit.set` for switches and what is folded open,
+`Kit.came` for what comes in late, `Kit.loop` for what never stops. Things left to chance go through `Kit.fixed` when
+they are drawn again, or a screen that is come back to would not look the same.
 
 ## Adding a new scenario
 

@@ -102,9 +102,19 @@ _ENGINE_NOTES = {
         "step": "a screen that stayed still for at least resolved_settings.min_dwell_ms",
         "scene_score": "share of the screen that changed into this step (share of a 24 x 24 grid of regions); 1 for the opening screen",
         "transition_type": (
-            "how the step was reached: opening_screen, navigation, scroll, feed_card_swap, modal, modal_close "
-            "(a pop-up went away and the screen under it was still there), content_update, small_ui_change or "
-            "text_entry (a typing burst grouped into one step); a description, not used to find steps"
+            "how the step was reached: opening_screen, navigation, scroll, feed_card_swap, modal (a menu, dialog or "
+            "sheet opened over the screen; before engine 1.2.0 only over a dimmed screen), modal_close (it went away "
+            "and the screen under it was still there), content_update, small_ui_change or text_entry (a typing burst "
+            "grouped into one step); a description, not used to find steps"
+        ),
+        "score_breakdown.moved_regions": (
+            "since engine 1.2.0: areas whose content moved up or down into this step (dy in pixels of the recording, "
+            "negative is up), and the share of their content that moved by as much (agreement)"
+        ),
+        "score_breakdown.overlay_region": "since engine 1.2.0: where something opened over the screen, or went away",
+        "score_breakdown.likeness": (
+            "since engine 1.2.0: how much of the step before is still there, 0 to 1, with what many screens of the "
+            "recording share counting for less"
         ),
         "change_started_ms": "when the screen started changing away from the previous step",
         "settled_ms": "when this step's screen stopped changing",

@@ -151,7 +151,7 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, icon, anyStep
         type="button"
       >
         <span>automatic</span>
-        <small>from revisits and labels</small>
+        <small>from what the steps show</small>
       </button>
       <button
         aria-pressed={candidate.screen_link === 'new'}

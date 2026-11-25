@@ -11,7 +11,8 @@ from app.services.pathway import _letters, _mark_detours, _set_continuations, bu
 
 def _candidate(index: int, label: str | None, *, status: str = 'accepted', similar_to: int | None = None,
                title: str | None = None, origin: str = 'detected', dwell: int | None = 1_000,
-               link: int | str | None = None, kind: str | None = None, back: int | None = None) -> dict:
+               link: int | str | None = None, kind: str | None = None, back: int | None = None,
+               same: int | None = None, why: str | None = None) -> dict:
     return {
         'id': f'c{index}',
         'detector_index': index,
@@ -29,6 +30,8 @@ def _candidate(index: int, label: str | None, *, status: str = 'accepted', simil
         'screen_link': f'c{link}' if isinstance(link, int) else link,
         'screen_kind': kind,
         'returns_to': None if back is None else f'c{back}',
+        'same_screen_as': None if same is None else f'c{same}',
+        'same_screen_reason': why,
     }
 
 
@@ -56,6 +59,37 @@ def test_a_linear_journey_is_one_screen_per_step() -> None:
         ('screen-02', 'screen-03', 'forward', [2]),
     ]
     assert pathway['step_count'] == 2 and pathway['screen_count'] == 3
+
+
+def test_what_the_engine_found_decides_and_not_the_label() -> None:
+    # Home, scrolled, Settings (a change of part of the screen), a menu over it, gone again, Home with something new,
+    # the same menu again, typing in a panel that was opened over Home
+    candidates = [
+        _candidate(1, 'opening_screen'),
+        _candidate(2, 'scroll', same=1, why='scroll'),
+        _candidate(3, 'content_update', why='new'),
+        _candidate(4, 'modal', why='overlay'),
+        _candidate(5, 'modal_close', same=3, why='overlay_closed'),
+        _candidate(6, 'navigation', same=2, why='same_page'),
+        _candidate(7, 'modal', same=4, why='overlay'),
+        _candidate(8, 'text_entry', same=7, why='text_entry'),
+        _candidate(9, 'modal', why='overlay'),
+    ]
+    pathway = _pathway(candidates)
+    assert _screens_of(pathway) == ['screen-01', 'screen-01', 'screen-02', 'screen-03', 'screen-02', 'screen-01', 'screen-03', 'screen-03', 'screen-04']
+    assert [step['grouped_by'] for step in pathway['steps']] == [
+        None, 'scroll', None, None, 'overlay_closed', 'same_page', 'overlay', 'text_entry', None,
+    ]
+    assert [screen['kind'] for screen in pathway['screens']] == ['screen', 'screen', 'popup', 'popup']
+
+    # by step, only the same picture again shares a box
+    assert len(set(_screens_of(_pathway(candidates, 'steps')))) == 9
+
+    # the reviewer's say comes first, and a pop-up of theirs starts a box of its own
+    said = [dict(candidate) for candidate in candidates]
+    said[5] |= {'screen_link': 'new'}
+    said[1] |= {'screen_kind': 'popup'}
+    assert _screens_of(_pathway(said))[:6] == ['screen-01', 'screen-02', 'screen-03', 'screen-04', 'screen-03', 'screen-05']
 
 
 def test_popup_and_return_branch_and_scroll() -> None:

@@ -14,6 +14,7 @@ function makeCandidate(
     transition?: string;
     screen_link?: string | null;
     similar_to?: string | null;
+    same_as?: string | null;
   } = {},
 ): CandidateFrame {
   return {
@@ -30,6 +31,8 @@ function makeCandidate(
     status: 'accepted',
     screen_link: options.screen_link ?? null,
     similar_to_candidate_id: options.similar_to ?? null,
+    same_screen_as: options.same_as ?? null,
+    same_screen_reason: options.same_as ? 'same_page' : null,
     score_breakdown: {
       visual: 0,
       text: 0,
@@ -95,6 +98,8 @@ function groupScreens(candidates: CandidateFrame[]): string[][] {
     if (!target && link !== 'new') {
       if (candidate.similar_to_candidate_id && parent.has(candidate.similar_to_candidate_id)) {
         target = candidate.similar_to_candidate_id;
+      } else if (candidate.same_screen_as && parent.has(candidate.same_screen_as)) {
+        target = candidate.same_screen_as;
       } else if (label && SAME_SCREEN_LABELS.has(label) && previous) {
         target = previous.id;
       }
@@ -208,4 +213,18 @@ test('unstackSteps pops out the first step from a manually stacked pair', () => 
 
   const popFirst = applyChanges(candidates, unstackStepsChanges([steps[0]], steps, byId));
   assert.deepEqual(groupScreens(popFirst), [['c1'], ['c2']]);
+});
+
+test('a step the engine found to be the same screen stays apart once it is popped out, and the others together', () => {
+  const candidates = [
+    makeCandidate('c1', 1, { transition: 'opening_screen' }),
+    makeCandidate('c2', 2, { transition: 'navigation' }),
+    makeCandidate('c3', 3, { transition: 'navigation', same_as: 'c1' }),
+    makeCandidate('c4', 4, { transition: 'navigation', same_as: 'c3' }),
+  ];
+  assert.deepEqual(groupScreens(candidates), [['c1', 'c3', 'c4'], ['c2']]);
+  const steps = [makeStep(candidates[0], 1), makeStep(candidates[2], 3, 'screen-01', 2, 'same_page'), makeStep(candidates[3], 4, 'screen-01', 2, 'same_page')];
+  const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  assert.deepEqual(groupScreens(applyChanges(candidates, unstackStepsChanges([steps[1]], steps, byId))), [['c1', 'c4'], ['c2'], ['c3']]);
+  assert.deepEqual(groupScreens(applyChanges(candidates, unstackStepsChanges([steps[0]], steps, byId))), [['c1'], ['c2'], ['c3', 'c4']]);
 });

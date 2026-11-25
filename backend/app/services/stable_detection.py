@@ -19,6 +19,8 @@ Pipeline:
 5. Merge neighbouring intervals that show the same state, describe the change into each step
    (navigation, scroll, modal, ...), collapse typing bursts and, optionally, scroll stops.
 6. Extract one screenshot per step from the working copy.
+7. Look at the screenshots to say more surely what led to each step, and which steps show the same screen
+   (``screens.py``). This changes labels and links, never which steps there are.
 
 Every user-facing setting is in physical units. The fully resolved values and the engine version are
 stored with each run (``resolve_stable_config``), so results can be reproduced and cited.
@@ -42,11 +44,12 @@ from ..analysis_metadata import STABLE_RECORDING_TYPES
 from ..models import RunSettings, StableSettings
 from ..utils import timecode_from_ms, utc_now
 from .ocr import OcrCache, OcrUsageStats, extract_text_from_image, load_ocr_engine
+from . import screens
 from .run_control import CancellationCallback, CancellationRequested, ProgressCallback
 from .similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string, text_distance
 from .video import extract_frame
 
-ENGINE_VERSION = "stable_v3/1.1.0"
+ENGINE_VERSION = "stable_v3/1.2.0"
 
 ANALYSIS_LONG_EDGE = 480
 TARGET_SAMPLE_FPS = 15.0
@@ -841,8 +844,59 @@ def detect_candidates_stable(
     )
 
     ocr = _load_ocr(config, progress)
-    return _extract_candidates(steps, config, ocr, pts, end_ms, n, (width / aw, height / ah), (aw, ah),
-                               video_path, frames_dir, duration_ms, progress, cancelled, revisit_of)
+    candidates = _extract_candidates(steps, config, ocr, pts, end_ms, n, (width / aw, height / ah), (aw, ah),
+                                     video_path, frames_dir, duration_ms, progress, cancelled, revisit_of)
+    keeps = [comparer.keep_mask(int(frame_bins[step.start]), int(frame_bins[step.start])) for step in steps]
+    _relate_screens(candidates, steps, keeps, revisit_of, ah, progress, cancelled)
+    return candidates
+
+
+def _travelled(transition: _Transition | None, height: int) -> float:
+    """How far the content was seen to move up or down on the way to a step, as a share of the height; 0 if it was not."""
+    if transition is None or transition.vertical_moves < 2 or transition.vertical_consistency < 0.8:
+        return 0.0
+    travel = abs(transition.travel_dy)
+    return travel / height if travel > 2 * abs(transition.travel_dx) and travel >= 0.08 * height else 0.0
+
+
+def _relate_screens(
+    candidates: list[dict[str, Any]],
+    steps: list[_Step],
+    keeps: list[np.ndarray | None],
+    revisit_of: dict[int, int],
+    height: int,
+    progress: ProgressCallback,
+    cancelled: CancellationCallback,
+) -> None:
+    """What led to each step, and which steps show the same screen, from their screenshots (``screens.py``)."""
+    progress("primary_extract", f"Comparing {len(candidates)} screens", EXTRACT_RANGE[1], "info")
+    views: list[screens.View] = []
+    size = (0, 0)
+    for candidate, keep in zip(candidates, keeps):
+        if cancelled():
+            raise CancellationRequested("Run cancelled while comparing screens.")
+        image = cv2.imread(candidate["image_path"])
+        if image is None:
+            return  # the labels and revisits the changes gave stand
+        size = (image.shape[1], image.shape[0])
+        views.append(screens.view(image, keep))
+    found = screens.describe(views, [step.label for step in steps], revisit_of, [_travelled(step.transition, height) for step in steps])
+    for candidate, screen, shown in zip(candidates, found, views):
+        sx, sy = size[0] / shown.size[0], size[1] / shown.size[1]
+        breakdown = candidate["score_breakdown"]
+        breakdown["transition_type"] = screen.label
+        breakdown["likeness"] = screen.likeness
+        breakdown["moved_regions"] = [
+            {"x": round(move.x * sx), "y": round(move.y * sy), "width": round(move.width * sx), "height": round(move.height * sy),
+             "dy": round(move.dy * sy), "agreement": move.agree}
+            for move in screen.relation.moves
+        ]
+        area = screen.relation.opened or screen.relation.closed
+        breakdown["overlay_region"] = (
+            {"x": round(area[0] * sx), "y": round(area[1] * sy), "width": round(area[2] * sx), "height": round(area[3] * sy)} if area else None
+        )
+        candidate["same_screen_as"] = candidates[screen.same_as]["id"] if screen.same_as is not None else None
+        candidate["same_screen_reason"] = screen.reason or None
 
 
 def _load_ocr(config: StableDetectorConfig, progress: ProgressCallback) -> tuple[Any, Any, Any] | None:

@@ -115,6 +115,8 @@ test('what the menu says fits the view and the step', () => {
   );
   assert.deepEqual(choose(links, 'go to step 1, which looks the same'), [['jumpTo', 'candidate-c1']]);
   assert.deepEqual(choose(links, 'go to the start, where this went back'), [['jumpTo', 'candidate-c1']]);
+  const again = stepMenuItems(context(steps, 'c2', [], { similar: { targetId: 'candidate-c1', label: 'same screen as step 1' } }));
+  assert.deepEqual(choose(again, 'go to step 1, which looks the same'), [['jumpTo', 'candidate-c1']]);
 });
 
 test('a range is selected from the step selected before', () => {

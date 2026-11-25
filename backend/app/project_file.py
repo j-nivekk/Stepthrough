@@ -65,7 +65,7 @@ STEP_FIELDS = (
     "id", "detector_index", "candidate_origin", "timestamp_ms", "timestamp_tc", "scene_score", "status", "title",
     "notes", "image_hash", "perceptual_hash", "histogram_signature", "ocr_text", "revisit_group_id",
     "similar_to_candidate_id", "similarity_distance", "score_breakdown", "screen_link", "screen_kind", "pathway_row",
-    "returns_to", "created_at", "updated_at",
+    "returns_to", "same_screen_as", "same_screen_reason", "created_at", "updated_at",
 )
 
 # Steps that bring a project.json of one version up to the next: UPGRADES[1] turns a version 1 file into version 2,
@@ -472,6 +472,7 @@ def _unpack_recording(
                         "similar_to_candidate_id": ids.get(step.get("similar_to_candidate_id")),
                         "screen_link": screen_link if screen_link in (None, "new") else ids.get(screen_link),
                         "returns_to": ids.get(step.get("returns_to")),
+                        "same_screen_as": ids.get(step.get("same_screen_as")),
                     },
                 )
             )

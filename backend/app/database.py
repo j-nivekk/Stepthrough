@@ -100,6 +100,10 @@ CREATE TABLE IF NOT EXISTS candidate_frames (
     -- The reviewer's say that after this step the user went back to an earlier screen, with no step of its own for it:
     -- NULL, or the id of an earlier step that shows that screen.
     returns_to TEXT,
+    -- What the engine found (since 1.2.0): the earlier step that shows the same screen, NULL when there is none, and why
+    -- (or that it is another screen). Both NULL: an engine that did not look, or a step added by hand.
+    same_screen_as TEXT,
+    same_screen_reason TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(run_id, detector_index)
@@ -417,6 +421,8 @@ def init_db() -> None:
         _ensure_column(conn, "candidate_frames", "screen_kind", "TEXT")
         _ensure_column(conn, "candidate_frames", "pathway_row", "TEXT")
         _ensure_column(conn, "candidate_frames", "returns_to", "TEXT")
+        _ensure_column(conn, "candidate_frames", "same_screen_as", "TEXT")
+        _ensure_column(conn, "candidate_frames", "same_screen_reason", "TEXT")
         _ensure_column(conn, "recordings", "working_path", "TEXT")
         _ensure_column(conn, "users", "notes", "TEXT")
         _ensure_column(conn, "users", "password_hash", "TEXT")

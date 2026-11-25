@@ -28,13 +28,16 @@ _SCREEN_CHOICES = {None: "automatic", "new": "new_screen"}  # any other value is
 ROW_CHOICES = ("continue", "below")
 
 FIELD_NOTES = {
-    "detail": "screens: steps reached by scrolling, typing or a small change share a box with the step before; "
-              "steps: every step has its own box. In both, a step that shows an earlier screen again shares its box",
+    "detail": "screens: steps that show the same screen share a box, also scrolled, or with something changed on it; "
+              "steps: every step has its own box. In both, the same picture again shares its box",
     "steps": "the steps of steps.json in order; screen_id and visit say where each one sits in the pathway",
     "steps.grouped_by": "why the step shares a screen with an earlier step: researcher (the reviewer said so), "
-                        "revisit (the same screen state again), modal_close (the pop-up over that screen went "
-                        "away) or the label of the change that stayed on the screen (scroll, text_entry, ...); "
-                        "null for the step that starts a screen",
+                        "revisit (the same screen state again); in runs of engine stable_v3/1.2.0 and later, what the "
+                        "engine found: overlay_closed (what lay over that screen went away), scroll, text_entry, "
+                        "feed_card_swap, same_page (it looks like that screen, perhaps scrolled or with something "
+                        "changed), overlay (the same pop-up again) or update (a small change); in older runs "
+                        "modal_close (a pop-up went away) or the label of the change that stayed on the screen; null "
+                        "for the step that starts a screen",
     "steps.screen_choice": "what the reviewer chose for the step: automatic (nothing), new_screen (a screen of its "
                            "own) or same_screen (the screen of another step they picked)",
     "steps.kind_choice": "automatic, or what the reviewer set: screen or popup",
@@ -115,8 +118,10 @@ def _group_candidates(candidates: list[dict[str, Any]], detail: PathwayDetail) -
     1. the reviewer's choice (``screen_link``): the same screen as a step they picked (earlier or later), or a
        screen of its own;
     2. a revisit: the detector found the same screen state again;
-    3. a pop-up closing, which leads back to the screen the pop-up opened over;
-    4. a change that stays on the screen (scroll, typing, ...), which joins the step before.
+    3. what the engine found when it compared the screenshots (``same_screen_as``, ``screens.py``): the same screen,
+       also scrolled, with something changed on it, or after what lay over it went away;
+    4. in runs of engines that did not compare them: a pop-up closing, which leads back to the screen it opened over,
+       and a change that stays on the screen (scroll, typing, ...), which joins the step before.
 
     With ``detail="steps"`` only 1 and 2 apply. Every candidate of the run takes part, also rejected ones: a
     label describes the change from the detector's previous step, so the chain must not skip steps the
@@ -137,6 +142,7 @@ def _group_candidates(candidates: list[dict[str, Any]], detail: PathwayDetail) -
         parent[second] = first
 
     reasons: dict[str, str] = {}
+    popups = {candidate["id"]: _popup(candidate) for candidate in ordered}
     previous_detected: dict[str, Any] | None = None
     open_popups: list[str] = []  # the steps showing the screens under the pop-ups that are open, innermost last
     for candidate in ordered:
@@ -157,13 +163,18 @@ def _group_candidates(candidates: list[dict[str, Any]], detail: PathwayDetail) -
             continue
 
         label = _breakdown(candidate).get("transition_type")
-        popup = _popup(candidate)
+        popup = popups[candidate["id"]]
         revisit = candidate.get("similar_to_candidate_id")
+        found, why = candidate.get("same_screen_as"), candidate.get("same_screen_reason")  # since engine 1.2.0
         if target is None and link != "new":
             if revisit in parent and revisit != candidate["id"]:
                 target, reason = revisit, "revisit"
-            elif popup or detail != "screens":
-                pass  # a pop-up starts a box of its own; by step, only the same screen state shares a box
+            elif detail != "screens":
+                pass  # by step, only the same screen state shares a box
+            elif found in parent and found != candidate["id"] and (popups.get(found, False) or not popup):
+                target, reason = found, why or label  # what the engine found (a pop-up only joins the same pop-up again)
+            elif popup or why:
+                pass  # a pop-up starts a box of its own, and so does a screen the engine found to be another one
             elif label == POPUP_CLOSED_LABEL and open_popups:
                 # The screen under the pop-up is back. Something on it may have changed meanwhile (a switch
                 # that is now on), so it need not be a revisit; it is still that screen.

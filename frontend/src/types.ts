@@ -198,6 +198,11 @@ export interface CandidateScoreBreakdown {
   event_start_ms?: number | null;
   event_end_ms?: number | null;
   grouped_states?: number | null;
+  /** Since engine 1.2.0: how much of the step before is still there (0 to 1), the areas whose content moved up or down
+   *  (dy, negative is up), and where something opened over the screen or went away. */
+  likeness?: number | null;
+  moved_regions?: Array<{ x: number; y: number; width: number; height: number; dy: number; agreement: number }>;
+  overlay_region?: { x: number; y: number; width: number; height: number } | null;
 }
 
 export interface CandidateFrame {
@@ -218,6 +223,9 @@ export interface CandidateFrame {
   revisit_group_id?: string | null;
   similar_to_candidate_id?: string | null;
   similarity_distance?: number | null;
+  /** What the engine found (since 1.2.0): the earlier step that shows the same screen, and why. */
+  same_screen_as?: string | null;
+  same_screen_reason?: string | null;
   /** The reviewer's say for the pathway: `new` (a screen of its own) or the id of an earlier step that shows
    *  the same screen. Empty leaves it to the automatic grouping. */
   screen_link?: string | null;

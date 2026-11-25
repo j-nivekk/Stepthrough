@@ -381,6 +381,18 @@ class ChangedRegion(BaseModel):
     score: float
 
 
+class ScreenRegion(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
+
+
+class MovedRegion(ScreenRegion):
+    dy: int
+    agreement: float
+
+
 class CandidateScoreBreakdown(BaseModel):
     visual: float
     text: float
@@ -397,6 +409,11 @@ class CandidateScoreBreakdown(BaseModel):
     event_start_ms: int | None = None
     event_end_ms: int | None = None
     grouped_states: int | None = None
+    # since engine 1.2.0: how much of the screen before is still there (0 to 1), the areas whose content moved up or
+    # down, and where something opened over the screen or went away
+    likeness: float | None = None
+    moved_regions: list[MovedRegion] = Field(default_factory=list)
+    overlay_region: ScreenRegion | None = None
 
 
 class AnalysisControlMetadataResponse(BaseModel):
@@ -437,6 +454,9 @@ class CandidateFrameResponse(BaseModel):
     revisit_group_id: str | None = None
     similar_to_candidate_id: str | None = None
     similarity_distance: float | None = None
+    # What the engine found: the earlier step that shows the same screen, and why (services/screens.py).
+    same_screen_as: str | None = None
+    same_screen_reason: str | None = None
     # The reviewer's say for the pathway; None leaves it to the automatic grouping.
     screen_link: str | None = None  # "new", or the id of another step that shows the same screen
     screen_kind: Literal["screen", "popup"] | None = None

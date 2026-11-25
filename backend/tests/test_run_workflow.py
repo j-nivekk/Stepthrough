@@ -342,8 +342,8 @@ def test_adding_a_step_by_hand_keeps_the_detectors_revisit_links() -> None:
                 'ocr_text': None, 'revisit_group_id': None, 'similar_to_candidate_id': None, **extra}
 
     # The detector found three different screens and one revisit (step 4 shows step 2 again).
-    detected = [row(1), row(2, revisit_group_id='revisit-c2'), row(3),
-                row(4, revisit_group_id='revisit-c2', similar_to_candidate_id='c2')]
+    detected = [row(1), row(2, revisit_group_id='revisit-c2'), row(3, same_screen_reason='new'),
+                row(4, revisit_group_id='revisit-c2', similar_to_candidate_id='c2', same_screen_as='c1', same_screen_reason='same_page')]
     added = row(5, id='manual', candidate_origin='manual', timestamp_ms=2_500)
 
     after = {c['id']: c for c in main._resequence_candidates([*detected, added], frozenset({'manual'}))}
@@ -351,6 +351,7 @@ def test_adding_a_step_by_hand_keeps_the_detectors_revisit_links() -> None:
     assert [c['id'] for c in sorted(after.values(), key=lambda c: c['detector_index'])] == ['c1', 'c2', 'manual', 'c3', 'c4']
     assert [after[key]['similar_to_candidate_id'] for key in ('c1', 'c2', 'c3', 'c4')] == [None, None, None, 'c2']
     assert after['c3']['revisit_group_id'] is None and after['c4']['revisit_group_id'] == 'revisit-c2'
+    assert (after['c4']['same_screen_as'], after['c4']['same_screen_reason'], after['c3']['same_screen_reason']) == ('c1', 'same_page', 'new')
     # Only the added step is linked to its look-alike, and the two share a group.
     assert after['manual']['similar_to_candidate_id'] == 'c1'
     assert after['manual']['revisit_group_id'] == after['c1']['revisit_group_id'] == 'revisit-c1'

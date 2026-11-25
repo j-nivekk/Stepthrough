@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app import main
+from app import database, main
 from app.accounts import User, current_user
 from app.repository import MAX_RUN_NAME_LENGTH, create_user, duplicate_run_name, update_run
 from app.storage import absolute_data_path
@@ -79,6 +79,8 @@ def test_duplicate_completed_run_copies_steps_images_links_and_phases(client: Te
         json={"name": "Onboarding", "first_step": first["id"], "last_step": second["id"]},
     )
     client.post(f"/runs/{run['id']}/export", json={"mode": "accepted"})
+    with database.connect() as conn:  # as the engine would have found it
+        conn.execute("UPDATE candidate_frames SET same_screen_as = ?, same_screen_reason = 'same_page' WHERE id = ?", (first["id"], second["id"]))
 
     # Unnamed run #1 -> "run #1 copy" (run #2)
     dup1_resp = client.post(f"/runs/{run['id']}/duplicate")
@@ -114,6 +116,7 @@ def test_duplicate_completed_run_copies_steps_images_links_and_phases(client: Te
     assert c1["pathway_row"] == "below"
     # screen_link is remapped to the new candidate ID, not the original run's candidate ID
     assert c2["screen_link"] == c1["id"] and c2["returns_to"] == c1["id"]
+    assert (c2["same_screen_as"], c2["same_screen_reason"]) == (c1["id"], "same_page")
     assert c2["screen_kind"] == "popup"
     assert detail["phases"] == [{"start_ms": 500, "name": "Onboarding"}]
 

@@ -597,6 +597,8 @@ def _serialize_candidate(row: dict) -> CandidateFrameResponse:
         revisit_group_id=row.get("revisit_group_id"),
         similar_to_candidate_id=row.get("similar_to_candidate_id"),
         similarity_distance=row.get("similarity_distance"),
+        same_screen_as=row.get("same_screen_as"),
+        same_screen_reason=row.get("same_screen_reason"),
         screen_link=row.get("screen_link"),
         screen_kind=row.get("screen_kind"),
         pathway_row=row.get("pathway_row"),
@@ -1536,6 +1538,7 @@ def runs_duplicate(run_id: str, user: CurrentUser, client: SharedClient = None) 
                         "recording_id": recording["id"],
                         "image_path": image_path,
                         "similar_to_candidate_id": id_map.get(candidate.get("similar_to_candidate_id")),
+                        "same_screen_as": id_map.get(candidate.get("same_screen_as")),
                         "screen_link": screen_link if screen_link in (None, "new") else id_map.get(screen_link),
                         "returns_to": id_map.get(candidate.get("returns_to")),
                     }

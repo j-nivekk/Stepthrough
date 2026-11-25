@@ -60,7 +60,7 @@ import {
 import { downloadExportBundle, jumpToAnchor, sleep, triggerDownload } from './lib/utils';
 import { formatCalendarDate } from './lib/formatters';
 import { isSharedAccount } from './lib/live';
-import { reviewNumbers } from './lib/stepNumbers';
+import { reviewNumbers, returnsTo } from './lib/stepNumbers';
 import { formatSize, isVisitor, uploadProblem } from './lib/visitors';
 import {
   collectImportQueueItems,
@@ -681,6 +681,10 @@ function App({ session, onSessionChange }: AppProps) {
           targetId: `candidate-${target.id}`,
           label: `similar to ${numbers.get(target.id)?.name ?? 'an earlier step'}`,
         });
+      } else {
+        // Back on a screen that looks a little different now: scrolled, or with something changed on it.
+        const again = returnsTo(candidate, selectedRun.candidates);
+        if (again) links.set(candidate.id, { targetId: `candidate-${again.id}`, label: `same screen as ${numbers.get(again.id)?.name ?? 'an earlier step'}` });
       }
 
       if (candidate.revisit_group_id && !firstCandidateByGroup.has(candidate.revisit_group_id)) {
