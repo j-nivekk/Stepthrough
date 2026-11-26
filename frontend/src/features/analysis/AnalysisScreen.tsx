@@ -81,7 +81,7 @@ import { StepMenu } from './components/StepMenu';
 import { defaultComparisonPair } from '../../lib/runComparison';
 import type { ImportQueueItem } from '../../lib/importQueue';
 import type { WorkflowStage } from '../../lib/workflow';
-import { defaultStableSettings, formatStableSummary, getEffectiveStableValues, getRecordingTypeMetadata, sanitizeStableSettings, statusBarShare } from '../../lib/stableSettings';
+import { defaultStableSettings, getEffectiveStableValues, getRecordingTypeMetadata, sanitizeStableSettings, statusBarShare } from '../../lib/stableSettings';
 import {
   clampStepSize,
   fitStepGrid,
@@ -419,10 +419,11 @@ export function AnalysisScreen({
   const [stepLayout, setStepLayout] = useState<StepLayout>(() => loadStepLayout());
   const [reviewMode, setReviewMode] = useState<'steps' | 'pathway'>('steps');
   const reviewModeBarRef = useRef<HTMLDivElement | null>(null);
-  // The videos, parameters and tasks fold into the line of their headings while a finished run is reviewed, and open
-  // again with a click on it (see below).
+  // The videos, parameters and tasks shelf can be tucked away while a finished run is reviewed using the
+  // workspace / review switcher in the top navigation bar.
   const [setupFolded, setSetupFolded] = useState(false);
   const setupRef = useRef<HTMLDivElement | null>(null);
+  const setupAnimRef = useRef<Animation | null>(null);
   const setupFoldedForRef = useRef<string | null>(null);
   // Where the page was when steps and pathway were switched, to keep the tabs where they were (see below).
   const reviewSwitchRef = useRef<number | null>(null);
@@ -647,12 +648,6 @@ export function AnalysisScreen({
     () => reviewNumbers(selectedRun?.candidates ?? [], selectedRun?.accepted_steps ?? []),
     [selectedRun?.candidates, selectedRun?.accepted_steps],
   );
-  const setupTaskSummary = (() => {
-    if (!selectedRun) return `${analysisTaskItems.length} ${analysisTaskItems.length === 1 ? 'run' : 'runs'}`;
-    const review = summarizeRunReview(selectedRun.summary);
-    const title = formatRunTitle(selectedRun.summary, runNumberById.get(selectedRun.summary.id));
-    return review ? `${title}, ${review.reviewed} of ${review.total} reviewed` : title;
-  })();
   const backLinks = useMemo(() => returnLinks(selectedRun?.candidates ?? [], stepNumbers), [selectedRun?.candidates, stepNumbers]);
   // "back at step 30": the run opened where its review was left (App, lib/lastStep.ts), until another step is taken up.
   const returnNote =
@@ -932,24 +927,40 @@ export function AnalysisScreen({
     setSetupFolded(setupFoldable);
   }, [selectedRun?.summary.id, selectedRunStale]);
 
-  /** Fold or open the videos, parameters and tasks, the page below following as they grow or shrink. */
+  /** Switch between workspace (videos, parameters and tasks shown) and review (tucked away into the top bar). */
   function foldSetup(folded: boolean) {
+    if (folded === setupFolded) return;
     const shell = setupRef.current;
     const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     if (!shell || still || typeof shell.animate !== 'function') {
       setSetupFolded(folded);
       return;
     }
-    const from = shell.getBoundingClientRect().height;
+    const fromH = shell.getBoundingClientRect().height;
+    const fromMb = getComputedStyle(shell).marginBottom;
+    setupAnimRef.current?.cancel();
     flushSync(() => setSetupFolded(folded));
-    const to = shell.getBoundingClientRect().height;
+    const toH = shell.getBoundingClientRect().height;
+    const toMb = getComputedStyle(shell).marginBottom;
     const root = getComputedStyle(document.documentElement);
     shell.classList.add('is-moving');
-    const animation = shell.animate([{ height: `${from}px` }, { height: `${to}px` }], {
-      duration: parseFloat(root.getPropertyValue('--motion-slow')) || 320,
-      easing: root.getPropertyValue('--ease-move').trim() || 'ease-in-out',
-    });
-    const done = () => shell.classList.remove('is-moving');
+    const animation = shell.animate(
+      [
+        { height: `${fromH}px`, marginBottom: fromMb, opacity: folded ? 1 : 0 },
+        { height: `${toH}px`, marginBottom: toMb, opacity: folded ? 0 : 1 },
+      ],
+      {
+        duration: parseFloat(root.getPropertyValue('--motion-slow')) || 320,
+        easing: root.getPropertyValue('--ease-move').trim() || 'ease-in-out',
+      },
+    );
+    setupAnimRef.current = animation;
+    const done = () => {
+      if (setupAnimRef.current === animation) {
+        setupAnimRef.current = null;
+        shell.classList.remove('is-moving');
+      }
+    };
     animation.finished.then(done, done);
   }
 
@@ -2341,35 +2352,62 @@ export function AnalysisScreen({
     <div className="entry-screen analysis-screen">
       <div className="analysis-stage-shell">
         <div className="analysis-stage-nav">
-          <StageNavigator
-            activeStage="analysis"
-            onNavigate={onNavigateStage}
-          />
-          {activeProject && (
-            <EditableName
-              buttonClassName="entry-rename-button"
-              containerClassName="analysis-pill-project"
-              onSave={(nextValue, previousValue) => onRenameProject(activeProject.id, nextValue, previousValue)}
-              renameLabel={`rename project ${activeProject.name}`}
-              textClassName="analysis-pill-project-text"
-              value={activeProject.name}
+          <div className="analysis-stage-nav-left">
+            <StageNavigator
+              activeStage="analysis"
+              onNavigate={onNavigateStage}
             />
+            {activeProject && (
+              <EditableName
+                buttonClassName="entry-rename-button"
+                containerClassName="analysis-pill-project"
+                onSave={(nextValue, previousValue) => onRenameProject(activeProject.id, nextValue, previousValue)}
+                renameLabel={`rename project ${activeProject.name}`}
+                textClassName="analysis-pill-project-text"
+                value={activeProject.name}
+              />
+            )}
+          </div>
+          {setupFoldable || setupFolded ? (
+            <div aria-label="page layout" className="analysis-layout-switch" role="group">
+              <button
+                aria-controls="analysis-setup"
+                aria-pressed={!setupFolded}
+                className={`analysis-layout-btn ${!setupFolded ? 'active' : ''}`}
+                onClick={() => foldSetup(false)}
+                title="show videos, parameters and tasks above the review"
+                type="button"
+              >
+                <svg aria-hidden="true" fill="none" height="12" stroke="currentColor" strokeWidth="1.2" viewBox="0 0 14 12" width="14">
+                  <rect height="10.5" width="12.5" x="0.75" y="0.75" />
+                  <line x1="0.75" x2="13.25" y1="5.5" y2="5.5" />
+                  <line x1="5" x2="5" y1="0.75" y2="5.5" />
+                  <line x1="9" x2="9" y1="0.75" y2="5.5" />
+                </svg>
+                <span>workspace</span>
+              </button>
+              <button
+                aria-controls="analysis-setup"
+                aria-pressed={setupFolded}
+                className={`analysis-layout-btn ${setupFolded ? 'active' : ''}`}
+                onClick={() => foldSetup(true)}
+                title="focus on the run review"
+                type="button"
+              >
+                <svg aria-hidden="true" fill="none" height="12" stroke="currentColor" strokeWidth="1.2" viewBox="0 0 14 12" width="14">
+                  <rect height="10.5" width="12.5" x="0.75" y="0.75" />
+                  <line strokeOpacity="0.45" x1="3" x2="11" y1="4.2" y2="4.2" />
+                  <line strokeOpacity="0.45" x1="3" x2="9" y1="7.2" y2="7.2" />
+                </svg>
+                <span>review</span>
+              </button>
+            </div>
+          ) : (
+            <span aria-hidden="true" />
           )}
           <span aria-live="polite" className="analysis-live-status" role="status" title={liveMessage || undefined}>
             {liveMessage}
           </span>
-          {setupFoldable || setupFolded ? (
-            <button
-              aria-controls="analysis-setup"
-              aria-expanded={!setupFolded}
-              className="analysis-task-link subtle analysis-setup-toggle"
-              onClick={() => foldSetup(!setupFolded)}
-              title={setupFolded ? 'show the videos, parameters and tasks' : 'fold the videos, parameters and tasks into one line'}
-              type="button"
-            >
-              {setupFolded ? 'unfold' : 'fold'}
-            </button>
-          ) : null}
         </div>
 
         {(healthMessage || ocrProblem || appError || settingsFeedback || analysisActionMessage) && (
@@ -2383,29 +2421,6 @@ export function AnalysisScreen({
         )}
 
         <div className={`analysis-setup ${setupFolded ? 'is-folded' : ''}`} id="analysis-setup" ref={setupRef}>
-        {/* Folded, the headings' line says what each column holds; a click on it opens them all, each growing from its
-            heading. */}
-        <div aria-hidden={!setupFolded} className={`analysis-setup-line ${taskSelectMode ? 'tasks-widened' : ''}`}>
-          {(
-            [
-              ['videos', selectedRecordingSummary?.filename ?? `${recordings.length} ${recordings.length === 1 ? 'video' : 'videos'}`],
-              ['parameters', formatStableSummary(runSettings.stable, analysisMetadata).slice(0, 3).join(', ')],
-              ['tasks', setupTaskSummary],
-            ] as const
-          ).map(([column, summary]) => (
-            <button
-              aria-label={`unfold the videos, parameters and tasks (${column}: ${summary})`}
-              className="analysis-setup-cell"
-              key={column}
-              onClick={() => foldSetup(false)}
-              tabIndex={setupFolded ? 0 : -1}
-              type="button"
-            >
-              <span className="analysis-setup-title">{column}</span>
-              <span className="analysis-setup-summary">{summary}</span>
-            </button>
-          ))}
-        </div>
         {/* Selecting tasks needs a wider toolbar: the tasks column then takes more room and the others give way. */}
         <div className={`analysis-grid ${taskSelectMode ? 'tasks-widened' : ''}`} inert={setupFolded}>
           <AnalysisVideosPanel

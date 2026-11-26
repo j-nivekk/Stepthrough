@@ -6,6 +6,8 @@ import { WHATS_NEW_VERSION, WhatsNewTour } from './WhatsNewTour';
 import { track } from '../lib/usage';
 
 const APP_IDENTITY = `stepthrough, ${VERSION_LABEL}`;
+/** How far down the page before the orange "↑ top" extension appears beside the watermark. */
+const TOP_SCROLL_THRESHOLD = 240;
 
 /** The panels that open from the bottom-right corner. Only one is open at a time. */
 export type CornerPanel = 'account' | 'settings' | 'about';
@@ -26,10 +28,29 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
   const [showDemo, setShowDemo] = useState(false);
   const [showPathways, setShowPathways] = useState(false);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
+  const [showTop, setShowTop] = useState(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const panel = onOpenPanel ? openPanel ?? null : ownPanel;
   const setPanel = onOpenPanel ?? setOwnPanel;
   const showAbout = panel === 'about';
+
+  useEffect(() => {
+    function syncTop() {
+      setShowTop(window.scrollY > TOP_SCROLL_THRESHOLD);
+    }
+    syncTop();
+    window.addEventListener('scroll', syncTop, { passive: true });
+    window.addEventListener('resize', syncTop, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', syncTop);
+      window.removeEventListener('resize', syncTop);
+    };
+  }, []);
+
+  function scrollToTop() {
+    const behavior: ScrollBehavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    window.scrollTo({ top: 0, behavior });
+  }
 
   useEffect(() => {
     if (!showAbout) {
@@ -59,39 +80,55 @@ export function AppWatermark({ accountLabel, withSettings = false, openPanel, on
   }, [showAbout, setPanel]);
 
   return (
-    <div className="app-watermark-shell" ref={shellRef}>
-      <span className="app-watermark-text">{APP_IDENTITY}</span>
-      {accountLabel ? (
+    <div className={`app-watermark-shell ${showTop ? 'has-top' : ''}`} ref={shellRef}>
+      <span aria-hidden={!showTop} className="app-watermark-top-wrap">
+        <span className="app-watermark-top-inner">
+          <button
+            aria-label="back to top"
+            className="app-watermark-top"
+            onClick={scrollToTop}
+            tabIndex={showTop ? 0 : -1}
+            title="back to top"
+            type="button"
+          >
+            ↑ top
+          </button>
+        </span>
+      </span>
+      <div className="app-watermark-body">
+        <span className="app-watermark-text">{APP_IDENTITY}</span>
+        {accountLabel ? (
+          <button
+            aria-expanded={panel === 'account'}
+            aria-label={`account: ${accountLabel}`}
+            className={`app-watermark-about app-watermark-account ${panel === 'account' ? 'active' : ''}`}
+            data-corner-panel-trigger="account"
+            onClick={() => setPanel(panel === 'account' ? null : 'account')}
+            type="button"
+          >
+            {accountLabel}
+          </button>
+        ) : null}
+        {withSettings ? (
+          <button
+            aria-expanded={panel === 'settings'}
+            className={`app-watermark-about ${panel === 'settings' ? 'active' : ''}`}
+            data-corner-panel-trigger="settings"
+            onClick={() => setPanel(panel === 'settings' ? null : 'settings')}
+            type="button"
+          >
+            settings
+          </button>
+        ) : null}
         <button
-          aria-expanded={panel === 'account'}
-          aria-label={`account: ${accountLabel}`}
-          className={`app-watermark-about app-watermark-account ${panel === 'account' ? 'active' : ''}`}
-          data-corner-panel-trigger="account"
-          onClick={() => setPanel(panel === 'account' ? null : 'account')}
+          aria-expanded={showAbout}
+          className={`app-watermark-about ${showAbout ? 'active' : ''}`}
+          onClick={() => setPanel(showAbout ? null : 'about')}
           type="button"
         >
-          {accountLabel}
+          about
         </button>
-      ) : null}
-      {withSettings ? (
-        <button
-          aria-expanded={panel === 'settings'}
-          className={`app-watermark-about ${panel === 'settings' ? 'active' : ''}`}
-          data-corner-panel-trigger="settings"
-          onClick={() => setPanel(panel === 'settings' ? null : 'settings')}
-          type="button"
-        >
-          settings
-        </button>
-      ) : null}
-      <button
-        aria-expanded={showAbout}
-        className={`app-watermark-about ${showAbout ? 'active' : ''}`}
-        onClick={() => setPanel(showAbout ? null : 'about')}
-        type="button"
-      >
-        about
-      </button>
+      </div>
       {showAbout ? (
         // The same grey panel as account and settings: a header to close it by, then its sections.
         <div aria-label="about stepthrough" className="app-settings-panel" role="dialog">

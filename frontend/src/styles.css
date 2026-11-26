@@ -169,21 +169,90 @@ a {
 
 .app-watermark-shell {
   position: fixed;
-  right: 40px;
-  bottom: 40px;
+  right: 32px;
+  bottom: 34px;
   display: inline-flex;
-  align-items: center;
-  gap: 8px;
+  align-items: stretch;
   z-index: 20;
 }
 
-/* On the analysis page the steps scroll under the watermark, so it sits on a patch of page colour, its text in
-   line with the right edge of the page's content. */
+/* On the analysis page the steps scroll under the watermark, so its text sits in line with the right edge of the
+   page's content (43px) on a patch of page colour. */
 .analysis-screen ~ .app-watermark-shell {
   right: 35px;
   bottom: 34px;
+}
+
+.app-watermark-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   padding: 6px 8px;
+}
+
+.analysis-screen ~ .app-watermark-shell .app-watermark-body,
+.app-watermark-shell.has-top .app-watermark-body {
   background: var(--bg);
+}
+
+.users-screen ~ .app-watermark-shell.has-top .app-watermark-body {
+  background: var(--admin-page);
+}
+
+/* Once the page scrolls down, a flush orange extension slides out to the left of the watermark chip (matching
+   .stage-pill-extra's horizontal reveal and the orange of "advanced") to jump back to the top. */
+.app-watermark-top-wrap {
+  display: inline-grid;
+  grid-template-columns: 0fr;
+  overflow: hidden;
+  transition: grid-template-columns var(--motion-base) var(--ease-move);
+}
+
+.app-watermark-shell.has-top .app-watermark-top-wrap {
+  grid-template-columns: 1fr;
+}
+
+.app-watermark-top-inner {
+  min-width: 0;
+  display: flex;
+}
+
+.app-watermark-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out);
+}
+
+.app-watermark-shell:not(.has-top) .app-watermark-top {
+  pointer-events: none;
+}
+
+.app-watermark-top:hover,
+.app-watermark-top:focus-visible {
+  background: var(--accent-strong);
+}
+
+.app-watermark-top:focus-visible {
+  outline: 2px solid rgba(209, 109, 56, 0.45);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-watermark-top-wrap,
+  .app-watermark-top {
+    transition: none;
+  }
 }
 
 .app-watermark-text {
@@ -2751,9 +2820,71 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   left: 24px;
   right: 24px;
   z-index: 5;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.analysis-stage-nav-left {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+}
+
+/* Centred on the top navigation line: switches between workspace (videos, parameters and tasks above the review)
+   and review (focused on the run), in the same 30px flat bar grammar as .stage-pill. */
+.analysis-layout-switch {
+  display: inline-flex;
+  align-items: stretch;
+  height: 30px;
+  padding: 2px;
+  gap: 2px;
+  background: rgba(0, 0, 0, 0.055);
+  border-radius: 0;
+  user-select: none;
+}
+
+.analysis-layout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.48);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.analysis-layout-btn:hover {
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.analysis-layout-btn.active {
+  background: #fff;
+  color: rgba(0, 0, 0, 0.88);
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.analysis-layout-btn:focus-visible {
+  outline: 2px solid rgba(72, 175, 124, 0.4);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-layout-btn {
+    transition: none;
+  }
 }
 
 .analysis-stage-shell {
@@ -2762,8 +2893,9 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   min-width: 0;
   max-width: 100%;
   overflow-x: clip;
-  /* The bottom clears the watermark, so the last steps can scroll out from under it. */
-  padding: 60px 43px 88px;
+  /* The top clears the stage pill and centred workspace / review toggle; the bottom clears the watermark,
+     so the last steps can scroll out from under it. */
+  padding: 68px 43px 88px;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -11437,119 +11569,28 @@ button:disabled {
   }
 }
 
-/* The videos, parameters and tasks fold into the line of their headings while a finished run is reviewed
-   (AnalysisScreen): only the headings and the rule under them stay, the line saying what each column holds. A click on
-   it opens them, each column growing from its heading; the height moves (a Web Animation), the line fades. */
+/* In review mode, the videos, parameters and tasks tuck completely away (height 0, cancelling the flex gap) so the
+   run review rises straight to the top of the page. Switching via the top bar's workspace / review toggle animates the
+   height and opacity (a Web Animation, 320 ms). */
 .analysis-setup {
   position: relative;
 }
 
 .analysis-setup.is-folded {
-  /* the headings (24px), the gap under them and the rule */
-  height: 38px;
+  height: 0;
+  margin-bottom: -28px;
   overflow-y: clip;
+  opacity: 0;
 }
 
 .analysis-setup.is-moving {
   overflow-y: clip;
 }
 
-.analysis-setup-line {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  left: -43px;
-  right: -43px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity var(--motion-base) var(--ease-out),
-    visibility 0s linear var(--motion-base),
-    grid-template-columns var(--motion-base) var(--ease-move);
-}
-
-.analysis-setup-line.tasks-widened {
-  grid-template-columns: minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 1.3fr);
-}
-
-.analysis-setup.is-folded .analysis-setup-line {
-  opacity: 1;
-  visibility: visible;
-  transition:
-    opacity var(--motion-base) var(--ease-out),
-    grid-template-columns var(--motion-base) var(--ease-move);
-}
-
-/* each over its column's heading, in the heading's place and type */
-.analysis-setup-cell {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  min-width: 0;
-  height: 24px;
-  margin: 0;
-  padding: 0 43px;
-  border: 0;
-  background: var(--bg);
-  color: #000;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.analysis-setup-title {
-  flex: 0 0 auto;
-  font-size: 20px;
-  line-height: 1.2;
-}
-
-.analysis-setup-summary {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: rgba(0, 0, 0, 0.6);
-  font-size: 14px;
-  line-height: 1.2;
-  text-align: right;
-  text-overflow: ellipsis;
-  text-decoration: underline;
-  text-decoration-color: rgba(0, 0, 0, 0.25);
-  text-underline-offset: 2px;
-  white-space: nowrap;
-  transition:
-    color var(--motion-fast) var(--ease-out),
-    text-decoration-color var(--motion-fast) var(--ease-out);
-}
-
-.analysis-setup-cell:hover .analysis-setup-summary,
-.analysis-setup-cell:focus-visible .analysis-setup-summary {
-  color: #000;
-  text-decoration-color: currentColor;
-}
-
-.analysis-setup-cell:focus-visible {
-  outline: 2px solid rgba(205, 109, 30, 0.56);
-  outline-offset: -2px;
-}
-
-.analysis-setup-toggle {
-  flex: 0 0 auto;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .analysis-setup-line,
-  .analysis-setup.is-folded .analysis-setup-line {
-    transition: none;
-  }
-}
-
 /* Towards 1024 px the parameters' labels need a little more room: their column takes it from the videos, whose names
    are cut short anyway, and the tasks keep theirs (and their review bars). */
 @media (max-width: 1200px) {
-  .analysis-grid:not(.tasks-widened),
-  .analysis-setup-line:not(.tasks-widened) {
+  .analysis-grid:not(.tasks-widened) {
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) minmax(0, 1fr);
   }
 }
