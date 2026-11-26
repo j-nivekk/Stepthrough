@@ -320,6 +320,9 @@ a {
 /* For what costs others something (ReadTextQuestion): marked like a crash-test dummy. */
 .confirm-dialog.is-caution {
   --caution-yellow: #efc739;
+  width: min(444px, 100%);
+  padding: 20px 22px 16px;
+  gap: 14px;
   background: #d6d6d6;
 }
 
@@ -327,15 +330,40 @@ a {
   color: rgba(0, 0, 0, 0.7);
 }
 
-.confirm-dialog-marks {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 8px;
+.confirm-dialog-body {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.confirm-dialog-copy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 
 .confirm-dialog-mark {
-  width: 28px;
-  height: 28px;
+  width: 56px;
+  height: 56px;
+  margin-top: 2px;
+}
+
+.confirm-dialog.is-caution .confirm-dialog-actions {
+  margin-top: 2px;
+}
+
+@media (max-width: 380px) {
+  .confirm-dialog-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .confirm-dialog-mark {
+    width: 44px;
+    height: 44px;
+    margin-top: 0;
+  }
 }
 
 .confirm-dialog-link {
@@ -348,9 +376,20 @@ a {
   margin-left: 1px;
 }
 
+/* Echoes the crash-test mark's top-right and bottom-left black quarters. */
 .analysis-pill.caution {
-  background: #efc739;
+  background-color: #efc739;
+  background-image:
+    linear-gradient(#000, #000),
+    linear-gradient(#000, #000);
+  background-size: 9px 9px;
+  background-position: top right, bottom left;
+  background-repeat: no-repeat;
   color: #000;
+}
+
+.confirm-dialog-actions .analysis-pill.caution {
+  padding-inline: 18px;
 }
 
 /* ── "how it works" demo ─────────────────────────────────────────────── */

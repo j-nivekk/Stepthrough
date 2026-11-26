@@ -93,6 +93,19 @@ function ConfirmDialog({ request, onAnswer }: { request: ConfirmRequest; onAnswe
     };
   }, [onAnswer, careful]);
 
+  const copy = (
+    <>
+      <p className="confirm-dialog-message" id={titleId}>
+        {request.message}
+      </p>
+      {request.detail ? (
+        <div className="confirm-dialog-detail" id={detailId}>
+          {request.detail}
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <div className="confirm-overlay" onPointerDown={(event) => event.target === event.currentTarget && onAnswer(false)}>
       <div
@@ -104,19 +117,13 @@ function ConfirmDialog({ request, onAnswer }: { request: ConfirmRequest; onAnswe
         role="alertdialog"
       >
         {request.caution ? (
-          <div className="confirm-dialog-marks">
+          <div className="confirm-dialog-body">
             <CautionMark />
-            <CautionMark />
+            <div className="confirm-dialog-copy">{copy}</div>
           </div>
-        ) : null}
-        <p className="confirm-dialog-message" id={titleId}>
-          {request.message}
-        </p>
-        {request.detail ? (
-          <div className="confirm-dialog-detail" id={detailId}>
-            {request.detail}
-          </div>
-        ) : null}
+        ) : (
+          copy
+        )}
         <div className="confirm-dialog-actions">
           <button className="analysis-task-link subtle" onClick={() => onAnswer(false)} ref={cancelRef} type="button">
             cancel
