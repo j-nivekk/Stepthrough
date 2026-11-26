@@ -19,6 +19,14 @@
   font-family: "Inter", "Avenir Next", "Helvetica Neue", "Trebuchet MS", sans-serif;
   line-height: 1.5;
   font-weight: 400;
+  /* Motion: three lengths and two curves for every transition (the pathway tutorial's demonstrations excepted).
+     Fast for hover, press and colour; base for small things arriving, leaving or fading into each other; slow for
+     what moves across the page. Ease-out for what arrives or answers, ease-move for what goes from one place to another. */
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-move: cubic-bezier(0.4, 0, 0.2, 1);
   --bg: #f4f4f4;
   --bg-accent: #f4f4f4;
   --panel: rgba(255, 251, 245, 0.82);
@@ -621,7 +629,7 @@ a {
   margin: 0;
   opacity: 0;
   transform: translateY(6px);
-  transition: opacity 250ms ease, transform 250ms ease;
+  transition: opacity var(--motion-base) var(--ease-out), transform var(--motion-base) var(--ease-out);
 }
 
 .demo-thumb.shown {
@@ -691,7 +699,7 @@ a {
   color: rgba(0, 0, 0, 0.7);
   font-size: 12px;
   opacity: 0;
-  transition: opacity 300ms ease;
+  transition: opacity var(--motion-slow) var(--ease-out);
 }
 
 .demo-export.shown {
@@ -2024,7 +2032,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   display: inline-grid;
   grid-template-columns: 0fr;
   overflow: hidden;
-  transition: grid-template-columns 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: grid-template-columns var(--motion-base) var(--ease-move);
 }
 
 .stage-pill--expanded .stage-pill-extra {
@@ -2357,8 +2365,8 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   pointer-events: none;
   transform: translateY(2px);
   transition:
-    opacity 140ms ease,
-    transform 140ms ease;
+    opacity var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .entry-project-action-pill {
@@ -2382,7 +2390,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 
 .entry-rename-button {
   opacity: 0;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -2624,7 +2632,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   position: absolute;
   inset: 0 auto 0 0;
   background: rgba(72, 175, 124, 0.55);
-  transition: width 200ms linear;
+  transition: width var(--motion-base) linear;
 }
 
 .import-progress-label {
@@ -2646,7 +2654,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 /* Deleting an uploaded video shows on hover, as elsewhere; cancel and remove are always there. */
 .import-row.uploaded .import-delete-button {
   opacity: 0;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .import-row.uploaded:hover .import-delete-button,
@@ -2742,7 +2750,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   gap: 0;
   margin-inline: -43px;
   align-items: start;
-  transition: grid-template-columns 240ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: grid-template-columns var(--motion-base) var(--ease-move);
 }
 
 .analysis-grid.tasks-widened {
@@ -3054,7 +3062,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 .analysis-video-hover-link {
   opacity: 0;
   pointer-events: none;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .analysis-video-row:hover .analysis-video-hover-link,
@@ -3111,7 +3119,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
   border-top: 6px solid rgba(0, 0, 0, 0.45);
-  transition: transform 140ms ease, border-top-color 140ms ease;
+  transition: transform var(--motion-fast) var(--ease-out), border-top-color var(--motion-fast) var(--ease-out);
 }
 
 .analysis-task-group.collapsed .analysis-task-group-chevron {
@@ -3207,7 +3215,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 .analysis-task-hover-link {
   opacity: 0;
   pointer-events: none;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .analysis-task-row:hover .analysis-task-hover-link,
@@ -3307,7 +3315,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   background-position: left bottom;
   background-repeat: no-repeat;
   background-size: var(--run-progress, 0%) 2px;
-  transition: background-size 400ms ease;
+  transition: background-size var(--motion-slow) var(--ease-out);
 }
 
 @keyframes analysis-task-run-start {
@@ -3478,7 +3486,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   line-height: 1.2;
   text-decoration: underline;
   text-underline-offset: 2px;
-  transition: color 140ms ease, text-decoration-color 140ms ease;
+  transition: color var(--motion-fast) var(--ease-out), text-decoration-color var(--motion-fast) var(--ease-out);
 }
 
 .analysis-task-progress {
@@ -4163,7 +4171,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   justify-content: flex-start;
   width: 100%;
   max-width: 560px;
-  transition: max-width 200ms ease;
+  transition: max-width var(--motion-base) var(--ease-out);
 }
 
 .analysis-preview-panel[data-size='sm'] {
@@ -4222,7 +4230,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   padding: 18px 22px;
   cursor: pointer;
   overflow: hidden;
-  transition: transform 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+  transition: transform var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out);
 }
 
 .analysis-preview-mark-button:hover {
@@ -4477,7 +4485,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   height: 4px;
   background: rgba(0, 0, 0, 0.1);
   border-radius: 2px;
-  transition: height 80ms ease;
+  transition: height var(--motion-fast) var(--ease-out);
   overflow: visible;
   isolation: isolate;
 }
@@ -4617,7 +4625,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   border-radius: 50%;
   box-shadow: 0 0 0 2px #fff, 0 0 0 3px rgba(0, 0, 0, 0.2);
   pointer-events: none;
-  transition: transform 60ms ease;
+  transition: transform var(--motion-fast) var(--ease-out);
   z-index: 3;
 }
 
@@ -4653,7 +4661,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   cursor: pointer;
   color: rgba(0, 0, 0, 0.6);
   padding: 0;
-  transition: background 100ms ease, color 80ms ease;
+  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
 }
 
 .preview-control-btn:hover {
@@ -4734,7 +4742,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   color: #fff;
   font-size: 13px;
   cursor: pointer;
-  transition: background 120ms ease, transform 80ms ease;
+  transition: background var(--motion-fast) var(--ease-out), transform var(--motion-fast) var(--ease-out);
   overflow: hidden;
   flex-shrink: 0;
 }
@@ -5193,7 +5201,7 @@ small {
   padding: 12px 18px;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+  transition: transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out), opacity var(--motion-fast) var(--ease-out);
 }
 
 .primary-button:hover,
@@ -5504,7 +5512,7 @@ button:disabled {
   background: var(--bg);
   container-type: inline-size;
   container-name: review-toolbar;
-  transition: box-shadow 140ms ease;
+  transition: box-shadow var(--motion-fast) var(--ease-out);
 }
 
 .candidate-review-toolbar.is-stuck {
@@ -5526,7 +5534,7 @@ button:disabled {
   font-size: 12px;
   line-height: 1.2;
   white-space: nowrap;
-  animation: candidate-review-context-in 160ms ease-out;
+  animation: candidate-review-context-in var(--motion-base) var(--ease-out);
 }
 
 .candidate-review-context-text {
@@ -5585,7 +5593,7 @@ button:disabled {
 }
 
 .accepted-step-chip {
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  transition: transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out);
 }
 
 .accepted-step-chip:hover,
@@ -5729,7 +5737,7 @@ button:disabled {
   border: 1px solid rgba(0, 0, 0, 0.24);
   border-radius: 3px;
   cursor: text;
-  transition: border-color 140ms ease, background-color 140ms ease;
+  transition: border-color var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out);
 }
 
 .candidate-export-name-wrap:hover {
@@ -5962,7 +5970,7 @@ button:disabled {
   padding: 0;
   transform: translateX(-50%);
   cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  transition: transform var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out);
   z-index: 10;
 }
 
@@ -6013,7 +6021,7 @@ button:disabled {
   line-height: 1.2;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
   white-space: nowrap;
 }
 
@@ -6764,11 +6772,11 @@ button:disabled {
 /* Interactive route spotlighting & clickable cross-row jump chips on the page. */
 .pathway-figure [data-move] {
   cursor: pointer;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .pathway-figure [data-screen] {
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .pathway-figure.is-spotlighting-move [data-move] {
@@ -7649,6 +7657,9 @@ button:disabled {
   background: var(--analysis-surface-soft);
   min-width: 0;
   scroll-margin: 100px;
+  transition:
+    background-color var(--motion-base) var(--ease-out),
+    opacity var(--motion-base) var(--ease-out);
 }
 
 .candidate-row-head {
@@ -7815,6 +7826,10 @@ button:disabled {
   width: 100%;
   max-width: 340px;
   scroll-margin: 100px;
+  /* a decision shows as the card's colour changing, not jumping */
+  transition:
+    background-color var(--motion-base) var(--ease-out),
+    opacity var(--motion-base) var(--ease-out);
 }
 
 .candidate-card.active {
@@ -7842,7 +7857,7 @@ button:disabled {
 .candidate-row {
   --playback-ring: 0 0 0 calc(4px * var(--playback, 0)) rgba(47, 100, 130, calc(0.85 * var(--playback, 0)));
   box-shadow: var(--playback-ring);
-  transition: box-shadow 120ms linear;
+  transition: box-shadow var(--motion-fast) linear;
 }
 
 /* Hover intent on a screenshot: a line fills while waiting, then the clip plays in the card and
@@ -7860,7 +7875,7 @@ button:disabled {
   object-fit: contain;
   background: var(--analysis-surface);
   opacity: 0;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .candidate-live-video.visible {
@@ -7880,7 +7895,7 @@ button:disabled {
 
 .hover-waiting > .candidate-hover-progress {
   width: 100%;
-  transition: width 400ms linear;
+  transition: width var(--motion-slow) linear;
 }
 
 .candidate-play-from-here {
@@ -8064,6 +8079,7 @@ button:disabled {
   color: rgba(0, 0, 0, 0.6);
   font-size: 12px;
   line-height: 1.2;
+  transition: color var(--motion-base) var(--ease-out);
 }
 
 .candidate-status-copy.accepted {
@@ -8446,7 +8462,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+  transition: background var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out), opacity var(--motion-fast) var(--ease-out);
 }
 
 .candidate-gallery-nav-btn:hover:not(:disabled) {
@@ -8868,7 +8884,7 @@ button:disabled {
   border-radius: 3px;
   background: transparent;
   cursor: pointer;
-  transition: background 110ms ease, box-shadow 110ms ease, opacity 110ms ease;
+  transition: background var(--motion-fast) var(--ease-out), box-shadow var(--motion-fast) var(--ease-out), opacity var(--motion-fast) var(--ease-out);
 }
 
 .candidate-gallery-thumb:hover {
@@ -8929,7 +8945,7 @@ button:disabled {
   border-radius: 2px;
   opacity: 0.72;
   cursor: pointer;
-  transition: opacity 110ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .candidate-gallery-thumb:hover .candidate-gallery-thumb-check,
@@ -9288,7 +9304,7 @@ button:disabled {
   min-height: 24px;
   padding: 6px 10px;
   text-transform: none;
-  transition: background 140ms ease;
+  transition: background var(--motion-fast) var(--ease-out);
   width: 100%;
 }
 
@@ -9318,7 +9334,7 @@ button:disabled {
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
   border-top: 6px solid currentColor;
-  transition: transform 140ms ease;
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 .analysis-tuning-section[open] .analysis-tuning-summary-chevron {
@@ -9635,7 +9651,7 @@ button:disabled {
   font-family: inherit;
   font-size: inherit;
   color: inherit;
-  transition: color 150ms ease, background 150ms ease;
+  transition: color var(--motion-fast) var(--ease-out), background var(--motion-fast) var(--ease-out);
 }
 
 .timeline-legend-item:hover {
@@ -10201,7 +10217,7 @@ button:disabled {
   gap: 10px;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 140ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .users-row:hover .users-row-actions,
@@ -10412,7 +10428,7 @@ button:disabled {
   min-width: 0;
   margin-top: 20px;
   padding-bottom: 72px;
-  transition: opacity 160ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 /* A new period holds the previous report, dimmed, until it arrives. */
@@ -10960,7 +10976,7 @@ button:disabled {
   outline-offset: 2px;
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.38);
   pointer-events: none;
-  transition: left 240ms ease-out, top 240ms ease-out, width 240ms ease-out, height 240ms ease-out;
+  transition: left var(--motion-base) var(--ease-out), top var(--motion-base) var(--ease-out), width var(--motion-base) var(--ease-out), height var(--motion-base) var(--ease-out);
 }
 
 .whats-new-note {
@@ -11198,4 +11214,176 @@ button:disabled {
 .entry-project-upload-progress .import-progress {
   flex: 1 1 auto;
   width: auto;
+}
+
+/* Placeholders (components/Placeholders.tsx): grey shapes where content is loading, as big as what will come. They fade
+   in after a moment, so a quick answer shows none of them, then pulse slowly. */
+.placeholder {
+  animation: placeholder-in var(--motion-base) var(--ease-out) 150ms both;
+}
+
+.placeholder-block {
+  display: block;
+  background: rgba(0, 0, 0, 0.07);
+  animation: placeholder-pulse 1.6s ease-in-out 500ms infinite;
+}
+
+@keyframes placeholder-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes placeholder-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.placeholder-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.placeholder-group {
+  width: 45%;
+  height: 10px;
+  margin-bottom: 2px;
+}
+
+/* as .analysis-video-row and .analysis-task-row: a name with its time or progress at the right, a line under it */
+.placeholder-row {
+  display: grid;
+  grid-template-columns: 1fr 22%;
+  gap: 6px 12px;
+  padding-bottom: 2px;
+}
+
+.placeholder-rows .placeholder-name {
+  height: 14px;
+}
+
+.placeholder-side {
+  height: 10px;
+  align-self: center;
+}
+
+.placeholder-rows .placeholder-meta {
+  grid-column: 1;
+  width: 34%;
+  height: 10px;
+}
+
+.placeholder-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  gap: 18px;
+}
+
+.placeholder-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+  background: var(--analysis-surface-soft);
+}
+
+.placeholder-shot {
+  aspect-ratio: var(--placeholder-aspect, 1.7778);
+  max-height: 260px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.placeholder-card .placeholder-name {
+  width: 40%;
+  height: 12px;
+  margin-inline: 10px;
+}
+
+.placeholder-card .placeholder-meta {
+  width: 62%;
+  height: 10px;
+  margin-inline: 10px;
+}
+
+/* as the pathway's frame (.pathway-scroll), with a row of screens */
+.placeholder-figure {
+  display: flex;
+  align-items: flex-start;
+  gap: 48px;
+  min-height: min(60vh, 520px);
+  padding: 56px 40px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  overflow: hidden;
+}
+
+.placeholder-screen {
+  flex: 0 0 160px;
+  height: 110px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .placeholder,
+  .placeholder-block {
+    animation: none;
+  }
+}
+
+/* The run chosen before, kept while the chosen one loads (App): dimmed after a moment, so a quick load shows nothing,
+   and not to be clicked. */
+.analysis-detail-section {
+  transition: opacity var(--motion-fast) var(--ease-out);
+}
+
+.analysis-detail-section.is-stale {
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity var(--motion-base) var(--ease-out) 120ms;
+}
+
+/* "advanced" opens and closes by growing, where the browser can animate a details element's height (elsewhere it opens
+   at once, as before). */
+.analysis-tuning-section {
+  interpolate-size: allow-keywords;
+}
+
+.analysis-tuning-section::details-content {
+  block-size: 0;
+  overflow: clip;
+  transition:
+    block-size var(--motion-slow) var(--ease-move),
+    content-visibility var(--motion-slow) allow-discrete;
+}
+
+.analysis-tuning-section[open]::details-content {
+  block-size: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-tuning-section::details-content {
+    transition: none;
+  }
+}
+
+/* View transitions (lib/viewTransition.ts): steps and pathway fade into each other; step cards move to their new places
+   when a filter changes, while the ones that come or go fade. */
+::view-transition-group(*) {
+  animation-duration: var(--motion-slow);
+  animation-timing-function: var(--ease-move);
+}
+
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: var(--motion-base);
+  animation-timing-function: var(--ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none;
+  }
 }

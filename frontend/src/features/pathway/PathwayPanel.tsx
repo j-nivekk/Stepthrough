@@ -28,6 +28,7 @@ import { holdPlace, keepPlace, type HeldPlace } from './holdPlace';
 import { PathwayCanvas, type PhaseRequest } from './PathwayCanvas';
 import { usePathwayPeek } from './usePathwayPeek';
 import { track } from '../../lib/usage';
+import { PlaceholderFigure } from '../../components/Placeholders';
 
 interface PathwayPanelProps {
   /** Opens the about panel at the bottom right, where the tutorial stays within reach. */
@@ -540,7 +541,10 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
           width={Math.floor(figure.width * scale)}
         />
       ) : (
-        controlsBar
+        <>
+          {controlsBar}
+          {!pathwayQuery.isError ? <PlaceholderFigure label="loading the pathway" /> : null}
+        </>
       )}
     </div>
   );

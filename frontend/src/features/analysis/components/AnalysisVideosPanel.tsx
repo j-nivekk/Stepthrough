@@ -13,6 +13,7 @@ import type { ImportQueueItem } from '../../../lib/importQueue';
 import { uploadsElsewhere } from '../../../lib/live';
 import { useLive } from '../../live/LiveProvider';
 import type { RecordingSummary } from '../../../types';
+import { PlaceholderRows } from '../../../components/Placeholders';
 
 export interface AnalysisVideosPanelProps {
   onCancelUpload: (localId: string) => void;
@@ -219,11 +220,13 @@ export function AnalysisVideosPanel({
             </div>
           </div>
         ))}
-        {!recordings.length && !uploads.length && !elsewhere.length && (
-          <p className="entry-empty-copy">
-            {recordingsLoading ? 'loading videos…' : 'uploaded videos will appear here.'}
-          </p>
-        )}
+        {!recordings.length && !uploads.length && !elsewhere.length ? (
+          recordingsLoading ? (
+            <PlaceholderRows count={2} label="loading the videos" />
+          ) : (
+            <p className="entry-empty-copy">uploaded videos will appear here.</p>
+          )
+        ) : null}
       </div>
       {menu && menuRecording ? (
         <ContextMenu

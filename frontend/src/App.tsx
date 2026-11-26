@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   abortRun,
@@ -275,6 +275,9 @@ function App({ session, onSessionChange }: AppProps) {
     queryKey: ['run', selectedRunId],
     queryFn: ({ signal }) => getRun(selectedRunId as string, signal),
     enabled: Boolean(selectedRunId),
+    // The run shown so far stays (dimmed, AnalysisScreen) until the next one has loaded, so the page does not empty
+    // and fill again; with no run chosen there is nothing to keep.
+    placeholderData: (previous) => (selectedRunId ? keepPreviousData(previous) : undefined),
     refetchInterval: (query) => {
       const run = query.state.data as RunDetail | undefined;
       return run && activeRunStatuses.includes(run.summary.status) ? 2000 : false;
@@ -633,10 +636,14 @@ function App({ session, onSessionChange }: AppProps) {
   // Done once a video is in, or on its way: uploads carry on while the analysis page is open.
   const canCompleteImport =
     uploadedImportItems.some((item) => item.projectId === selectedProjectId) || projectImportsInFlight.length > 0;
+  // Until the project and its videos have answered, their lists show placeholders, not that they are empty.
   const analysisRecordingsLoading =
     workflowStage === 'analysis' &&
-    pendingAnalysisProjectId === selectedProjectId &&
-    (!projectDetailQuery.data || projectDetailQuery.data.recordings.length === 0);
+    Boolean(selectedProjectId) &&
+    (!projectDetailQuery.data ||
+      (pendingAnalysisProjectId === selectedProjectId && projectDetailQuery.data.recordings.length === 0));
+  const analysisTasksLoading =
+    analysisRecordingsLoading || (workflowStage === 'analysis' && analysisRecordingQueries.some((query) => query.isLoading));
   const analysisTaskItems = useMemo<AnalysisTaskItem[]>(() => {
     return projectRecordings
       .flatMap((recording, index) => {
@@ -2098,6 +2105,7 @@ function App({ session, onSessionChange }: AppProps) {
         projectDefaultSettings={effectiveProjectDefaultSettings}
         recordings={projectRecordings}
         recordingsLoading={analysisRecordingsLoading}
+        tasksLoading={analysisTasksLoading}
         runSettings={runSettings}
         selectedRecording={selectedRecording}
         selectedRecordingId={selectedRecordingId}
@@ -2106,6 +2114,7 @@ function App({ session, onSessionChange }: AppProps) {
         selectedRecordingSummary={selectedRecordingSummary}
         selectedRun={selectedRun}
         selectedRunLoading={runDetailQuery.isLoading || runDetailQuery.isFetching}
+        selectedRunStale={runDetailQuery.isPlaceholderData}
         setRunSettings={setRunSettings}
         settingsFeedback={settingsFeedback}
         showPresetText={presetText}

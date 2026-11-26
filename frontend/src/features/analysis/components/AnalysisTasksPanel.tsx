@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { memo, useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
 import { getRun } from '../../../api';
 import {
@@ -12,6 +12,7 @@ import {
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
 import { formatElapsedDuration } from '../../../lib/utils';
 import { EditableName } from '../../../components/EditableName';
+import { PlaceholderRows } from '../../../components/Placeholders';
 import {
   formatAnalysisWait,
   formatLastChange,
@@ -65,6 +66,8 @@ interface AnalysisTaskRowSetting {
 
 export interface AnalysisTasksPanelProps {
   analysisTaskItems: AnalysisTaskItem[];
+  /** Not every video has answered yet: placeholders, not "no runs". */
+  loading?: boolean;
   analysisMetadata: AnalysisMetadata | null;
   bulkDeletePending: boolean;
   bulkExportPending: boolean;
@@ -101,9 +104,14 @@ export interface AnalysisTasksPanelProps {
   taskSelectMode: boolean;
 }
 
+/** How long the pointer rests on a finished run before it is loaded, and how long that load counts as fresh. */
+const PRELOAD_AFTER_MS = 120;
+const PRELOAD_FRESH_MS = 20_000;
+
 /** The tasks, drawn again only when something about them changes: the page around it is, with every move over a step. */
 export const AnalysisTasksPanel = memo(function AnalysisTasksPanel({
   analysisTaskItems,
+  loading = false,
   analysisMetadata,
   bulkDeletePending,
   bulkExportPending,
@@ -142,6 +150,25 @@ export const AnalysisTasksPanel = memo(function AnalysisTasksPanel({
   // which run's name to edit, from its context menu; the nonce starts the edit again on a second click
   const [renameRequest, setRenameRequest] = useState<{ id: string; nonce: number } | null>(null);
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
+  // A finished run the pointer rests on is loaded already, so that opening it shows its steps at once (the page keeps it
+  // for a little while; a run that changed since is loaded again when it opens).
+  const queryClient = useQueryClient();
+  const preloadTimerRef = useRef<number | undefined>(undefined);
+  const preloadRun = useCallback(
+    (runId: string) => {
+      window.clearTimeout(preloadTimerRef.current);
+      preloadTimerRef.current = window.setTimeout(() => {
+        void queryClient.prefetchQuery({
+          queryKey: ['run', runId],
+          queryFn: ({ signal }) => getRun(runId, signal),
+          staleTime: PRELOAD_FRESH_MS,
+        });
+      }, PRELOAD_AFTER_MS);
+    },
+    [queryClient],
+  );
+  const cancelPreload = useCallback(() => window.clearTimeout(preloadTimerRef.current), []);
+  useEffect(() => cancelPreload, [cancelPreload]);
   // the run whose log is open in its details
   const [logsRunId, setLogsRunId] = useState<string | null>(null);
   const knownActiveRunIds = useRef<Set<string> | null>(null);
@@ -363,6 +390,8 @@ export const AnalysisTasksPanel = memo(function AnalysisTasksPanel({
       <div
         className={rowClassName}
         key={run.id}
+        onPointerEnter={opensReview ? () => preloadRun(run.id) : undefined}
+        onPointerLeave={opensReview ? cancelPreload : undefined}
         onContextMenu={(event) => handleRowContextMenu(event, run.id)}
         onKeyDown={(event) => handleRowKeyDown(event, run.id)}
         style={showLiveLine ? ({ '--run-progress': formatPercent(run.progress) } as CSSProperties) : undefined}
@@ -615,7 +644,10 @@ export const AnalysisTasksPanel = memo(function AnalysisTasksPanel({
       </div>
       <div className="analysis-tasks">
         {groupedTaskItems.map((group) => renderTaskGroup(group))}
-        {!analysisTaskItems.length && <p className="entry-empty-copy">run summaries will appear here once analysis starts.</p>}
+        {!analysisTaskItems.length && loading ? <PlaceholderRows count={3} group label="loading the tasks" /> : null}
+        {!analysisTaskItems.length && !loading ? (
+          <p className="entry-empty-copy">run summaries will appear here once analysis starts.</p>
+        ) : null}
         {Boolean(analysisTaskItems.length) && !groupedTaskItems.length && (
           <p className="entry-empty-copy">no tasks in this filter yet.</p>
         )}

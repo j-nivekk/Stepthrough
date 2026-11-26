@@ -92,6 +92,8 @@ import type { StepHoverProps } from '../../components/CandidateCard';
 import { PathwayPanel } from '../pathway/PathwayPanel';
 import { useElementWidth } from './useElementWidth';
 import { useStuck } from './useStuck';
+import { PlaceholderCards } from '../../components/Placeholders';
+import { changeWithTransition, moveCardsWithTransition } from '../../lib/viewTransition';
 import { useHoverClips } from './useHoverClips';
 import { usePlaybackHighlight } from './usePlaybackHighlight';
 import { track } from '../../lib/usage';
@@ -183,6 +185,8 @@ export interface AnalysisScreenProps {
   projectDefaultSettings: RunSettings;
   recordings: RecordingSummary[];
   recordingsLoading: boolean;
+  /** The tasks list has not heard from every video yet: it shows placeholders, not that there are none. */
+  tasksLoading: boolean;
   runSettings: RunSettings;
   selectedRecording: RecordingDetail | null;
   selectedRecordingId: string | null;
@@ -192,6 +196,8 @@ export interface AnalysisScreenProps {
   selectedRunId: string | null;
   selectedRun: RunDetail | null;
   selectedRunLoading?: boolean;
+  /** The run shown is the one chosen before, kept until the chosen one has loaded: dimmed, and not to be acted on. */
+  selectedRunStale?: boolean;
   setRunSettings: Dispatch<SetStateAction<RunSettings>>;
   settingsFeedback: string;
   showPresetText: string;
@@ -315,6 +321,7 @@ export function AnalysisScreen({
   projectDefaultSettings,
   recordings,
   recordingsLoading,
+  tasksLoading,
   runSettings,
   selectedRecording,
   selectedRecordingId,
@@ -323,6 +330,7 @@ export function AnalysisScreen({
   selectedRunId,
   selectedRun,
   selectedRunLoading = false,
+  selectedRunStale = false,
   setRunSettings,
   settingsFeedback,
   showPresetText,
@@ -972,6 +980,10 @@ export function AnalysisScreen({
       if (isEditableElement(event.target)) {
         return;
       }
+      // the steps of the run left a moment ago, while the next one loads
+      if (selectedRunStale) {
+        return;
+      }
       if (event.metaKey || event.ctrlKey || event.altKey) {
         return;
       }
@@ -1036,7 +1048,7 @@ export function AnalysisScreen({
 
     window.addEventListener('keydown', handleReviewKeydown);
     return () => window.removeEventListener('keydown', handleReviewKeydown);
-  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedCandidateIds.length, selectedRun?.summary.id, selectedShownCandidateIds, showPathway, stepLayout.view]);
+  }, [activeCandidate, canReviewCandidates, filteredCandidates, previewMatchesSelectedRun, selectedCandidateIds.length, selectedRun?.summary.id, selectedRunStale, selectedShownCandidateIds, showPathway, stepLayout.view]);
 
   useEffect(() => {
     if (!previewVideoUrl) {
@@ -1850,6 +1862,7 @@ export function AnalysisScreen({
           <AnalysisTasksPanel
             {...taskActions}
             analysisTaskItems={analysisTaskItems}
+            loading={tasksLoading}
             busyRunIds={runsBusyElsewhere}
             analysisMetadata={analysisMetadata}
             bulkDeletePending={bulkDeletePending}
@@ -2123,7 +2136,11 @@ export function AnalysisScreen({
             ) : null;
           })()
         ) : selectedRun ? (
-          <section className="analysis-detail-section stack-gap" id="analysis-run-detail">
+          <section
+            aria-busy={selectedRunStale || undefined}
+            className={`analysis-detail-section stack-gap ${selectedRunStale ? 'is-stale' : ''}`}
+            id="analysis-run-detail"
+          >
             {/* One title row: the file name on the left, when it ran and its logs on the right. Its settings are in the
                 tasks list (details), so they are not repeated here. */}
             <div className="analysis-detail-header">
@@ -2185,8 +2202,11 @@ export function AnalysisScreen({
                       onClick={() => {
                         if (mode === reviewMode) return;
                         track({ kind: 'page', name: mode === 'pathway' ? 'pathway' : 'review' });
-                        reviewSwitchRef.current = window.scrollY;
-                        setReviewMode(mode);
+                        // the one fades into the other (where the browser can), the tabs staying where they are
+                        changeWithTransition(() => {
+                          reviewSwitchRef.current = window.scrollY;
+                          setReviewMode(mode);
+                        });
                       }}
                       role="tab"
                       title={
@@ -2588,7 +2608,15 @@ export function AnalysisScreen({
                           aria-selected={activeCandidateFilter === filter}
                           className={`candidate-filter-tab ${activeCandidateFilter === filter ? 'active' : ''}`}
                           key={filter}
-                          onClick={() => setActiveCandidateFilter(filter)}
+                          onClick={() => {
+                            if (filter === activeCandidateFilter) return;
+                            // the steps that stay move to their new places, the others fade (where the browser can)
+                            moveCardsWithTransition(
+                              () => document.getElementById('analysis-candidate-review'),
+                              '.candidate-card, .candidate-row',
+                              () => setActiveCandidateFilter(filter),
+                            );
+                          }}
                           role="tab"
                           type="button"
                         >
@@ -2945,7 +2973,9 @@ export function AnalysisScreen({
         ) : selectedRecording ? (
           <section className="analysis-detail-section empty-state">
             <h2>{selectedRecording.filename}</h2>
-            {selectedRunId && selectedRunLoading ? <p>loading task details…</p> : null}
+            {selectedRunId && selectedRunLoading ? (
+              <PlaceholderCards aspect={stepAspect} count={8} label="loading the steps of the run" />
+            ) : null}
             {!selectedRunId && !selectedRunLoading && (
               <p>select a video or a run to review steps and exports here.</p>
             )}
