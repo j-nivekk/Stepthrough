@@ -77,7 +77,8 @@ Open <http://localhost:5173>. See [GUIDE.md](GUIDE.md) for the workflow and opti
 
 Installation and Docker builds require access to package registries. The lockfiles preserve application
 dependency versions; this is a source archive, not a self-contained offline environment. Operating-system
-packages, Docker base-image tags and optional OCR model downloads can change independently of the archived code.
+packages and Docker base-image tags can change independently of the archived code. The text recognition models are
+downloaded when they are first needed, from fixed commits and checked against the checksums in the code.
 
 ## Check the archive and run tests
 
@@ -91,7 +92,7 @@ On Linux, use `sha256sum -c SHA256SUMS` instead. The manifest excludes itself.
 
 After installing dependencies, run the backend tests from `backend/` with `uv run pytest -q`, and the frontend
 regression tests from `frontend/` with `npm test`. `npm run build` checks the frontend types and builds it.
-The optional PaddleOCR smoke tests need the model setup documented in [backend/README.md](backend/README.md).
+The tests that read text need its models: run `uv run python -m app.services.text_models` from `backend/` first.
 
 ## Cite this version
 

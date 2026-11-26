@@ -1,9 +1,12 @@
 # Builds the Docker image, runs the backend tests and an end-to-end smoke test inside it, and publishes it to the
 # GitHub Container Registry (ghcr.io/j-nivekk/stepthrough).
 #
-#   push to `main`               -> :edge and :sha-<commit>   (plus -ocr variants)
-#   push a tag such as v1.0.0    -> :1.0.0, :1.0 and :stable  (plus -ocr variants)
+#   push to `main`               -> :edge and :sha-<commit>
+#   push a tag such as v1.0.0    -> :1.0.0, :1.0 and :stable
 #   pull requests                -> test only, nothing published
+#
+# Each tag is published with `-ocr` behind it too, as the same image: text recognition used to come in an image of its
+# own (until 1.4.5), and a server that follows `stable-ocr` must go on getting updates.
 #
 # Pushes and pull requests run only when they change something the image or its tests are built from (the `paths`
 # lists below): documentation, the nginx example and the evaluation write-ups do not. Release tags always run, as
@@ -91,44 +94,12 @@ jobs:
           cache-from: type=gha,scope=runtime
           cache-to: type=gha,scope=runtime,mode=max
 
-      - name: Start it as deployed and run the smoke test
+      # Text is read without a connection: the models are in the image.
+      - name: Start it as deployed and run the smoke test, text recognition included
         env:
           STEPTHROUGH_TAG: ci
         run: |
           docker compose up -d --no-build --wait --wait-timeout 120
-          docker compose exec -T stepthrough python - < docker/smoke_test.py
-
-      - name: Container logs
-        if: failure()
-        run: docker compose logs --no-color
-
-  test-ocr:
-    name: Test the text recognition image
-    # Native x86-64: PaddlePaddle crashes under emulation, so this is the only place its image is exercised.
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: Build the runtime image with text recognition
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile
-          target: runtime
-          load: true
-          tags: ${{ env.IMAGE }}:ci-ocr
-          build-args: WITH_OCR=true
-          cache-from: type=gha,scope=runtime-ocr
-          cache-to: type=gha,scope=runtime-ocr,mode=max
-
-      - name: Start it and read text from a recording
-        env:
-          STEPTHROUGH_TAG: ci-ocr
-        run: |
-          docker compose up -d --no-build --wait --wait-timeout 180
           docker compose exec -T stepthrough python - --ocr < docker/smoke_test.py
 
       - name: Container logs
@@ -136,25 +107,14 @@ jobs:
         run: docker compose logs --no-color
 
   publish:
-    name: Publish ${{ matrix.variant || 'standard' }} image
-    needs: [test, test-ocr]
+    name: Publish the image
+    needs: [test]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: ""
-            with_ocr: "false"
-            platforms: linux/amd64,linux/arm64
-          # PaddlePaddle publishes no Linux ARM packages.
-          - variant: "-ocr"
-            with_ocr: "true"
-            platforms: linux/amd64
     steps:
       - uses: actions/checkout@v4
 
@@ -174,26 +134,29 @@ jobs:
           images: ${{ env.IMAGE }}
           flavor: |
             latest=false
-            suffix=${{ matrix.variant }}
           tags: |
-            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
-            type=sha,prefix=sha-,enable=${{ github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=stable,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}-ocr,priority=50
+            type=semver,pattern={{major}}.{{minor}}-ocr,priority=50
+            type=raw,value=stable-ocr,priority=50,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=edge-ocr,priority=50,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,suffix=-ocr,priority=50,enable=${{ github.ref == 'refs/heads/main' }}
 
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
           target: runtime
-          platforms: ${{ matrix.platforms }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            WITH_OCR=${{ matrix.with_ocr }}
             VERSION=${{ steps.meta.outputs.version }}
             REVISION=${{ github.sha }}
-          cache-from: type=gha,scope=publish${{ matrix.variant }}
-          cache-to: type=gha,scope=publish${{ matrix.variant }},mode=max
+          cache-from: type=gha,scope=publish
+          cache-to: type=gha,scope=publish,mode=max

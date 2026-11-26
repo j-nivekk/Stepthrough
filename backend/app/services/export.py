@@ -3,13 +3,18 @@ from __future__ import annotations
 import csv
 import json
 import shutil
+from collections import Counter
+from datetime import datetime, timezone
 from collections.abc import Sequence
 from pathlib import Path
 
+from .. import __version__
 from ..models import ExportMode
 from ..storage import absolute_data_path, asset_url, relative_data_path, run_exports_dir
 from ..utils import utc_now
 from .pathway import build_pathway, phase_at
+from . import page_xml
+from .step_text import parse_reading, text_state
 from .video import export_filename
 
 
@@ -89,7 +94,22 @@ _COMMON_NOTES = {
         "detected: found by the analysis; manual: added by hand by the reviewer, so it has no change, "
         "timing or label"
     ),
-    "ocr_text": "text read from the screenshot by OCR; null when OCR was off or found no text",
+    "ocr_text": (
+        "text read from the screenshot (OCR), its lines from top to bottom, in one piece; null when it was not read or "
+        "there is none. text_state says which"
+    ),
+    "text_state": (
+        "read; waiting: still to be read when this was exported; failed: could not be read; earlier: read by a version "
+        "before 1.4.6, which could give a screen the text of an earlier one that looked much like it; null: not read"
+    ),
+    "text_lines": (
+        "since 1.4.6: the lines of ocr_text with where they are, x, y, width, height in pixels of the screenshot, and "
+        "how sure the engine was (score, 0 to 1); null when it was not read"
+    ),
+    "text_page_xml": (
+        "since 1.4.6: the same lines as PAGE XML (2013-07-15), for Transkribus, eScriptorium, OCR-D or Loghi: one file "
+        "per screenshot in images/page, named after it, so images can be opened there as it is; null when it was not read"
+    ),
     "score_breakdown.changed_regions": (
         "up to 6 changed areas as boxes (x, y, width, height) in pixels of the recording "
         "(recording.width x recording.height)"
@@ -144,6 +164,53 @@ _ENGINE_NOTES = {
 def _field_notes(engine: str | None) -> dict:
     """What the per-step fields mean for this run's engine, so a bundle can be read without the app."""
     return {**_COMMON_NOTES, **_ENGINE_NOTES.get(engine or "", {})}
+
+
+def _text_columns(candidate: dict) -> dict:
+    """Whether the text of a step was read, and where its lines are on the screenshot."""
+    reading = parse_reading(candidate.get("text_reading"))
+    names = ("text", "x", "y", "width", "height", "score")
+    return {
+        "text_state": text_state(candidate),
+        "text_lines": [dict(zip(names, line)) for line in reading["lines"]] if reading else None,
+    }
+
+
+def _write_page_xml(candidate: dict, row: dict, images_dir: Path, created: str) -> str | None:
+    """The PAGE XML of a step's screenshot, beside it; its path inside the bundle, or None when its text was not read."""
+    reading = parse_reading(candidate.get("text_reading"))
+    if reading is None:
+        return None
+    name = page_xml.file_name(row["export_filename"])
+    folder = images_dir / page_xml.FOLDER
+    folder.mkdir(exist_ok=True)
+    (folder / name).write_bytes(
+        page_xml.page_xml(
+            reading,
+            row["export_filename"],
+            creator=f"Stepthrough {__version__}, text recognition {reading['engine']} (PP-OCRv6, ONNX Runtime)",
+            created=created,
+            comments=f"{row['title']}, at {row['timestamp_tc']} of the recording. Lines are given as boxes, without baselines.",
+        )
+    )
+    return f"images/{page_xml.FOLDER}/{name}"
+
+
+def _text_recognition(steps: list[dict], with_page_xml: bool) -> dict | None:
+    """What read the text of the exported steps, and how far it got; None when no text was asked for."""
+    counts = Counter(text_state(step) for step in steps)
+    if not any(counts):
+        return None
+    readings = [parse_reading(step.get("text_reading")) for step in steps]
+    return {
+        "engines": sorted({reading["engine"] for reading in readings if reading}),
+        "steps_read": counts["read"],
+        "steps_waiting": counts["waiting"],
+        "steps_failed": counts["failed"],
+        "steps_read_by_an_earlier_version": counts["earlier"],
+        "steps_not_read": counts[None],
+        "page_xml": f"images/{page_xml.FOLDER}" if with_page_xml else None,
+    }
 
 
 def _timing_columns(row: dict) -> dict:
@@ -299,6 +366,8 @@ def create_export_bundle(
     way = {step["step_id"]: step for step in pathway["steps"]}
     first_step_of = {screen["id"]: screen["image_step_id"] for screen in pathway["screens"]}
 
+    stored = {candidate["id"]: candidate for candidate in candidates}
+    created = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     exported_manifest_rows = []
     for row in export_rows:
         source_path = absolute_data_path(row["image_path"])
@@ -314,6 +383,8 @@ def create_export_bundle(
             "detour": way[row["step_id"]]["detour"],
             "returns_to_step_id": first_step_of.get(way[row["step_id"]]["returns_to"]),
             **_timing_columns(row),
+            **_text_columns(stored[row["source_candidate_id"]]),
+            "text_page_xml": _write_page_xml(stored[row["source_candidate_id"]], row, images_dir, created),
         })
 
     manifest = {
@@ -342,6 +413,10 @@ def create_export_bundle(
             "engine_version": (_json_value(run.get("analysis_config")) or {}).get("engine_version"),
             "settings": _run_settings(run),
             "resolved_settings": _json_value(run.get("analysis_config")),
+            "text_recognition": _text_recognition(
+                [stored[row["source_candidate_id"]] for row in export_rows],
+                any(row["text_page_xml"] for row in exported_manifest_rows),
+            ),
         },
         "field_notes": _field_notes(run.get("analysis_engine")),
         "steps": exported_manifest_rows,
@@ -374,6 +449,7 @@ def create_export_bundle(
                 "time_on_screen_ms",
                 "grouped_states",
                 "ocr_text",
+                "text_state",
                 "revisit_group_id",
                 "similar_to_step_id",
                 "similar_to_source_candidate_id",

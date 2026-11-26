@@ -3,7 +3,6 @@
 # Stepthrough as one image: the built frontend, the API and the analysis, served on port 8000.
 #
 #   docker build -f docker/Dockerfile .                          # the image (last stage, `runtime`)
-#   docker build -f docker/Dockerfile --build-arg WITH_OCR=true .  # with text recognition (amd64 only)
 #   docker build -f docker/Dockerfile --target test .            # the backend test suite on top
 #
 # Everything the app writes goes to /data, which compose.yaml keeps on a named volume.
@@ -42,15 +41,19 @@ ENV UV_COMPILE_BYTECODE=${COMPILE_BYTECODE} \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /src/backend
 COPY backend/pyproject.toml backend/uv.lock ./
-ARG WITH_OCR=false
 RUN --mount=type=cache,target=/root/.cache/uv \
-    if [ "$WITH_OCR" = "true" ]; then groups="--group ocr"; else groups=""; fi; \
-    uv sync --frozen --no-dev --no-install-project $groups
+    uv sync --frozen --no-dev --no-install-project
 
-# --- 3. Shared base for the test and runtime stages ------------------------------------------------------------
+# --- 3. The models that read text: the same on every platform, pinned by checksum (app/services/text_models.py) ---
+FROM --platform=$BUILDPLATFORM ${PYTHON_IMAGE} AS text-models
+WORKDIR /src/backend
+COPY backend/app/__init__.py backend/app/config.py ./app/
+COPY backend/app/services/__init__.py backend/app/services/text_models.py ./app/services/
+RUN python -m app.services.text_models /models
+
+# --- 4. Shared base for the test and runtime stages ------------------------------------------------------------
 FROM ${PYTHON_IMAGE} AS base
-# ffmpeg/ffprobe do the decoding and the working copy. OpenCV's wheel needs libGL and GLib (PaddleOCR requires
-# that build rather than the headless one); PaddlePaddle needs OpenMP.
+# ffmpeg/ffprobe do the decoding and the working copy. OpenCV's wheel needs libGL, GLib and OpenMP.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg libgl1 libglib2.0-0t64 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
@@ -59,6 +62,7 @@ RUN groupadd --system --gid 10001 stepthrough \
     && mkdir /data \
     && chown stepthrough:stepthrough /data
 COPY --from=python-deps /opt/venv /opt/venv
+COPY --from=text-models /models /app/ocr-models
 COPY backend/app /app/backend/app
 COPY --from=frontend /src/frontend/dist /app/frontend
 ENV PATH=/opt/venv/bin:$PATH \
@@ -67,10 +71,11 @@ ENV PATH=/opt/venv/bin:$PATH \
     HOME=/data \
     STEPTHROUGH_DEPLOYMENT=server \
     STEPTHROUGH_DATA_ROOT=/data \
+    STEPTHROUGH_OCR_MODELS=/app/ocr-models \
     STEPTHROUGH_FRONTEND_DIR=/app/frontend
 WORKDIR /app/backend
 
-# --- 4. Tests: the same image plus pytest and the suite ---------------------------------------------------------
+# --- 5. Tests: the same image plus pytest and the suite ---------------------------------------------------------
 FROM base AS test
 COPY --from=uv /uv /usr/local/bin/uv
 COPY backend/pyproject.toml backend/uv.lock ./
@@ -84,7 +89,7 @@ ENV STEPTHROUGH_DEPLOYMENT=local \
 USER stepthrough
 CMD ["python", "-m", "pytest", "-q", "-p", "no:cacheprovider"]
 
-# --- 5. Runtime (the default target) ---------------------------------------------------------------------------
+# --- 6. Runtime (the default target) ---------------------------------------------------------------------------
 FROM base AS runtime
 ARG VERSION=dev
 ARG REVISION=unknown

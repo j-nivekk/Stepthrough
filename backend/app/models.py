@@ -16,7 +16,7 @@ RecordingType = Literal["phone", "desktop"]
 ScrollMode = Literal["each_stop", "merge"]
 AnalysisPreset = Literal["subtle_ui", "balanced", "noise_resistant"]
 OcrBackend = Literal["paddleocr"]
-OcrStatus = Literal["checking", "available", "unavailable"]
+OcrStatus = Literal["checking", "available", "unavailable", "off"]
 TransitionType = Literal[
     "navigation",
     "scroll",
@@ -56,7 +56,6 @@ class HealthResponse(BaseModel):
     missing_tools: list[str]
     message: str
     ocr_message: str
-    ocr_warnings: list[str]
 
 
 class ProjectCreate(BaseModel):
@@ -336,6 +335,49 @@ class ExportRequest(BaseModel):
     mode: ExportMode | Literal["auto"] = "accepted"
 
 
+TextState = Literal["waiting", "read", "failed", "earlier"]
+
+
+class RunText(BaseModel):
+    """How far the reading of a run's text is (app/text_reading.py), in steps. ``earlier``: read by a version before
+    1.4.6. ``problem``: why it was not read, when it could not be."""
+
+    waiting: int = 0
+    read: int = 0
+    failed: int = 0
+    earlier: int = 0
+    problem: str | None = None
+
+
+class StepText(BaseModel):
+    candidate_id: str
+    state: TextState | None = None
+    text: str | None = None
+
+
+class RunTextResponse(BaseModel):
+    summary: RunText
+    steps: list[StepText]
+
+
+class TextLine(BaseModel):
+    """A line of text on a screenshot, and where it is, in pixels of the screenshot."""
+
+    text: str
+    x: int
+    y: int
+    width: int
+    height: int
+    score: float
+
+
+class StepTextDetail(StepText):
+    engine: str | None = None
+    width: int | None = None
+    height: int | None = None
+    lines: list[TextLine] = Field(default_factory=list)
+
+
 class DetectionRunSummary(BaseModel):
     id: str
     recording_id: str
@@ -369,6 +411,7 @@ class DetectionRunSummary(BaseModel):
     modified_at: str | None = None
     modified_by_name: str | None = None
     export_bundle_id: str | None = None
+    text: RunText = Field(default_factory=RunText)
     is_abortable: bool
     is_deletable: bool
 
@@ -464,6 +507,8 @@ class CandidateFrameResponse(BaseModel):
     pathway_row: Literal["continue", "below"] | None = None
     # After this step the user went back to an earlier screen: the id of a step that shows it.
     returns_to: str | None = None
+    # Whether the text of its screenshot has been read (app/text_reading.py); None: not asked for.
+    text_state: TextState | None = None
     created_at: str
     updated_at: str
 

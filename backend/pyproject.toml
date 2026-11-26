@@ -21,17 +21,21 @@ dev = [
   "pytest>=8.3.0"
 ]
 
-# Optional text recognition for step screenshots (ocr_text in exports): uv sync --group ocr
-# Bump paddlepaddle and paddleocr together and test on x86 first: see "PaddlePaddle version bugs" in README.md.
+# Text recognition (app/services/text_engine.py): ONNX Runtime, and PyYAML for the models' list of characters. Installed
+# by a plain `uv sync`; leave it out with `uv sync --no-group ocr`. ONNX Runtime has no packages for Intel Macs and for
+# macOS before 14 (Darwin 23), so there it is left out by itself and text recognition is unavailable. (With the dot,
+# '23.' is compared as text; as a version, it would trip some tools over the names of Linux kernels.)
 ocr = [
-  "paddlepaddle==3.3.0",
-  "paddleocr==3.3.0",
-  "setuptools>=70.0.0"
+  "onnxruntime==1.31.1; sys_platform != 'darwin' or (platform_machine == 'arm64' and platform_release >= '23.')",
+  "pyyaml>=6.0",
 ]
+
+[tool.uv]
+default-groups = ["dev", "ocr"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
-  "smoke: requires a real PaddleOCR 3.x backend environment"
+  "models: reads text with the real models, where they are (see tests/test_text_engine.py)"
 ]

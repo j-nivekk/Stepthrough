@@ -4,7 +4,7 @@ import type { SimilarLink } from '../lib/analysis';
 import { formatPathwayTime } from '../lib/pathwayFigure';
 import type { GalleryLayoutSizing } from '../lib/stepLayout';
 import { START } from '../lib/stepNumbers';
-import type { CandidateChanges, CandidateFrame, CandidateStatus } from '../types';
+import type { CandidateChanges, CandidateFrame, CandidateStatus, StepTextDetail } from '../types';
 import {
   BackLink,
   CandidateDecisionButtons,
@@ -23,6 +23,7 @@ import {
 import { PhaseChoice, phaseInfoAt, type PhaseSpanInfo } from './PhaseChoice';
 import { ScreenChoice } from './ScreenChoice';
 import { useStepNumbers } from './StepNumbers';
+import { CopyTextButton, StepTextBody, StepTextLayer, useStepText } from './StepText';
 
 export interface CandidateGalleryProps {
   candidates: CandidateFrame[];
@@ -131,6 +132,13 @@ export function CandidateGallery({
 
   const numberOf = useStepNumbers();
 
+  // The text of the step shown, which stays open from one step to the next, and the line of it pointed at.
+  const [textWanted, setTextWanted] = useState(false);
+  const [highlightedLine, setHighlightedLine] = useState<number | null>(null);
+  const textOpen = textWanted && Boolean(activeCandidate?.text_state);
+  const stepText = useStepText(activeCandidate, textOpen);
+  useEffect(() => setHighlightedLine(null), [activeCandidate?.id, textOpen]);
+
   const filmstripGroups = useMemo<FilmstripPhaseGroup[]>(() => {
     if (!hasPhases) {
       return [{ key: 'all', name: '', items: candidates }];
@@ -178,11 +186,14 @@ export function CandidateGallery({
           activeIndex={activeIndex}
           candidate={activeCandidate}
           hover={activeHover}
+          highlightedLine={highlightedLine}
           isSelected={selectedSet.has(activeCandidate.id)}
+          onHighlightLine={setHighlightedLine}
           onSetStatus={(status) => onSetStatus(activeCandidate, status)}
           onStep={onStep}
           onToggleSelection={(shift) => onToggleSelection(activeCandidate.id, shift)}
           name={numberOf(activeCandidate).name}
+          text={textOpen ? stepText.data : undefined}
           total={candidates.length}
         />
 
@@ -197,6 +208,12 @@ export function CandidateGallery({
           name={numberOf(activeCandidate).name}
           similarLink={activeSimilar}
           steps={allSteps}
+          highlightedLine={highlightedLine}
+          onHighlightLine={setHighlightedLine}
+          onToggleText={setTextWanted}
+          text={stepText.data}
+          textError={stepText.error}
+          textOpen={textOpen}
         />
       </div>
 
@@ -379,6 +396,10 @@ interface GalleryStageProps {
   total: number;
   isSelected: boolean;
   hover: StepHoverProps;
+  /** The text of the step, while it is open beside the screenshot: its lines are then marked on it. */
+  text?: StepTextDetail;
+  highlightedLine: number | null;
+  onHighlightLine: (line: number | null) => void;
   onStep: (direction: -1 | 1) => void;
   onSetStatus: (status: CandidateStatus) => void;
   onToggleSelection: (shift: boolean) => void;
@@ -391,6 +412,9 @@ function GalleryStage({
   total,
   isSelected,
   hover,
+  text,
+  highlightedLine,
+  onHighlightLine,
   onStep,
   onSetStatus,
   onToggleSelection,
@@ -438,11 +462,12 @@ function GalleryStage({
         </button>
 
         <div className="candidate-gallery-viewport">
-          {/* Coordinate-faithful frame hugging the rendered screenshot pixels 1:1 (ready for future on-screen element callouts). */}
+          {/* Coordinate-faithful frame hugging the rendered screenshot pixels 1:1. While its text is open, pointing at
+              the screenshot picks lines of text, so it plays no clip. */}
           <div
-            className={`candidate-gallery-frame ${hover.state ? `hover-${hover.state}` : ''}`}
+            className={`candidate-gallery-frame ${hover.state && !text ? `hover-${hover.state}` : ''}`}
             data-gallery-media-frame=""
-            {...hoverHandlers(hover, liveSlotRef)}
+            {...hoverHandlers(text ? undefined : hover, liveSlotRef)}
           >
             <img
               alt={`candidate screenshot at ${candidate.timestamp_tc}`}
@@ -451,6 +476,7 @@ function GalleryStage({
             />
             <div aria-hidden="true" className="candidate-live-slot" ref={liveSlotRef} />
             <span aria-hidden="true" className="candidate-hover-progress" />
+            {text ? <StepTextLayer detail={text} highlighted={highlightedLine} onHighlight={onHighlightLine} /> : null}
           </div>
         </div>
 
@@ -499,6 +525,12 @@ interface GalleryInspectorProps {
   onJumpBack?: () => void;
   steps: CandidateFrame[];
   phases?: { runId: string; boundaries: Array<{ start_ms: number; name: string }> | undefined };
+  text?: StepTextDetail;
+  textError?: Error | null;
+  textOpen: boolean;
+  highlightedLine: number | null;
+  onHighlightLine: (line: number | null) => void;
+  onToggleText: (open: boolean) => void;
   onUpdate: (payload: CandidateChanges) => void;
 }
 
@@ -512,6 +544,12 @@ function GalleryInspector({
   onJumpBack,
   steps,
   phases,
+  text,
+  textError,
+  textOpen,
+  highlightedLine,
+  onHighlightLine,
+  onToggleText,
   onUpdate,
 }: GalleryInspectorProps) {
   const editing = useStepEditing(candidate);
@@ -525,18 +563,19 @@ function GalleryInspector({
     setScoresOpen(false);
   }, [candidate.id]);
 
-  // Allow Escape to collapse the temporary scores overlay cleanly.
+  // Allow Escape to collapse the temporary scores or text overlay cleanly.
   useEffect(() => {
-    if (!scoresOpen) return;
+    if (!scoresOpen && !textOpen) return;
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.stopPropagation();
         setScoresOpen(false);
+        onToggleText(false);
       }
     }
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [scoresOpen]);
+  }, [onToggleText, scoresOpen, textOpen]);
 
   // Auto-grow the step title textarea as it wraps, capped cleanly so notes always retain room.
   // Include top/bottom border thickness so border-box sizing never triggers a 2px phantom scrollbar on 1 line.
@@ -639,6 +678,21 @@ function GalleryInspector({
           </label>
         </div>
 
+        {textOpen ? (
+          <div aria-label="text on the screen" className="candidate-gallery-scores-overlay candidate-gallery-text-overlay" role="region">
+            <div className="candidate-gallery-scores-overlay-head">
+              <span>text</span>
+              <span className="candidate-gallery-text-actions">
+                <CopyTextButton detail={text} />
+                <button aria-label="hide text" className="inline-link-button" onClick={() => onToggleText(false)} type="button">
+                  hide
+                </button>
+              </span>
+            </div>
+            <StepTextBody candidate={candidate} detail={text} error={textError} highlighted={highlightedLine} onHighlight={onHighlightLine} />
+          </div>
+        ) : null}
+
         {scoresOpen ? (
           <div aria-label="step scores" className="candidate-gallery-scores-overlay" role="region">
             <div className="candidate-gallery-scores-overlay-head">
@@ -661,9 +715,11 @@ function GalleryInspector({
                   <span>
                     visual <strong className="info-text">{candidate.score_breakdown.visual.toFixed(2)}</strong>
                   </span>
-                  <span>
-                    text <strong className="info-text">{candidate.score_breakdown.text.toFixed(2)}</strong>
-                  </span>
+                  {candidate.text_state === 'read' ? (
+                    <span>
+                      text <strong className="info-text">{candidate.score_breakdown.text.toFixed(2)}</strong>
+                    </span>
+                  ) : null}
                   <span>
                     motion <strong className="warning-text">{candidate.score_breakdown.motion.toFixed(2)}</strong>
                   </span>
@@ -749,11 +805,28 @@ function GalleryInspector({
           <button
             aria-expanded={scoresOpen}
             className={`inline-link-button candidate-gallery-scores-toggle ${scoresOpen ? 'is-open' : ''}`}
-            onClick={() => setScoresOpen((open) => !open)}
+            onClick={() => {
+              onToggleText(false);
+              setScoresOpen((open) => !open);
+            }}
             type="button"
           >
             {scoresOpen ? 'hide scores' : 'scores'}
           </button>
+          {candidate.text_state ? (
+            <button
+              aria-expanded={textOpen}
+              className={`inline-link-button candidate-gallery-scores-toggle ${textOpen ? 'is-open' : ''}`}
+              onClick={() => {
+                setScoresOpen(false);
+                onToggleText(!textOpen);
+              }}
+              title="the text on the screen, and where it is"
+              type="button"
+            >
+              {textOpen ? 'hide text' : 'text'}
+            </button>
+          ) : null}
         </div>
       </div>
     </aside>

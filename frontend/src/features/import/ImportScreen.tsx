@@ -15,9 +15,6 @@ export interface ImportScreenProps {
   isDeleting: boolean;
   isUploadBlocked: boolean;
   ocrStatusMessage: string | null;
-  ocrStatusTone: 'info' | 'warning';
-  ocrWarnings: string[];
-  onDismissOcrWarnings: () => void;
   onDeleteRow: (localId: string) => void;
   onDone: () => void;
   onFilesSelected: (files: FileList | File[]) => void;
@@ -37,9 +34,6 @@ export function ImportScreen({
   isDeleting,
   isUploadBlocked,
   ocrStatusMessage,
-  ocrStatusTone,
-  ocrWarnings,
-  onDismissOcrWarnings,
   onDeleteRow,
   onDone,
   onFilesSelected,
@@ -55,7 +49,6 @@ export function ImportScreen({
   const live = useLive();
   const elsewhere = uploadsElsewhere(live.presence, project?.id ?? null, live.clientId);
   const [isDropzoneActive, setIsDropzoneActive] = useState(false);
-  const [ocrWarningsExpanded, setOcrWarningsExpanded] = useState(false);
   const uploadedCount = rows.filter((row) => row.status === 'uploaded').length;
   const onTheWay = rows.filter((row) => row.status === 'queued' || row.status === 'uploading').length;
   const failedCount = rows.filter((row) => row.status === 'error').length;
@@ -65,37 +58,12 @@ export function ImportScreen({
       <div className="entry-shell import-shell">
         <div className="entry-stage-nav">
           <StageNavigator activeStage="import" onNavigate={onNavigateStage} />
-          {ocrWarnings.length > 0 && (
-            <div className="nav-ocr-inline">
-              <button
-                className="entry-notice-ocr-summary"
-                onClick={() => setOcrWarningsExpanded((prev) => !prev)}
-                type="button"
-              >
-                {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
-                — {ocrWarningsExpanded ? 'hide' : 'show'}
-              </button>
-              <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
-                dismiss
-              </button>
-            </div>
-          )}
         </div>
 
-        {(healthMessage || ocrStatusMessage || (ocrWarnings.length > 0 && ocrWarningsExpanded) || appError) && (
+        {(healthMessage || ocrStatusMessage || appError) && (
           <div className="entry-notices">
             {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
-            {ocrStatusMessage && (
-              <p className={ocrStatusTone === 'warning' ? 'entry-notice warning' : 'entry-notice'}>
-                {ocrStatusMessage}
-              </p>
-            )}
-            {ocrWarnings.length > 0 && ocrWarningsExpanded &&
-              ocrWarnings.map((warning) => (
-                <p className="entry-notice diagnostic" key={warning}>
-                  {warning}
-                </p>
-              ))}
+            {ocrStatusMessage && <p className="entry-notice warning">{ocrStatusMessage}</p>}
             {appError && <p className="entry-notice error">{appError}</p>}
           </div>
         )}

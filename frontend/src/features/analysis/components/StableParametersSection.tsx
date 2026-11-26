@@ -2,6 +2,8 @@ import type { Dispatch, HTMLAttributes, SetStateAction } from 'react';
 import { useState } from 'react';
 import { absoluteApiUrl } from '../../../api';
 import { AnalysisResetDiamondButton, AnalysisStepperInput } from '../../../components/AnalysisControls';
+import { useConfirm } from '../../../components/ConfirmDialog';
+import { useReadTextQuestion } from '../../../components/ReadTextQuestion';
 import type { AnalysisHintKey } from '../../../lib/analysis';
 import {
   areStableSettingsEqual,
@@ -86,6 +88,16 @@ export function StableParametersSection({
   const recordingWidth = selectedRecordingSummary?.width ?? null;
   const recordingHeight = selectedRecordingSummary?.height ?? null;
   const statusBarVisible = stable.recording_type === 'phone' && statusBarShare(recordingWidth, recordingHeight) > 0;
+
+  const { confirm, dialog } = useConfirm();
+  const question = useReadTextQuestion();
+
+  // Turned on only after the question; turned off at once.
+  async function chooseReadText(value: boolean) {
+    if (value === stable.enable_ocr) return;
+    if (value && !(await confirm(question))) return;
+    update({ enable_ocr: value });
+  }
 
   function update(patch: Partial<StableSettings>) {
     setRunSettings((current) => ({
@@ -276,7 +288,7 @@ export function StableParametersSection({
           <div className="analysis-parameter-control">
             <ModeToggle
               disabled={!ocrAvailable}
-              onSelect={(value) => update({ enable_ocr: value })}
+              onSelect={(value) => void chooseReadText(value)}
               options={ON_OFF}
               value={stable.enable_ocr}
             />
@@ -286,7 +298,7 @@ export function StableParametersSection({
         <span className="analysis-parameter-annotation">
           {!ocrAvailable && ocrStatusMessage
             ? ocrStatusMessage
-            : 'stores the text of each screenshot for exports; not needed to find steps'}
+            : 'to show, search and export the text on the screens; read after the steps are found, which do not need it'}
         </span>
       </div>
 
@@ -357,6 +369,7 @@ export function StableParametersSection({
           </div>
         </div>
       </details>
+      {dialog}
     </>
   );
 }

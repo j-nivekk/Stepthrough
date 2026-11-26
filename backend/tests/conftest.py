@@ -34,7 +34,6 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
                 status='unavailable',
                 available=False,
                 message='OCR disabled in tests by default; enable it explicitly in OCR-specific cases.',
-                warnings=(),
             )
         )
         try:
@@ -50,6 +49,63 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
             for _run_id, worker in workers:
                 worker.join(timeout=15)
                 assert not worker.is_alive(), 'analysis worker outlived its test'
+
+
+class FakeReader:
+    """Stands in for the process that reads text (services/text_queue.py): answers with what ``answer`` gives for a
+    screenshot, and keeps which screenshots it was asked for, in order."""
+
+    asked: list = []
+    started: list = []
+
+    def __init__(self, models, threads: int) -> None:
+        self.threads = threads
+        self.stopped = False
+        FakeReader.started.append(self)
+
+    @staticmethod
+    def answer(screen) -> dict | None:
+        return {'lines': [['sample text', 10, 20, 90, 18, 0.98]], 'width': 640, 'height': 360, 'memory_mb': 100}
+
+    def read(self, screen) -> dict | None:
+        FakeReader.asked.append(screen)
+        return FakeReader.answer(screen)
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
+@pytest.fixture()
+def fake_reader(monkeypatch: pytest.MonkeyPatch) -> type[FakeReader]:
+    """Text is read by FakeReader, and text recognition is available."""
+    import app.main as main
+    import app.services.text_models as text_models
+    import app.services.text_queue as text_queue
+
+    answer = FakeReader.answer
+    FakeReader.asked, FakeReader.started = [], []
+    monkeypatch.setattr(text_queue, 'Reader', FakeReader)
+    monkeypatch.setattr(text_models, 'ensure', lambda: Path('.'))
+    main._set_ocr_state(main.OcrHealthState(status='available', available=True, message='Text recognition works.'))
+    yield FakeReader
+    FakeReader.answer = staticmethod(answer)
+
+
+@pytest.fixture()
+def wait_for_text():
+    """Wait until nothing of a run is waiting to be read; returns its summary."""
+
+    def _wait(client: TestClient, run_id: str) -> dict:
+        import app.main as main
+
+        for _ in range(200):
+            summary = client.get(f'/runs/{run_id}').json()['summary']
+            if summary['text']['waiting'] == 0 and not main._text_reading()._queue.has(run_id):
+                return summary
+            time.sleep(0.02)
+        raise AssertionError(f'the text was not read in time: {summary["text"]}')
+
+    return _wait
 
 
 @pytest.fixture()

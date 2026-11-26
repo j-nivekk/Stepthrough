@@ -7,15 +7,8 @@ from threading import Event
 from fastapi.testclient import TestClient
 
 
-def _set_ocr_state(main, *, status: str, available: bool | None, message: str, warnings: tuple[str, ...] = ()) -> None:
-    main._set_ocr_state(
-        main.OcrHealthState(
-            status=status,
-            available=available,
-            message=message,
-            warnings=warnings,
-        )
-    )
+def _set_ocr_state(main, *, status: str, available: bool | None, message: str) -> None:
+    main._set_ocr_state(main.OcrHealthState(status=status, available=available, message=message))
 
 
 def _configure_test_paths(monkeypatch, tmp_path):
@@ -35,28 +28,20 @@ def _configure_test_paths(monkeypatch, tmp_path):
     return main
 
 
-def test_health_reports_ocr_availability(client: TestClient, monkeypatch) -> None:
+def test_health_reports_ocr_availability(client: TestClient) -> None:
     import app.main as main
 
-    _set_ocr_state(
-        main,
-        status='unavailable',
-        available=False,
-        message='Unsupported Paddle OCR stack in the backend Python environment. Install paddlepaddle==3.3.0 and paddleocr==3.3.0.',
-    )
+    _set_ocr_state(main, status='unavailable', available=False, message='Text recognition does not work here: no package.')
 
     response = client.get('/health')
 
     assert response.status_code == 200
     assert response.json()['ocr_status'] == 'unavailable'
     assert response.json()['ocr_available'] is False
-    assert 'Unsupported Paddle OCR stack' in response.json()['ocr_message']
-    assert response.json()['ocr_warnings'] == []
+    assert response.json()['ocr_message'] == 'Text recognition does not work here: no package.'
 
 
 def test_health_returns_checking_while_background_probe_runs(monkeypatch, tmp_path) -> None:
-    import app.services.ocr as ocr_module
-
     main = _configure_test_paths(monkeypatch, tmp_path)
     allow_probe_to_finish = Event()
     probe_started = Event()
@@ -64,51 +49,39 @@ def test_health_returns_checking_while_background_probe_runs(monkeypatch, tmp_pa
     def slow_probe():
         probe_started.set()
         allow_probe_to_finish.wait(timeout=1.0)
-        return ocr_module.PaddleOcrProbeResult(available=True, message='PaddleOCR ready.', warnings=('ccache warning',))
+        return {'ok': True, 'onnxruntime': '1.31.1'}
 
-    monkeypatch.setattr(main, 'probe_paddleocr_availability', slow_probe)
+    monkeypatch.setattr(main.text_queue, 'check', slow_probe)
 
     with TestClient(main.app) as client:
         assert probe_started.wait(timeout=1.0)
-        response = client.get('/health')
-        payload = response.json()
-
-        assert response.status_code == 200
+        payload = client.get('/health').json()
         assert payload['ocr_status'] == 'checking'
         assert payload['ocr_available'] is None
-        assert payload['ocr_message'] == 'Checking PaddleOCR availability in the background.'
-        assert payload['ocr_warnings'] == []
+        assert payload['ocr_message'] == 'Checking whether text recognition works here.'
         allow_probe_to_finish.set()
 
 
 def test_background_probe_updates_health_state(monkeypatch, tmp_path) -> None:
-    import app.services.ocr as ocr_module
-
     main = _configure_test_paths(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        main,
-        'probe_paddleocr_availability',
-        lambda: ocr_module.PaddleOcrProbeResult(
-            available=False,
-            message='PaddleOCR is unavailable.',
-            warnings=('No ccache found.', 'Requests dependency mismatch.'),
-        ),
-    )
-
-    with TestClient(main.app) as client:
-        for _ in range(20):
-            payload = client.get('/health').json()
-            if payload['ocr_status'] != 'checking':
-                break
-            time.sleep(0.02)
-        else:
-            raise AssertionError('OCR status did not leave checking state')
-
-    assert payload['ocr_status'] == 'unavailable'
-    assert payload['ocr_available'] is False
-    assert payload['ocr_message'] == 'PaddleOCR is unavailable.'
-    assert payload['ocr_warnings'] == ['No ccache found.', 'Requests dependency mismatch.']
-
+    monkeypatch.delenv('STEPTHROUGH_OCR_MODELS', raising=False)  # the Docker image has the models
+    answers = [
+        ({'ok': False, 'missing': 'onnxruntime', 'error': "No module named 'onnxruntime'"}, 'unavailable', 'onnxruntime is not installed'),
+        ({'ok': False, 'error': 'DLL load failed'}, 'unavailable', 'does not work here: DLL load failed.'),
+        ({'ok': True, 'onnxruntime': '1.31.1'}, 'available', 'are fetched the first time'),
+    ]
+    for answer, status, words in answers:
+        monkeypatch.setattr(main.text_queue, 'check', lambda answer=answer: answer)
+        with TestClient(main.app) as client:
+            for _ in range(50):
+                payload = client.get('/health').json()
+                if payload['ocr_status'] != 'checking':
+                    break
+                time.sleep(0.02)
+            else:
+                raise AssertionError('OCR status did not leave checking state')
+        assert payload['ocr_status'] == status and payload['ocr_available'] is (status == 'available')
+        assert words in payload['ocr_message']
 
 
 def _create_project(client: TestClient) -> dict:
@@ -190,12 +163,7 @@ def test_retired_engines_cannot_start_but_their_runs_still_open_and_export(
 def test_run_locks_ocr_off_when_unavailable(client: TestClient, video_factory, wait_for_run) -> None:
     import app.main as main
 
-    _set_ocr_state(
-        main,
-        status='unavailable',
-        available=False,
-        message='Local OCR mode requires both STEPTHROUGH_OCR_DET_MODEL_DIR and STEPTHROUGH_OCR_REC_MODEL_DIR.',
-    )
+    _set_ocr_state(main, status='unavailable', available=False, message='Text recognition does not work here.')
 
     project = _create_project(client)
     video = video_factory('ocr-lock.mp4', ['black', 'white'])
@@ -208,64 +176,6 @@ def test_run_locks_ocr_off_when_unavailable(client: TestClient, video_factory, w
     assert response.status_code == 200
     assert run['stable']['enable_ocr'] is False
     assert detail['summary']['stable']['enable_ocr'] is False
-
-
-def test_run_emits_warning_and_continues_when_ocr_init_fails(
-    client: TestClient,
-    video_factory,
-    wait_for_run,
-    monkeypatch,
-) -> None:
-    import app.main as main
-    import app.services.stable_detection as stable_detection
-
-    _set_ocr_state(main, status='available', available=True, message='PaddleOCR 3.3.0 is configured.')
-    monkeypatch.setattr(stable_detection, 'load_ocr_engine', lambda: (None, 'model bootstrap failed'))
-
-    project = _create_project(client)
-    video = video_factory('ocr-warning.mp4', ['black', 'white'])
-    recording = _import_video(client, project['id'], video)
-
-    run = client.post(f"/recordings/{recording['id']}/runs", json={'stable': {'enable_ocr': True}}).json()
-    detail = wait_for_run(client, run['id'])
-
-    assert detail['summary']['status'] == 'completed'
-    assert any(
-        event['level'] == 'warning' and 'OCR disabled: model bootstrap failed' in event['message']
-        for event in detail['events']
-    )
-    assert detail['candidates']
-
-
-def test_run_reads_screenshot_text_when_ocr_is_on(
-    client: TestClient,
-    video_factory,
-    wait_for_run,
-    monkeypatch,
-) -> None:
-    import app.main as main
-    import app.services.stable_detection as stable_detection
-
-    class FakeOcrEngine:
-        def extract_text(self, _image):
-            return 'sample text'
-
-    _set_ocr_state(main, status='available', available=True, message='PaddleOCR 3.3.0 is configured.')
-    monkeypatch.setattr(stable_detection, 'load_ocr_engine', lambda: (FakeOcrEngine(), None))
-
-    project = _create_project(client)
-    video = video_factory('ocr-invoked.mp4', ['black', 'white'])
-    recording = _import_video(client, project['id'], video)
-
-    run = client.post(f"/recordings/{recording['id']}/runs", json={'stable': {'enable_ocr': True}}).json()
-    detail = wait_for_run(client, run['id'])
-
-    assert detail['summary']['status'] == 'completed'
-    assert any('OCR read ' in event['message'] for event in detail['events'])
-    from app.repository import list_candidates
-
-    stored = list_candidates(run['id'])
-    assert stored and all(candidate['ocr_text'] == 'sample text' for candidate in stored)
 
 
 def test_run_creation_defaults_to_stable_v3_engine(client: TestClient, video_factory, wait_for_run) -> None:

@@ -18,7 +18,7 @@ class ImageFingerprint:
 
 
 HASH_BITS = 64
-TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
+TOKEN_PATTERN = re.compile(r"\w+")
 
 
 def perceptual_hash_array(image: np.ndarray) -> int:
@@ -128,10 +128,6 @@ def blended_distance(current: dict, previous: dict) -> float:
             * 0.3
         )
 
-    current_text = current.get("ocr_text")
-    previous_text = previous.get("ocr_text")
-    if current_text or previous_text:
-        return (base_distance * 0.75) + (text_distance(current_text, previous_text) * 0.25)
     return base_distance
 
 

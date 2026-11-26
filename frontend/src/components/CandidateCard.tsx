@@ -8,6 +8,7 @@ import type { CandidateChanges, CandidateFrame, CandidateStatus } from '../types
 import { PhaseChoice } from './PhaseChoice';
 import { ScreenChoice, screenChoiceSummary } from './ScreenChoice';
 import { useStepNumbers } from './StepNumbers';
+import { StepTextDetails } from './StepText';
 
 /** Hover intent on a step's screenshot: wait, then the clip plays and "play from here" appears. */
 export interface StepHoverProps {
@@ -467,9 +468,11 @@ export function CandidateCard({
                   <span>
                     visual <strong className="info-text">{candidate.score_breakdown.visual.toFixed(2)}</strong>
                   </span>
-                  <span>
-                    text <strong className="info-text">{candidate.score_breakdown.text.toFixed(2)}</strong>
-                  </span>
+                  {candidate.text_state === 'read' ? (
+                    <span>
+                      text <strong className="info-text">{candidate.score_breakdown.text.toFixed(2)}</strong>
+                    </span>
+                  ) : null}
                   <span>
                     motion <strong className="warning-text">{candidate.score_breakdown.motion.toFixed(2)}</strong>
                   </span>
@@ -524,6 +527,7 @@ export function CandidateCard({
               )}
             </div>
           </details>
+          <StepTextDetails candidate={candidate} key={candidate.id} />
           <button
             aria-expanded={showAnnotation}
             className="candidate-annotation-toggle"

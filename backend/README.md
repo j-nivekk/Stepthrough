@@ -36,27 +36,7 @@ The earlier engines, `hybrid_v2` and `scene_v1`, are retired. Their runs still l
 export (their stored settings and field notes are kept), but `POST /recordings/{id}/runs` refuses them with
 422. Their code is at the git tag `last-with-hybrid-v2`.
 
-OCR (`enable_ocr`) needs the optional PaddleOCR packages: `uv sync --group ocr`. Note that a plain `uv sync`,
-`uv add` or `uv remove` uninstalls them again unless `--group ocr` is passed.
-
-### PaddlePaddle version bugs
-
-OCR is pinned to `paddlepaddle==3.3.0` with `paddleocr==3.3.0`. Change the two together, and test on an x86
-machine before bumping either (CI's `test-ocr` job does this for the Docker image).
-
-- **oneDNN fails in 3.3.0 on x86 CPUs** (Linux servers, and Windows machines running the desktop app). The first
-  prediction stops with `(Unimplemented) ConvertPirAttribute2RuntimeAttribute not support
-  [pir::ArrayAttribute<pir::DoubleAttribute>]` from `onednn_instruction.cc`, a regression in that release
-  ([Paddle#77340](https://github.com/PaddlePaddle/Paddle/issues/77340)). Stepthrough therefore turns oneDNN off
-  (`enable_mkldnn=False` in `app/services/ocr.py`), so x86 recognition runs on plain CPU kernels and is slower.
-  Apple silicon never uses oneDNN and is unaffected. If the error comes back, the fix reported upstream is
-  `paddlepaddle==3.2.2`.
-- **Mismatched versions** of `paddleocr` and `paddlepaddle` cause similar errors
-  ([PaddleOCR discussion #17350](https://github.com/PaddlePaddle/PaddleOCR/discussions/17350)).
-- **No Linux ARM packages** exist for 3.3.0, so the `-ocr` Docker image is x86-64 only.
-- **No emulation.** The x86-64 build crashes (segmentation fault) under Docker Desktop's emulation on an ARM Mac
-  as soon as recognition starts, even with oneDNN off, so it can only be tested on real x86 hardware. Even
-  building it under emulation needs `--build-arg COMPILE_BYTECODE=0`.
+Reading the text of screenshots (`enable_ocr`) is not part of the analysis: see [Text recognition](#text-recognition).
 
 Settings (`RunSettings.stable`; `null` means the recording type's default):
 
@@ -70,7 +50,7 @@ Settings (`RunSettings.stable`; `null` means the recording type's default):
 | `scroll_mode` | `each_stop` (every scroll stop is a step) or `merge` (keep the first) | `each_stop` |
 | `group_typing` | a burst of typing with short pauses becomes one step with the finished text | on |
 | `include_opening_screen` | the first screen is step 0 | on |
-| `enable_ocr` | read the text of each screenshot into exports (`ocr_text`); not used to find steps | off |
+| `enable_ocr` | read the text of each screenshot after the analysis; not used to find steps | off |
 | `sensitivity` | pixel threshold in multiples of the noise measured on the recording (at least 10 grey levels) | 4 |
 | `sample_fps` | analysis rate, rounded to a whole share of the working copy's frame rate | 15 |
 
@@ -85,8 +65,8 @@ runs of the recording, which never changes, the `name` someone gave it if any, `
 `engine_version`, the `settings` as chosen and the `resolved_settings` actually used, including what was
 measured), `field_notes` explaining each per-step field for that run's engine, and the steps. Per step:
 time, image path inside the bundle, the reviewer's status, title and notes, `origin` (`detected`, or `manual`
-for a step added by hand, which has no timing or label), `ocr_text`, the score
-breakdown, revisit links and the timing columns `transition_type`, `change_started_ms`, `settled_ms`,
+for a step added by hand, which has no timing or label), `ocr_text` with `text_state`, `text_lines` and
+`text_page_xml`, the score breakdown, revisit links and the timing columns `transition_type`, `change_started_ms`, `settled_ms`,
 `time_on_screen_ms` and `grouped_states`. Changed regions are in pixels of the recording for every engine.
 `steps.csv` has the same per-step fields without the nested score breakdown.
 
@@ -135,6 +115,49 @@ hand in between belongs to the phase. The pathway gives each step its `phase` an
 steps, screens and duration; the export puts `phase` in `steps.csv` and `steps.json` and the list in
 `pathway.json`.
 
+## Text recognition
+
+The text of screenshots is read by ONNX Runtime with PP-OCRv6 models (PaddlePaddle, Apache License 2.0):
+
+- `app/services/text_models.py`: the three model files (23 MB), each pinned to a commit on Hugging Face and a SHA-256.
+  They are fetched the first time text is read, into `STEPTHROUGH_OCR_MODELS` or `ocr-models/ppocrv6` in the data
+  folder; `uv run python -m app.services.text_models` gets them beforehand. The Docker image has them.
+- `app/services/text_engine.py`: reads one screenshot. A small model marks where text is, on the screenshot at half its
+  size (longest side 1280 to 1920 pixels); each line is cut out of the full screenshot and read by the other. Lines that
+  look the same in the same place as on the run's screenshot before are not read again. `ENGINE` goes up whenever the
+  same screenshot could be read differently.
+- `app/text_reader.py`: the process that reads, at low priority, spoken to in lines of JSON. The web server never loads
+  ONNX Runtime: at start it only runs `python -m app.text_reader --check` in the background, for `/health`.
+- `app/services/text_queue.py`: the screenshots waiting to be read, of every run, and the readers. Runs take turns (four
+  screenshots each). A screenshot that takes longer than two minutes, or whose reader dies, is tried once more with a
+  new reader, then marked `failed`; a reader that used more than 2.5 GB is replaced, and one without work ends after a
+  minute. When text cannot be read at all (no models, a package that does not load), what waits is let go of and the
+  run says why.
+- `app/text_reading.py`: what is asked for and how it is stored. `candidate_frames.text_state` is NULL (not asked for),
+  `waiting`, `read` or `failed`; `text_reading` has the engine, the screenshot's size and the lines with their places;
+  `ocr_text` the same text in one piece. What is `waiting` when the server stops is read when it is back. Text without a
+  `text_state` was read by a version before 1.4.6 (`earlier`): those used an engine that shared one text between
+  screenshots with nearly the same perceptual hash, so it can be another screen's.
+
+Exports also have the text of each screenshot whose text was read as PAGE XML (`app/services/page_xml.py`, version
+2013-07-15, as Transkribus, eScriptorium, OCR-D and Loghi read it), in `images/page/` with the screenshot's name: one text
+region with the lines in reading order, each with its box as a rectangle and `conf`; there are no baselines.
+`tests/test_page_xml.py` checks the files against PAGE's schema when `STEPTHROUGH_PAGE_SCHEMA` names its
+`pagecontent.xsd`.
+
+`POST /runs/{id}/text` reads what this version has not read of a finished run, `DELETE` stops it, and `GET` gives the
+text of every step in one piece; `GET /candidates/{id}/text` has a step's lines. Run summaries say how far it is
+(`text`: `waiting`, `read`, `failed`, `earlier`, `problem`). Administrators set the number of readers (0: off) and their
+threads (`text_readers`, `text_threads` in `/admin/server-settings`).
+
+The packages are in the `ocr` group, which a plain `uv sync` installs; `uv sync --no-group ocr` leaves it out. ONNX
+Runtime has no packages for Intel Macs, for macOS before 14 and for Linux with glibc before 2.28; on Macs it is left out
+by itself, and text recognition is unavailable there.
+
+`python -m tests.eval.webtext` measures how well text is read
+([results](../docs/evaluation.md#text-recognition)). Reading is not exactly the same on every processor; a letter can
+differ.
+
 ## Carrying a review over
 
 After a run with other settings, `POST /runs/{id}/review-from` brings the review of another completed run of the
@@ -161,12 +184,14 @@ The caller must be an owner of both runs' project.
 | `STEPTHROUGH_MAX_UPLOAD_MB` | `2048` | largest accepted upload; also enforce it in the reverse proxy (`client_max_body_size`) |
 | `STEPTHROUGH_ALLOW_ADMIN_RESET` | on in `local`, off in `server` | whether `POST /admin/reset-db` is available (it also requires the `X-Stepthrough-Confirm: reset-database` header) |
 | `STEPTHROUGH_MAX_CONCURRENT_RUNS` | no limit in `local`, `2` in `server` | analyses that may run at once; later runs wait as `queued`, first come first served, and can be ended while they wait. `0` lifts the limit. It is the default for the setting administrators change while the server runs (below) |
+| `STEPTHROUGH_OCR_MODELS` | `ocr-models/ppocrv6` in the data folder | the folder with the models that read text (see [Text recognition](#text-recognition)) |
+| `STEPTHROUGH_OCR_MODEL_URL` | `https://huggingface.co` | where they are fetched from, the first time text is read |
 | `STEPTHROUGH_FRONTEND_DIR` | unset | a built frontend (`frontend/dist`) to serve from the API's own origin, as the Docker image does; it must contain `index.html` |
 | `STEPTHROUGH_AUTH` | `none` in `local`, `password` in `server` | `none`: no logins, every request comes from the built-in user; `password`: people log in (see [Accounts](#accounts)) |
 | `STEPTHROUGH_PUBLIC_URL` | unset | the address people open, such as `https://stepthrough.example.org`, so `python -m app.users` prints whole links; an `https` address also keeps the session cookie to HTTPS, even when the web server in front does not say the browser used HTTPS |
 
 Project media (recordings, screenshots, exports) is served under `/assets/projects/` only to people who may
-open that project; the database, OCR models and other files in the data root are not reachable over HTTP.
+open that project; the database, models and other files in the data root are not reachable over HTTP.
 Runs that were queued or running when the backend stopped are marked failed at the next start-up.
 
 Run the API with a single worker process: run progress, cancel requests and the run queue live in that process's

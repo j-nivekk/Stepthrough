@@ -106,6 +106,11 @@ CREATE TABLE IF NOT EXISTS candidate_frames (
     same_screen_reason TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    -- Reading the text of the screenshot (app/text_reading.py). `text_state`: NULL (not asked for, or read by a version
+    -- before 1.4.6), 'waiting', 'read' or 'failed'. `text_reading`: what was read, as JSON: the engine, the size of the
+    -- screenshot and its lines with their places; `ocr_text` has the same text in one piece. Last, as it can be large.
+    text_state TEXT,
+    text_reading TEXT,
     UNIQUE(run_id, detector_index)
 );
 
@@ -423,6 +428,8 @@ def init_db() -> None:
         _ensure_column(conn, "candidate_frames", "returns_to", "TEXT")
         _ensure_column(conn, "candidate_frames", "same_screen_as", "TEXT")
         _ensure_column(conn, "candidate_frames", "same_screen_reason", "TEXT")
+        _ensure_column(conn, "candidate_frames", "text_state", "TEXT")
+        _ensure_column(conn, "candidate_frames", "text_reading", "TEXT")
         _ensure_column(conn, "recordings", "working_path", "TEXT")
         _ensure_column(conn, "users", "notes", "TEXT")
         _ensure_column(conn, "users", "password_hash", "TEXT")

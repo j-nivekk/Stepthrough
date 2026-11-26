@@ -3,7 +3,9 @@ export type RecordingType = 'phone' | 'desktop';
 export type ScrollMode = 'each_stop' | 'merge';
 export type AnalysisPreset = 'subtle_ui' | 'balanced' | 'noise_resistant';
 export type OcrBackend = 'paddleocr';
-export type OcrStatus = 'checking' | 'available' | 'unavailable';
+export type OcrStatus = 'checking' | 'available' | 'unavailable' | 'off';
+/** How far the text of a step is: waiting to be read, read, could not be read, or read by a version before 1.4.6. */
+export type TextState = 'waiting' | 'read' | 'failed' | 'earlier';
 export type TransitionType =
   | 'navigation'
   | 'scroll'
@@ -42,7 +44,6 @@ export interface HealthResponse {
   missing_tools: string[];
   message: string;
   ocr_message: string;
-  ocr_warnings: string[];
 }
 
 export interface AnalysisControlMetadata {
@@ -166,6 +167,7 @@ export interface RunSummary {
   modified_at?: string | null;
   modified_by_name?: string | null;
   export_bundle_id?: string | null;
+  text: RunText;
   is_abortable: boolean;
   is_deletable: boolean;
 }
@@ -236,8 +238,46 @@ export interface CandidateFrame {
   pathway_row?: PathwayRowChoice | null;
   /** The reviewer's say that after this step the user went back to an earlier screen: the id of a step on it. */
   returns_to?: string | null;
+  /** Whether the text of its screenshot has been read; empty: not asked for. */
+  text_state?: TextState | null;
   created_at: string;
   updated_at: string;
+}
+
+/** How far the reading of a run's text is, in steps, and why it was not read when it could not be. */
+export interface RunText {
+  waiting: number;
+  read: number;
+  failed: number;
+  /** Read by a version before 1.4.6, which could give a screen the text of another. */
+  earlier: number;
+  problem?: string | null;
+}
+
+/** The text of every step of a run, each in one piece: to look for words in. */
+export interface RunTextDetail {
+  summary: RunText;
+  steps: Array<{ candidate_id: string; state: TextState | null; text: string | null }>;
+}
+
+/** A line of text on a screenshot, and where it is, in pixels of the screenshot. */
+export interface TextLine {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  score: number;
+}
+
+export interface StepTextDetail {
+  candidate_id: string;
+  state: TextState | null;
+  text: string | null;
+  engine: string | null;
+  width: number | null;
+  height: number | null;
+  lines: TextLine[];
 }
 
 /** What a reviewer can change about a step. */
@@ -443,6 +483,9 @@ export interface TrafficReport extends ReportWindow {
 export interface ServerSettings {
   /** How many analyses run together; 0 is no limit. */
   analyses_at_a_time: { value: number; default: number };
+  /** How many processes read the text of screenshots (0: text recognition is off), and the threads each uses. */
+  text_readers: { value: number; default: number };
+  text_threads: { value: number; default: number };
   compression: { value: boolean; default: boolean };
   live_spread_seconds: { value: number; default: number };
   /** Days usage and traffic are kept; 0 records nothing, null keeps them for ever. */

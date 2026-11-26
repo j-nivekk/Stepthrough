@@ -20,6 +20,8 @@ import type {
   RunDetail,
   RunSettings,
   RunSummary,
+  RunTextDetail,
+  StepTextDetail,
   SavedRunSettings,
   ProgressReport,
   ReportFilter,
@@ -351,6 +353,28 @@ export function createManualRun(recordingId: string): Promise<RunSummary> {
 
 export function getRun(runId: string, signal?: AbortSignal): Promise<RunDetail> {
   return request<RunDetail>(`/runs/${runId}`, { signal });
+}
+
+/** The run without its steps: to follow the reading of its text. */
+export function getRunSummary(runId: string, signal?: AbortSignal): Promise<RunSummary> {
+  return request<RunSummary>(`/runs/${runId}/summary`, { signal });
+}
+
+/** Read the text of the steps that is not read yet (or was by an earlier version); it is read in the background. */
+export function readRunText(runId: string): Promise<RunSummary> {
+  return request<RunSummary>(`/runs/${runId}/text`, { method: 'POST' });
+}
+
+export function stopReadingRunText(runId: string): Promise<RunSummary> {
+  return request<RunSummary>(`/runs/${runId}/text`, { method: 'DELETE' });
+}
+
+export function getRunText(runId: string, signal?: AbortSignal): Promise<RunTextDetail> {
+  return request<RunTextDetail>(`/runs/${runId}/text`, { signal });
+}
+
+export function getStepText(candidateId: string, signal?: AbortSignal): Promise<StepTextDetail> {
+  return request<StepTextDetail>(`/candidates/${candidateId}/text`, { signal });
 }
 
 export function getRunPathway(runId: string, detail: PathwayDetail, signal?: AbortSignal): Promise<Pathway> {

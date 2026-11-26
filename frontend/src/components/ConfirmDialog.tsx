@@ -3,12 +3,15 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 export interface ConfirmRequest {
   /** The question, such as `delete recording.mp4?` */
   message: string;
-  /** What follows from it, in a line or two. */
-  detail?: string;
+  /** What follows from it, in a line or two; paragraphs and links where it needs them. */
+  detail?: ReactNode;
   /** The button that goes ahead: `delete`, `restore`; `continue` when left out. */
   confirmLabel?: string;
   /** A red button for what cannot be undone. The focus then starts on cancel, so Enter does not destroy. */
   danger?: boolean;
+  /** For what costs others something, such as reading text on a shared server: marked like a crash-test dummy,
+   *  with a yellow button. The focus starts on cancel, as for danger. */
+  caution?: boolean;
 }
 
 interface Pending extends ConfirmRequest {
@@ -44,16 +47,29 @@ export function useConfirm(): { confirm: (request: ConfirmRequest) => Promise<bo
   return { confirm, dialog: pending ? <ConfirmDialog onAnswer={answer} request={pending} /> : null };
 }
 
+/** The mark of a crash-test dummy: a circle in yellow and black quarters. */
+function CautionMark() {
+  return (
+    // Four quarters side by side, not yellow over a black circle, which would leave a dark rim round the yellow.
+    <svg aria-hidden="true" className="confirm-dialog-mark" viewBox="0 0 32 32">
+      <path d="M16 16V0A16 16 0 0 0 0 16Z M16 16V32A16 16 0 0 0 32 16Z" fill="var(--caution-yellow)" />
+      <path d="M16 16V0A16 16 0 0 1 32 16Z M16 16V32A16 16 0 0 1 0 16Z" fill="#000" />
+    </svg>
+  );
+}
+
 function ConfirmDialog({ request, onAnswer }: { request: ConfirmRequest; onAnswer: (value: boolean) => void }) {
   const titleId = useId();
   const detailId = useId();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
   const confirmRef = useRef<HTMLButtonElement | null>(null);
+  const careful = request.danger || request.caution;
 
   useEffect(() => {
     // focus goes back where it was when the dialog closes
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    (request.danger ? cancelRef : confirmRef).current?.focus();
+    (careful ? cancelRef : confirmRef).current?.focus();
     function handleKeyDown(event: KeyboardEvent) {
       // No key reaches the page behind (the review board's a, r, u and arrows); Enter and space still press the
       // focused button, which is the browser's own doing.
@@ -62,9 +78,11 @@ function ConfirmDialog({ request, onAnswer }: { request: ConfirmRequest; onAnswe
         event.preventDefault();
         onAnswer(false);
       } else if (event.key === 'Tab') {
-        // focus stays on the two buttons
+        // focus stays in the dialog: its links and its two buttons, in turn
         event.preventDefault();
-        (document.activeElement === cancelRef.current ? confirmRef : cancelRef).current?.focus();
+        const stops = [...(dialogRef.current?.querySelectorAll<HTMLElement>('a[href], button') ?? [])];
+        const here = stops.indexOf(document.activeElement as HTMLElement);
+        stops[(here + (event.shiftKey ? -1 : 1) + stops.length) % stops.length]?.focus();
       }
     }
     // capture, so that this runs before any listener of the page
@@ -73,7 +91,7 @@ function ConfirmDialog({ request, onAnswer }: { request: ConfirmRequest; onAnswe
       window.removeEventListener('keydown', handleKeyDown, true);
       previous?.focus?.();
     };
-  }, [onAnswer, request.danger]);
+  }, [onAnswer, careful]);
 
   return (
     <div className="confirm-overlay" onPointerDown={(event) => event.target === event.currentTarget && onAnswer(false)}>
@@ -81,23 +99,30 @@ function ConfirmDialog({ request, onAnswer }: { request: ConfirmRequest; onAnswe
         aria-describedby={request.detail ? detailId : undefined}
         aria-labelledby={titleId}
         aria-modal="true"
-        className="confirm-dialog"
+        className={`confirm-dialog ${request.caution ? 'is-caution' : ''}`}
+        ref={dialogRef}
         role="alertdialog"
       >
+        {request.caution ? (
+          <div className="confirm-dialog-marks">
+            <CautionMark />
+            <CautionMark />
+          </div>
+        ) : null}
         <p className="confirm-dialog-message" id={titleId}>
           {request.message}
         </p>
         {request.detail ? (
-          <p className="confirm-dialog-detail" id={detailId}>
+          <div className="confirm-dialog-detail" id={detailId}>
             {request.detail}
-          </p>
+          </div>
         ) : null}
         <div className="confirm-dialog-actions">
           <button className="analysis-task-link subtle" onClick={() => onAnswer(false)} ref={cancelRef} type="button">
             cancel
           </button>
           <button
-            className={`analysis-pill ${request.danger ? 'danger' : 'success'}`}
+            className={`analysis-pill ${request.danger ? 'danger' : request.caution ? 'caution' : 'success'}`}
             onClick={() => onAnswer(true)}
             ref={confirmRef}
             type="button"

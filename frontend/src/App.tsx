@@ -28,7 +28,10 @@ import {
   isAbortError,
   listProjects,
   logOut,
+  readRunText,
   recheckOcr,
+  stopReadingRunText,
+  getRunSummary,
   resetDatabase,
   saveRunSettings,
   forgetRunSettings,
@@ -168,7 +171,6 @@ function App({ session, onSessionChange }: AppProps) {
   const [liveMessage, setLiveMessage] = useState('');
   const [analysisActionMessage, setAnalysisActionMessage] = useState('');
   const [appError, setAppError] = useState('');
-  const [dismissedOcrWarningsKey, setDismissedOcrWarningsKey] = useState<string | null>(null);
   const [bulkDeletePending, setBulkDeletePending] = useState(false);
   const [bulkExportPending, setBulkExportPending] = useState(false);
   const [appPrefs, setAppPrefs] = useState<AppPreferences>(() => loadAppPreferences());
@@ -232,11 +234,9 @@ function App({ session, onSessionChange }: AppProps) {
   const ocrStatus = healthQuery.data?.ocr_status ?? null;
   const ocrAvailability = healthQuery.data?.ocr_available;
   const ocrStatusMessage = backendReady ? healthQuery.data?.ocr_message ?? null : null;
-  const ocrWarnings = healthQuery.data?.ocr_warnings ?? [];
-  const ocrWarningsKey = ocrWarnings.join('\n');
-  // OCR's diagnostics are about the server's set-up, so only administrators (who can act on them) see them.
-  const visibleOcrWarnings =
-    !isAdmin || (ocrWarningsKey && dismissedOcrWarningsKey === ocrWarningsKey) ? [] : ocrWarnings;
+  // That text recognition does not work is for administrators to know, who can do something about it; where it is
+  // turned off there is nothing to tell. Everyone else sees it at the settings it concerns.
+  const ocrProblem = backendReady && isAdmin && ocrStatus === 'unavailable' ? ocrStatusMessage : null;
   const ocrAvailable = ocrAvailability !== false;
   const applyLocalOcrAvailability = (settings: RunSettings) =>
     enforceLocalOcrAvailability(settings, ocrAvailability);
@@ -273,6 +273,20 @@ function App({ session, onSessionChange }: AppProps) {
       return run && activeRunStatuses.includes(run.summary.status) ? 2000 : false;
     },
   });
+  // The text of a finished run is read in the background: follow how far it is, without loading its steps each time.
+  const runSummaryQuery = useQuery({
+    queryKey: ['run-summary', selectedRunId],
+    queryFn: ({ signal }) => getRunSummary(selectedRunId as string, signal),
+    enabled: Boolean(selectedRunId) && (runDetailQuery.data?.summary.text.waiting ?? 0) > 0,
+    refetchInterval: 2000,
+    gcTime: 0,
+  });
+  useEffect(() => {
+    const summary = runSummaryQuery.data;
+    if (!summary) return;
+    queryClient.setQueryData<RunDetail>(['run', summary.id], (run) => (run && run.summary.text.waiting > 0 ? { ...run, summary } : run));
+    if (summary.text.waiting === 0) void refreshRunQueries(summary.id, summary.recording_id);
+  }, [runSummaryQuery.data]);
   // In a shared account the other browsers see what this one uploads (see LiveProvider).
   const { setPresence } = useLive();
 
@@ -579,8 +593,6 @@ function App({ session, onSessionChange }: AppProps) {
     [projectDefaultSettings, selectedRecordingSummary?.fps, ocrAvailability],
   );
   const healthWarning = Boolean(healthQuery.data && healthQuery.data.missing_tools.length > 0);
-  const ocrEntryMessage = backendReady && ocrStatus !== 'available' ? ocrStatusMessage : null;
-  const ocrEntryMessageTone = ocrStatus === 'unavailable' ? 'warning' : 'info';
   const projectsStatusMessage = !backendReady
     ? 'connecting to backend…'
     : projectsQuery.isLoading
@@ -591,18 +603,6 @@ function App({ session, onSessionChange }: AppProps) {
           : 'Could not load projects.'
         : null;
 
-  useEffect(() => {
-    if (!ocrWarnings.length && dismissedOcrWarningsKey !== null) {
-      setDismissedOcrWarningsKey(null);
-    }
-  }, [dismissedOcrWarningsKey, ocrWarnings.length]);
-
-  function dismissOcrWarnings() {
-    if (!ocrWarningsKey) {
-      return;
-    }
-    setDismissedOcrWarningsKey(ocrWarningsKey);
-  }
   const presetText = useMemo(() => serializeRunPresetText(runSettings), [runSettings]);
   const uploadedImportItems = useMemo(() => getUploadedImportItems(importQueue), [importQueue]);
   const projectImportRows = useMemo(
@@ -1042,6 +1042,12 @@ function App({ session, onSessionChange }: AppProps) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['health'] });
     },
+    onError: (error: Error) => setAppError(error.message),
+  });
+
+  const readTextMutation = useMutation({
+    mutationFn: ({ runId, stop }: { runId: string; stop: boolean }) => (stop ? stopReadingRunText(runId) : readRunText(runId)),
+    onSuccess: (summary) => refreshRunQueries(summary.id, summary.recording_id),
     onError: (error: Error) => setAppError(error.message),
   });
 
@@ -1900,10 +1906,7 @@ function App({ session, onSessionChange }: AppProps) {
           healthMessage={healthWarning ? healthQuery.data?.message ?? 'Video tools are not ready.' : null}
           isCreating={createProjectMutation.isPending}
           deletingProjectId={deleteProjectMutation.isPending ? deleteProjectMutation.variables?.projectId ?? null : null}
-          ocrStatusMessage={ocrEntryMessage}
-          ocrStatusTone={ocrEntryMessageTone}
-          ocrWarnings={visibleOcrWarnings}
-          onDismissOcrWarnings={dismissOcrWarnings}
+          ocrStatusMessage={ocrProblem}
           onCreate={handleCreateProject}
           onDeleteProject={confirmDeleteProject}
           onDownloadProject={downloadProjectFile}
@@ -1940,10 +1943,7 @@ function App({ session, onSessionChange }: AppProps) {
           healthMessage={healthWarning ? healthQuery.data?.message ?? 'Video tools are not ready.' : null}
           isDeleting={deleteRecordingMutation.isPending}
           isUploadBlocked={Boolean(healthWarning)}
-          ocrStatusMessage={ocrEntryMessage}
-          ocrStatusTone={ocrEntryMessageTone}
-          ocrWarnings={visibleOcrWarnings}
-          onDismissOcrWarnings={dismissOcrWarnings}
+          ocrStatusMessage={ocrProblem}
           onDeleteRow={handleDeleteImportItem}
           onDone={() => void handleNavigateToAnalysis(false)}
           onFilesSelected={handleImportFileSelection}
@@ -2014,10 +2014,11 @@ function App({ session, onSessionChange }: AppProps) {
         onUpdateCandidate={(candidateId, payload) => updateCandidateMutation.mutate({ candidateId, payload })}
         onUpdateCandidates={handleUpdateCandidates}
         ocrAvailable={ocrAvailable}
-        ocrStatus={ocrStatus}
+        ocrProblem={ocrProblem}
+        onReadText={(runId) => readTextMutation.mutate({ runId, stop: false })}
+        onStopReadingText={(runId) => readTextMutation.mutate({ runId, stop: true })}
+        textPending={readTextMutation.isPending}
         ocrStatusMessage={ocrStatusMessage}
-        ocrWarnings={visibleOcrWarnings}
-        onDismissOcrWarnings={dismissOcrWarnings}
         previewRecording={previewRecording}
         projectDefaultSettings={effectiveProjectDefaultSettings}
         recordings={projectRecordings}

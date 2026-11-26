@@ -13,8 +13,8 @@ If the server uses password logins, it logs in. Inside the container it makes a 
 `python -m app.users`) and deletes it at the end; against an address, pass --user NAME and give the password in
 the STEPTHROUGH_PASSWORD environment variable (or type it when asked).
 
-With --ocr (for the `-ocr` image) the two screens carry words, the run reads them, and the test checks the text that
-comes back. Drawing the words needs Pillow, which the image has.
+With --ocr the two screens carry words, the run reads them, and the test checks the text that comes back. Drawing the
+words needs Pillow, which the image has.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 PARSER = argparse.ArgumentParser(description="End-to-end check of a running Stepthrough server.")
 PARSER.add_argument("base", nargs="?", default="http://127.0.0.1:8000", help="the server's address")
-PARSER.add_argument("--ocr", action="store_true", help="also check text recognition (the -ocr image)")
+PARSER.add_argument("--ocr", action="store_true", help="also check text recognition")
 PARSER.add_argument("--user", help="log in as this account (password from STEPTHROUGH_PASSWORD, or asked)")
 OPTIONS = PARSER.parse_args()
 OCR = OPTIONS.ocr
@@ -182,7 +182,7 @@ def check_a_project() -> None:
             check(health.get("ocr_available") is True, f"text recognition is available ({health.get('ocr_message')})")
         run = call_json("POST", f"/recordings/{recording['id']}/runs", {"stable": {"enable_ocr": True}} if OCR else {})
         check(websocket_upgrades(f"/runs/{run['id']}/events"), "the live progress socket connects")
-        deadline = time.monotonic() + (900 if OCR else 180)  # the first OCR run downloads its models
+        deadline = time.monotonic() + 180
         while True:
             detail = call_json("GET", f"/runs/{run['id']}")
             if detail["summary"]["status"] in {"completed", "failed", "cancelled"} or time.monotonic() > deadline:
@@ -192,6 +192,15 @@ def check_a_project() -> None:
         check(summary["status"] == "completed", f"the analysis completes ({summary['status']}: {summary.get('message')})")
         candidates = detail["candidates"]
         check(len(candidates) >= 2, f"it finds both screens ({len(candidates)} steps)")
+
+        if OCR:
+            # its text is read after the analysis (the models are fetched first, where the image has none)
+            deadline = time.monotonic() + 300
+            while summary["text"]["waiting"] and time.monotonic() < deadline:
+                time.sleep(0.5)
+                summary = call_json("GET", f"/runs/{run['id']}/summary")
+            text = summary["text"]
+            check(text["read"] == len(candidates), f"the text of every screenshot is read ({text})")
 
         status, headers, image = call("GET", urlsplit(candidates[-1]["image_url"]).path)
         check(status == 200 and image[:8] == b"\x89PNG\r\n\x1a\n", "a screenshot is served")
@@ -224,7 +233,6 @@ def check_a_project() -> None:
               and chart['screens'] == merged['screens'],
               "the bundle contains the reviewed pathway")
         if OCR:
-            # Recognised text is not part of the API's step list; exports carry it in steps.csv.
             with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
                 name = next(entry for entry in bundle.namelist() if entry.endswith("steps.csv"))
                 rows = list(csv.DictReader(io.TextIOWrapper(bundle.open(name), encoding="utf-8")))

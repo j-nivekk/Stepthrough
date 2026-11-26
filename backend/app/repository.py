@@ -651,13 +651,18 @@ def recording_has_active_runs(recording_id: str) -> bool:
     return bool(row[0])
 
 
-# A run with how many steps are accepted or rejected, and who last changed it. Runs from before changes were recorded
-# give the last change to one of their steps instead, or when they were made, and no one.
+# A run with how many steps are accepted or rejected, how far the reading of their text is (text_earlier: read by a
+# version before 1.4.6), and who last changed it. Runs from before changes were recorded give the last change to one of
+# their steps instead, or when they were made, and no one.
 RUN_SUMMARY_SELECT = """
 SELECT
     dr.*,
     COALESCE(SUM(CASE WHEN c.status = 'accepted' THEN 1 ELSE 0 END), 0) AS accepted_count,
     COALESCE(SUM(CASE WHEN c.status = 'rejected' THEN 1 ELSE 0 END), 0) AS rejected_count,
+    COALESCE(SUM(CASE WHEN c.text_state = 'waiting' THEN 1 ELSE 0 END), 0) AS text_waiting,
+    COALESCE(SUM(CASE WHEN c.text_state = 'read' THEN 1 ELSE 0 END), 0) AS text_read,
+    COALESCE(SUM(CASE WHEN c.text_state = 'failed' THEN 1 ELSE 0 END), 0) AS text_failed,
+    COALESCE(SUM(CASE WHEN c.text_state IS NULL AND c.ocr_text IS NOT NULL THEN 1 ELSE 0 END), 0) AS text_earlier,
     COALESCE(dr.modified_at, MAX(c.updated_at), dr.created_at) AS last_modified_at,
     COALESCE(u.display_name, u.name) AS modified_by_name
 FROM detection_runs dr
@@ -947,12 +952,13 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
                     id, run_id, recording_id, detector_index, candidate_origin, timestamp_ms, timestamp_tc, image_path,
                     scene_score, status, title, notes, image_hash, perceptual_hash, histogram_signature, ocr_text,
                     revisit_group_id, similar_to_candidate_id, similarity_distance, score_breakdown, screen_link, screen_kind,
-                    pathway_row, returns_to, same_screen_as, same_screen_reason, created_at, updated_at
+                    pathway_row, returns_to, same_screen_as, same_screen_reason, created_at, updated_at, text_state, text_reading
                 ) VALUES (
                     :id, :run_id, :recording_id, :detector_index, :candidate_origin, :timestamp_ms, :timestamp_tc, :image_path,
                     :scene_score, :status, :title, :notes, :image_hash, :perceptual_hash, :histogram_signature, :ocr_text,
                     :revisit_group_id, :similar_to_candidate_id, :similarity_distance, :score_breakdown, :screen_link, :screen_kind,
-                    :pathway_row, :returns_to, :same_screen_as, :same_screen_reason, :created_at, :updated_at
+                    :pathway_row, :returns_to, :same_screen_as, :same_screen_reason, :created_at, :updated_at, :text_state,
+                    :text_reading
                 )
                 """,
                 [
@@ -967,6 +973,8 @@ def replace_candidates(run_id: str, recording_id: str, candidates: list[dict[str
                         "returns_to": candidate.get("returns_to"),
                         "same_screen_as": candidate.get("same_screen_as"),
                         "same_screen_reason": candidate.get("same_screen_reason"),
+                        "text_state": candidate.get("text_state"),
+                        "text_reading": candidate.get("text_reading"),
                         "score_breakdown": (
                             candidate.get("score_breakdown")
                             if isinstance(candidate.get("score_breakdown"), str)
@@ -1031,6 +1039,62 @@ def set_candidate_screen_links(run_id: str, candidate_ids: Sequence[str], target
             "UPDATE candidate_frames SET screen_link = ?, updated_at = ? WHERE run_id = ? AND id = ?",
             [(target_id, utc_now(), run_id, candidate_id) for candidate_id in candidate_ids],
         )
+
+
+# What reading the text of screenshots stores (app/text_reading.py). None of it counts as a change someone made, so
+# ``updated_at`` stays.
+
+
+def mark_text_waiting(run_id: str, candidate_ids: Sequence[str]) -> None:
+    with connect() as conn:
+        conn.executemany(
+            "UPDATE candidate_frames SET text_state = 'waiting' WHERE run_id = ? AND id = ?",
+            [(run_id, candidate_id) for candidate_id in candidate_ids],
+        )
+
+
+def list_text_waiting(run_id: str | None = None) -> list[dict[str, Any]]:
+    """Steps whose text is still to be read, of one run or all: the runs as they were made, each in the order of time."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.id, c.run_id, c.image_path FROM candidate_frames c JOIN detection_runs dr ON dr.id = c.run_id
+            WHERE c.text_state = 'waiting' AND (:run_id IS NULL OR c.run_id = :run_id)
+            ORDER BY dr.created_at, c.run_id, c.detector_index
+            """,
+            {"run_id": run_id},
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def set_text_reading(candidate_id: str, text: str | None, reading: str | None) -> bool:
+    """What was read on a step's screenshot (``reading`` None: it could not be read), while it is waited for. False when
+    it is not any more."""
+    with connect() as conn:
+        cursor = conn.execute(
+            "UPDATE candidate_frames SET ocr_text = ?, text_reading = ?, text_state = ? WHERE id = ? AND text_state = 'waiting'",
+            (text, reading, "failed" if reading is None else "read", candidate_id),
+        )
+    return cursor.rowcount > 0
+
+
+def forget_text_waiting(run_id: str | None = None) -> int:
+    """Nothing is waited for any more, in one run or all: steps read before keep what was read."""
+    with connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE candidate_frames SET text_state = CASE WHEN text_reading IS NULL THEN NULL ELSE 'read' END
+            WHERE text_state = 'waiting' AND (:run_id IS NULL OR run_id = :run_id)
+            """,
+            {"run_id": run_id},
+        )
+    return cursor.rowcount
+
+
+def set_score_breakdowns(changes: Sequence[tuple[str, str]]) -> None:
+    """(candidate_id, score breakdown as JSON)."""
+    with connect() as conn:
+        conn.executemany("UPDATE candidate_frames SET score_breakdown = ? WHERE id = ?", [(value, key) for key, value in changes])
 
 
 def create_export_bundle(

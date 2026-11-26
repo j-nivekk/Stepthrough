@@ -480,18 +480,15 @@ def test_answers_carry_security_headers(passwords: TestClient) -> None:
 
 
 def test_health_details_are_for_administrators(passwords: TestClient) -> None:
-    main._set_ocr_state(main.OcrHealthState(
-        status='available', available=True, message='Models live in /data/ocr-models.', warnings=('paddle 3.3.0 says hi',)
-    ))
+    main._set_ocr_state(main.OcrHealthState(status='available', available=True, message='Models live in /data/ocr-models.'))
     anonymous = passwords.get('/health').json()
-    assert (anonymous['ocr_message'], anonymous['ocr_warnings']) == ('Text recognition is available.', [])
+    assert anonymous['ocr_message'] == 'Text recognition is available.'
     assert anonymous['ocr_available'] is True and anonymous['ffmpeg_available'] is True
     person = browser()
     person.post('/auth/link/password', json={'token': invite('kim'), 'password': PASSWORD})
-    assert person.get('/health').json()['ocr_warnings'] == []
+    assert person.get('/health').json()['ocr_message'] == 'Text recognition is available.'
     log_in(passwords, *_admin())
-    admin = passwords.get('/health').json()
-    assert (admin['ocr_message'], admin['ocr_warnings']) == ('Models live in /data/ocr-models.', ['paddle 3.3.0 says hi'])
+    assert passwords.get('/health').json()['ocr_message'] == 'Models live in /data/ocr-models.'
 
 
 def test_passwords_an_administrator_supplies_are_kept_as_given(

@@ -40,6 +40,7 @@ from . import __version__
 from .config import DATA_ROOT
 from .database import connect
 from .repository import ACTIVE_RUN_STATUSES, list_recordings
+from .services.step_text import parse_reading
 from .services.video import VideoToolError, probe_video, recording_slug_from_filename
 from .storage import absolute_data_path, recording_dir, recording_source_path, relative_data_path, run_frames_dir
 from .utils import sanitize_filename, utc_now
@@ -65,7 +66,7 @@ STEP_FIELDS = (
     "id", "detector_index", "candidate_origin", "timestamp_ms", "timestamp_tc", "scene_score", "status", "title",
     "notes", "image_hash", "perceptual_hash", "histogram_signature", "ocr_text", "revisit_group_id",
     "similar_to_candidate_id", "similarity_distance", "score_breakdown", "screen_link", "screen_kind", "pathway_row",
-    "returns_to", "same_screen_as", "same_screen_reason", "created_at", "updated_at",
+    "returns_to", "same_screen_as", "same_screen_reason", "created_at", "updated_at", "text_state", "text_reading",
 )
 
 # Steps that bring a project.json of one version up to the next: UPGRADES[1] turns a version 1 file into version 2,
@@ -143,6 +144,8 @@ def _plan(project: dict[str, Any]) -> tuple[dict[str, Any], list[tuple[str, Path
                 if image is not None and image.is_file():
                     image_name = f"frames/{run_count}/{image.name}"
                     files.append((image_name, image))
+                if step.get("text_state") == "waiting":  # for where it is taken, this is one whose text is not read
+                    step["text_state"] = "read" if step.get("text_reading") else None
                 steps.append({**{field: step.get(field) for field in STEP_FIELDS}, "image": image_name})
             phases = _rows("SELECT start_ms, name FROM run_phases WHERE run_id = ? ORDER BY start_ms", (run["id"],))
             runs.append(
@@ -460,11 +463,14 @@ def _unpack_recording(
                 _unpack(archive, image_info, image_listed, image)
                 image_path = relative_data_path(image)
             screen_link = step.get("screen_link")
+            read = step.get("text_state") == "read" and parse_reading(step.get("text_reading")) is not None
             rows.append(
                 (
                     "candidate_frames",
                     {
                         **{field: step.get(field) for field in STEP_FIELDS if field in step},
+                        "text_state": "read" if read else "failed" if step.get("text_state") == "failed" else None,
+                        "text_reading": step["text_reading"] if read else None,
                         "id": new_id,
                         "run_id": run_id,
                         "recording_id": recording_id,

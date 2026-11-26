@@ -105,6 +105,7 @@ def test_init_db_migrates_existing_detection_runs(monkeypatch, tmp_path) -> None
         assert 'perceptual_hash' in candidate_columns
         assert 'ocr_text' in candidate_columns
         assert 'score_breakdown' in candidate_columns
+        assert {'text_state', 'text_reading'} <= candidate_columns
         event_tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert 'run_events' in event_tables
         phase = conn.execute("SELECT phase FROM detection_runs WHERE id = 'run-1'").fetchone()[0]

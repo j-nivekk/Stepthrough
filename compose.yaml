@@ -14,8 +14,6 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: runtime
-      args:
-        WITH_OCR: ${STEPTHROUGH_WITH_OCR:-false}
     restart: unless-stopped
     # Bound to the loopback address by default: the host's nginx (or another proxy) handles TLS and the domain.
     ports:
@@ -24,7 +22,6 @@ services:
       STEPTHROUGH_MAX_CONCURRENT_RUNS: ${STEPTHROUGH_MAX_CONCURRENT_RUNS:-2}
       STEPTHROUGH_MAX_UPLOAD_MB: ${STEPTHROUGH_MAX_UPLOAD_MB:-1024}
       STEPTHROUGH_MAX_PROJECT_FILE_MB: ${STEPTHROUGH_MAX_PROJECT_FILE_MB:-4096}
-      STEPTHROUGH_OCR_MODEL_SOURCE: ${STEPTHROUGH_OCR_MODEL_SOURCE:-auto}
       STEPTHROUGH_PUBLIC_URL: ${STEPTHROUGH_PUBLIC_URL:-}
       # Empty: people log in, as on any server. `none` only for Stepthrough on your own computer, for you alone.
       STEPTHROUGH_AUTH: ${STEPTHROUGH_AUTH:-}

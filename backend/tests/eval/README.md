@@ -33,6 +33,7 @@ tests/eval/
 ├── webreal.py            ← takes in a recording of it that a phone or a computer made; CLI
 ├── webtruth.py           ← the steps a recording should give, from the tester's own log
 ├── webscore.py           ← the engine on those recordings: steps, labels, boxes, returns; CLI
+├── webtext.py            ← reading text: screens of the web tester at eight sizes, and eleven languages; CLI
 ├── test_eval_stress.py   ← pytest regression gates for the stress matrix
 ├── test_eval_wide.py     ← pytest regression gates for the wider evaluation
 ├── test_eval_web.py      ← pytest for the rules in webtruth.py
@@ -215,6 +216,17 @@ choose *watch* (it plays a script) or *use it yourself*. Start the screen record
 python -m http.server --directory tests/eval/web 8400
 python -m tests.eval.webreal recording.mov larder_a__phone__log.json
 python -m tests.eval.webscore --set real --steps
+```
+
+**Reading text.** Every word of these screens is known too, so they also measure how well text is read
+(`app/services/text_engine.py`): at eight sizes, from a phone to a 4K display, with a page of sentences in eleven
+languages. It needs Chrome and the models; the results are in
+[docs/evaluation.md](../../../docs/evaluation.md#text-recognition).
+
+```bash
+python -m app.services.text_models               # once: get the models
+python -m tests.eval.webtext                     # every size (about fifteen minutes)
+python -m tests.eval.webtext --sizes phone,laptop
 ```
 
 A new app is an entry in `Kit.apps` with a `build` and two scripts (`web/apps_computer.js`, `web/apps_phone.js`). It says

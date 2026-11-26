@@ -55,7 +55,6 @@ Edit `.env`, then apply it with `docker compose up -d --wait`. Every setting is 
 | `STEPTHROUGH_MAX_PROJECT_FILE_MB` | `4096` | largest project file brought in at once (a whole project, every video in it; never less than the upload limit); nginx's limit for the project-file paths must be at least this. A download larger than this is warned about, as it could not come back |
 | `STEPTHROUGH_CPUS`, `STEPTHROUGH_MEMORY` | `0` (no limit) | caps for the container, for example `4` and `8g`, so analyses cannot starve other tools on the host |
 | `STEPTHROUGH_VOLUME` | `stepthrough_data` | name of the Docker volume with all data |
-| `STEPTHROUGH_OCR_MODEL_SOURCE` | `auto` | where the text recognition image downloads its models (`auto`, `huggingface`, `bos`) |
 | `STEPTHROUGH_PUBLIC_URL` | unset | the address people open, such as `https://stepthrough.example.org`; the command line prints password links with it, and an `https` address keeps the login cookie to HTTPS |
 | `STEPTHROUGH_AUTH` | `password` | whether people log in. Keep `password` on a server; `none` (no logins, everyone is an administrator) is only for Stepthrough on one person's own computer |
 
@@ -212,28 +211,39 @@ docker compose up -d --wait
 
 ## Text recognition (OCR)
 
-Reading the text of each screenshot into exports needs PaddleOCR, which adds well over a gigabyte, so it comes in a
-separate image: set `STEPTHROUGH_TAG=stable-ocr` (or add `-ocr` to any other tag). This image is for x86-64 (Intel
-and AMD) machines only: PaddlePaddle publishes no packages for ARM Linux, and the x86-64 image does not work under
-emulation. The first run with text recognition downloads its models into the volume, so the server needs internet
-access. To check it end to end, add `--ocr` to the smoke test:
+The text on every screenshot can be read, to show, search and export it. The image has all it needs for that, on
+x86-64 and ARM alike, the models included, so nothing is downloaded. Reading never holds anyone up, whoever asks for it:
+
+- An analysis does not read text. Its steps are there first, and their text follows; people can also ask for the text
+  of a run afterwards.
+- It is read in a process of its own (a **text reader**), at low priority, one screenshot at a time. However many runs
+  wait, there is one reader unless an administrator sets more, and the runs take turns: four screenshots of one, then
+  the next. A reader uses up to 1 GB while there is something to read, and ends a minute after.
+- What is still to be read survives a restart.
+
+Administrators set how many readers there may be and how many threads each uses in the admin panel under **server**;
+0 readers turns text recognition off. The default is one reader with half the processor's cores, at most four. More
+threads make one run faster, more readers keep more runs going; on an Apple M4, one reader with four threads reads
+a phone screenshot in 0.2 seconds and a full desktop window in 0.8.
+
+To check it end to end, add `--ocr` to the smoke test:
 `docker compose exec -T stepthrough python - --ocr < smoke_test.py`.
 
-Recognition runs without PaddlePaddle's oneDNN acceleration, which is broken on x86-64 in PaddlePaddle 3.3.0, so it
-is slower than it could be. The known PaddlePaddle version bugs are listed in
-[`backend/README.md`](backend/README.md#paddlepaddle-version-bugs).
+Up to 1.4.5, text recognition was another engine in an image of its own, with `-ocr` behind the tag. Those tags are now
+other names for the same images; change `STEPTHROUGH_TAG=stable-ocr` to `stable` when convenient. The settings
+`STEPTHROUGH_WITH_OCR` and `STEPTHROUGH_OCR_MODEL_SOURCE` are not used any more, and the old engine's models, the folder
+`ocr-models/paddleocr3` in the data volume, can be deleted.
 
 ## Build the image yourself
 
 ```bash
 git clone https://github.com/j-nivekk/Stepthrough.git && cd Stepthrough
 docker compose up -d --build --wait                                  # build and run this checkout
-STEPTHROUGH_WITH_OCR=true docker compose build                       # the text recognition variant
 docker build -f docker/Dockerfile --target test -t stepthrough:test . && docker run --rm stepthrough:test   # backend tests
 ```
 
 The build uses only what the image needs (see `.dockerignore`), so recordings in a local `data/` folder never end up
-in it.
+in it. It downloads the text recognition models (23 MB) from Hugging Face.
 
 ## Without Docker
 
@@ -249,7 +259,7 @@ moves it).
 ```bash
 git clone https://github.com/j-nivekk/Stepthrough.git && cd Stepthrough
 git checkout v1.4.5                                           # the latest release
-(cd backend && uv sync)                                       # add --group ocr for text recognition (x86-64 only)
+(cd backend && uv sync)                                       # leave text recognition out with --no-group ocr
 (cd frontend && npm ci && VITE_API_BASE_URL= npm run build)
 ```
 
@@ -286,12 +296,16 @@ The account commands run from `backend/`, for example `uv run python -m app.user
 for the first administrator. For whole links in what they print, set the address in that account's shell too:
 `echo 'export STEPTHROUGH_PUBLIC_URL=https://stepthrough.example.org' >> ~/.profile`.
 
-To upgrade, check out the new release, update both parts and restart. Use the same `uv sync` options as before:
-`uv sync` removes the packages it is not asked for, text recognition included.
+Text recognition downloads its models (23 MB) from Hugging Face the first time text is read, into
+`data/ocr-models/ppocrv6`. For a server without access to it, `uv run python -m app.services.text_models FOLDER` (from
+`backend/`) gets them on another computer; copy them to that folder of the data. `STEPTHROUGH_OCR_MODELS` names another
+folder, and `STEPTHROUGH_OCR_MODEL_URL` another server with the same files.
+
+To upgrade, check out the new release, update both parts and restart.
 
 ```bash
 git fetch --tags && git checkout v1.4.6                       # the new release
-(cd backend && uv sync)                                       # with --group ocr if you use text recognition
+(cd backend && uv sync)                                       # with the same options as before
 (cd frontend && npm ci && VITE_API_BASE_URL= npm run build)
 systemctl --user restart stepthrough
 ```

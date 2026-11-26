@@ -57,9 +57,9 @@ export function AppSettings({
 
   const ocrStatus = healthData?.ocr_status ?? null;
   const ocrStatusLabel =
-    ocrStatus === 'available' ? 'ready' : ocrStatus === 'checking' ? 'checking…' : 'not installed';
+    ocrStatus === 'available' ? 'ready' : ocrStatus === 'checking' ? 'checking…' : ocrStatus === 'off' ? 'off' : 'not working';
   const ocrStatusClass =
-    ocrStatus === 'available' ? 'ok' : ocrStatus === 'checking' ? 'checking' : 'missing';
+    ocrStatus === 'available' ? 'ok' : ocrStatus === 'checking' || ocrStatus === 'off' ? 'checking' : 'missing';
 
   function handleResetClick() {
     setAwaitingResetConfirm(true);
@@ -137,9 +137,9 @@ export function AppSettings({
           </span>
         </div>
         <div className="app-settings-tool-row">
-          <span>ocr (paddleocr)</span>
+          <span>text recognition</span>
           <span className={`app-settings-status ${ocrStatusClass}`}>{ocrStatusLabel}</span>
-          {isAdmin && ocrStatus !== 'available' && (
+          {isAdmin && ocrStatus !== 'available' && ocrStatus !== 'off' && (
             <button
               className="app-settings-action-btn"
               disabled={isRecheckingOcr || ocrStatus === 'checking'}
@@ -150,13 +150,9 @@ export function AppSettings({
             </button>
           )}
         </div>
-        {isAdmin && ocrStatus === 'unavailable' && (
-          <p className="app-settings-hint">
-            {'to install: '}
-            <code className="app-settings-code">pip install paddlepaddle paddleocr</code>
-            {', then use recheck.'}
-          </p>
-        )}
+        {isAdmin && ocrStatus && ocrStatus !== 'checking' && healthData?.ocr_message ? (
+          <p className="app-settings-hint">{healthData.ocr_message}</p>
+        ) : null}
       </div>
 
       {isAdmin && (

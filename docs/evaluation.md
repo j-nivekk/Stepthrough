@@ -381,9 +381,48 @@ Labels that fit, by the kind of change, both sets together:
 
 ### Text recognition
 
-Text recognition (OCR) is not part of finding steps, and its accuracy has not been evaluated beyond a check that
-it reads two large words correctly. On Intel and AMD processors it runs without PaddlePaddle's oneDNN
-acceleration, which is broken in the version Stepthrough uses, so it is slower there.
+Reading text (OCR) is not part of finding steps. It is measured on the screens of the web tester, of which every word is
+known: up to six moments of each of the 22 scripts, at eight sizes, put through the same compression as a recording. A
+word counts as read when the line that stands where the word is has its letters and digits, whatever the case and
+punctuation. The time is for one screenshot with four threads on an Apple M4, half of the screenshots taking less.
+
+| size of the recording | words read | time |
+|---|---|---|
+| phone, 1170 x 2532 | 2,048 of 2,050 (99.9 %) | 0.2 s |
+| phone, 720 pixels wide | 2,048 of 2,050 (99.9 %) | 0.2 s |
+| computer, 1440 x 900 | 13,948 of 13,967 (99.9 %) | 0.7 s |
+| computer, 2880 x 1800 (Retina) | 13,954 of 13,967 (99.9 %) | 0.9 s |
+| computer, 2560 x 1440 | 22,916 of 22,970 (99.8 %) | 0.9 s |
+| computer, 3440 x 1440 (ultrawide) | 22,600 of 22,756 (99.3 %) | 0.9 s |
+| computer, 3840 x 2160 at 100 % | 24,629 of 24,727 (99.6 %) | 1.0 s |
+| computer, 5120 x 2880 (Retina) | 22,955 of 22,970 (99.9 %) | 1.3 s |
+
+The process that reads used 0.9 GB at most, for the largest screens. A run takes less time than these add up to, as lines that look the same on the
+screenshot before are not read again: about half of the time on two recordings of real use. Reading such lines again gives
+other letters for 0.1 to 0.2 % of them, nearly all icons taken for letters.
+
+One sentence in each of eleven languages, as the share of its letters that were read:
+
+| language | letters |
+|---|---|
+| Dutch, German, Spanish, Polish, Turkish, Chinese | 99 to 100 % |
+| French, Japanese | 96 % |
+| Russian, Korean, Arabic | 0 % (not supported) |
+
+- **Real recordings.** On a screen recording of a video app, 11 of 11 account names and 10 of 10 captions were read (one
+  name with its tick mark taken for a letter). On two recordings of a computer, it agreed with Apple's own text recognition
+  on 663 of 690 words; most of the others were mistakes of the latter.
+- **Not measured:** text that is turned, handwritten or drawn, very small text in recordings of low quality, and how well
+  lines are put in reading order on pages with columns. The tester's fonts are those of the computer it was drawn on.
+
+```bash
+uv run python -m app.services.text_models   # the models, once
+uv run python -m tests.eval.webtext
+```
+
+Up to version 1.4.5, another engine read text, during the analysis, and gave a screenshot the text of an earlier one with
+nearly the same perceptual hash. On a computer recording of 66 steps, that would have given 47 of them an earlier step's
+text, 40 of them with four words wrong or more. Text of those versions should be read again (**read again**).
 
 ### Limits of this evaluation
 

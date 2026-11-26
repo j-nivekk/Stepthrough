@@ -14,7 +14,7 @@
 
 - **Stable-Screen Detection**: Every screen that stays still for a moment becomes a step, with one settled screenshot each. Settings are in milliseconds and screen share, so they can be reported in a methods section.
 - **Local-First & Private**: Everything stays on your machine. Data, recordings, and extracted frames process and save directly to your local `./data` folder.
-- **Optional OCR**: Reads the text of each screenshot into exports with local PaddleOCR.
+- **Optional Text Recognition**: Reads the text on every screenshot on your own machine, to show, search and export it.
 - **Chronological Review Board**: An intuitive GUI to accept, reject, rename, and add notes to candidate screenshots while preserving original chronology.
 - **Pathways**: The accepted steps drawn as a chart of screens and the moves between them, ready to finish as an SVG figure or to use as a PNG image, with a hands-on tutorial in the app.
 - **Run Comparison**: Run a recording again with other settings, see side by side what changed, and carry your review over to the new run.
@@ -86,7 +86,7 @@ type instead.
    chmod +x setup.sh start.sh
    ./setup.sh
    ```
-   *(To install manually instead: `cd backend && uv sync`, then `cd frontend && npm install`. For OCR, also run `cd backend && uv sync --group ocr`.)*
+   *(To install manually instead: `cd backend && uv sync`, then `cd frontend && npm install`.)*
 
 ---
 
@@ -117,9 +117,12 @@ and how to upgrade. The Docker images are at `ghcr.io/j-nivekk/stepthrough`:
 
 | tag | what it is |
 |---|---|
-| `stable` (`stable-ocr` with text recognition) | the latest release |
-| `1.4.5`, `1.4` (and `-ocr`) | a release, or the latest of a series, to stay on a known version |
-| `edge` (`edge-ocr`) | the latest build of `main`; the app shows `edge` at the bottom right and its commit under **about** |
+| `stable` | the latest release |
+| `1.4.5`, `1.4` | a release, or the latest of a series, to stay on a known version |
+| `edge` | the latest build of `main`; the app shows `edge` at the bottom right and its commit under **about** |
+
+Text recognition came in an image of its own, with `-ocr` behind the tag, up to 1.4.5. Every image has it now, and the
+`-ocr` tags are other names for the same images.
 
 The [Docker image workflow](.github/workflows/docker.yml) builds the image, runs the backend tests and an end-to-end
 smoke test in it, and only then publishes. It runs for:

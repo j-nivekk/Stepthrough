@@ -1,8 +1,9 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
 import { busyElsewhere, busyRunIds } from '../../lib/live';
 import { useLive } from '../live/LiveProvider';
-import { absoluteApiUrl, setRunPhase } from '../../api';
+import { absoluteApiUrl, getRunText, setRunPhase } from '../../api';
+import { EARLIER_TEXT, stepsWithText } from '../../lib/stepText';
 import { screenshotUrl } from '../../lib/screenshots';
 import { DecisionIcon } from '../../components/CandidateCard';
 import { onSelectedText, shouldIgnoreContextMenu } from '../../components/ContextMenu';
@@ -51,7 +52,6 @@ import type {
   CandidateFrame,
   CandidateStatus,
   ExportMode,
-  OcrStatus,
   Project,
   RecordingDetail,
   RecordingSummary,
@@ -64,6 +64,7 @@ import { AnalysisParametersPanel } from './components/AnalysisParametersPanel';
 import { AnalysisTasksPanel } from './components/AnalysisTasksPanel';
 import { AnalysisVideosPanel } from './components/AnalysisVideosPanel';
 import { RunComparison, type CarryOverPair } from './components/RunComparison';
+import { RunTextControl } from './components/RunTextControl';
 import { StepMenu } from './components/StepMenu';
 import { defaultComparisonPair } from '../../lib/runComparison';
 import type { ImportQueueItem } from '../../lib/importQueue';
@@ -167,10 +168,11 @@ export interface AnalysisScreenProps {
   /** Changes to several steps at once. */
   onUpdateCandidates: (runId: string, recordingId: string, changes: Array<[string, CandidateChanges]>) => Promise<void>;
   ocrAvailable: boolean;
-  ocrStatus: OcrStatus | null;
   ocrStatusMessage: string | null;
-  ocrWarnings: string[];
-  onDismissOcrWarnings: () => void;
+  ocrProblem: string | null;
+  onReadText: (runId: string) => void;
+  onStopReadingText: (runId: string) => void;
+  textPending: boolean;
   previewRecording: RecordingSummary | null;
   projectDefaultSettings: RunSettings;
   recordings: RecordingSummary[];
@@ -295,10 +297,11 @@ export function AnalysisScreen({
   onUpdateCandidate,
   onUpdateCandidates,
   ocrAvailable,
-  ocrStatus,
+  onReadText,
+  onStopReadingText,
+  textPending,
+  ocrProblem,
   ocrStatusMessage,
-  ocrWarnings,
-  onDismissOcrWarnings,
   previewRecording,
   projectDefaultSettings,
   recordings,
@@ -315,7 +318,6 @@ export function AnalysisScreen({
   settingsFeedback,
   showPresetText,
 }: AnalysisScreenProps) {
-  const [ocrWarningsExpanded, setOcrWarningsExpanded] = useState(false);
   const [expandedTaskRunId, setExpandedTaskRunId] = useState<string | null>(null);
   const [selectedTaskRunIds, setSelectedTaskRunIds] = useState<string[]>([]);
   const [taskFilter, setTaskFilter] = useState<AnalysisTaskFilter>('all');
@@ -415,7 +417,7 @@ export function AnalysisScreen({
     stable_min_dwell_ms:
       'how long the screen must stay still to count as a step. shorter catches brief screens; longer skips screens the user only passed through.',
     stable_ocr:
-      'reads the text in each screenshot and adds it to exports (ocr_text). it is not needed to find steps and makes runs slower.',
+      'reads the text on each screenshot once the steps are found, to show, search and export it (ocr_text). it is not needed to find steps, and the analysis does not wait for it.',
     stable_opening_screen: 'include the screen the recording starts on as step 0.',
     stable_recording_type:
       'sets sensible defaults: phone recordings ignore the status bar; computer recordings ignore small changes such as the moving mouse pointer.',
@@ -535,21 +537,37 @@ export function AnalysisScreen({
     [hiddenSegmentTypes, selectedRun],
   );
   const labelHiddenCount = (selectedRun?.candidates.length ?? 0) - labelVisibleCandidates.length;
+  // Words looked for in the text of the screens leave the steps that have them.
+  const [textQuery, setTextQuery] = useState('');
+  const runText = selectedRun?.summary.text;
+  useEffect(() => setTextQuery(''), [selectedRun?.summary.id]);
+  const runTextQuery = useQuery({
+    queryKey: ['run-text', selectedRun?.summary.id, runText?.read, runText?.earlier],
+    queryFn: ({ signal }) => getRunText(selectedRun?.summary.id ?? '', signal),
+    enabled: Boolean(selectedRun) && textQuery.trim() !== '',
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  });
+  const stepsFound = useMemo(() => stepsWithText(runTextQuery.data, textQuery), [runTextQuery.data, textQuery]);
+  const foundCandidates = useMemo(
+    () => (stepsFound ? labelVisibleCandidates.filter((candidate) => stepsFound.has(candidate.id)) : labelVisibleCandidates),
+    [labelVisibleCandidates, stepsFound],
+  );
   const candidateCounts = useMemo(() => {
-    const candidates = labelVisibleCandidates;
+    const candidates = foundCandidates;
     return {
       pending: candidates.filter((candidate) => candidate.status === 'pending').length,
       accepted: candidates.filter((candidate) => candidate.status === 'accepted').length,
       rejected: candidates.filter((candidate) => candidate.status === 'rejected').length,
       all: candidates.length,
     };
-  }, [labelVisibleCandidates]);
+  }, [foundCandidates]);
   const filteredCandidates = useMemo(() => {
     if (!selectedRun || !canReviewCandidates) {
       return [];
     }
-    return labelVisibleCandidates.filter((candidate) => candidateMatchesFilter(candidate, activeCandidateFilter));
-  }, [activeCandidateFilter, canReviewCandidates, labelVisibleCandidates, selectedRun]);
+    return foundCandidates.filter((candidate) => candidateMatchesFilter(candidate, activeCandidateFilter));
+  }, [activeCandidateFilter, canReviewCandidates, foundCandidates, selectedRun]);
   const stepAspect = recordingAspect(selectedRecordingSummary?.width, selectedRecordingSummary?.height);
   // Fitted (the default): cards fill the width of the page. A size from the slider keeps cards exactly that size.
   const fittedStepGrid = stepLayout.size === null && stepAreaWidth > 0 ? fitStepGrid(stepAreaWidth, stepAspect) : null;
@@ -1675,37 +1693,12 @@ export function AnalysisScreen({
           <span aria-live="polite" className="analysis-live-status" role="status" title={liveMessage || undefined}>
             {liveMessage}
           </span>
-          {ocrWarnings.length > 0 && (
-            <div className="nav-ocr-inline">
-              <button
-                className="entry-notice-ocr-summary"
-                onClick={() => setOcrWarningsExpanded((prev) => !prev)}
-                type="button"
-              >
-                {ocrWarnings.length} OCR {ocrWarnings.length === 1 ? 'warning' : 'warnings'}{' '}
-                — {ocrWarningsExpanded ? 'hide' : 'show'}
-              </button>
-              <button className="entry-notice-dismiss" onClick={onDismissOcrWarnings} type="button">
-                dismiss
-              </button>
-            </div>
-          )}
         </div>
 
-        {(healthMessage || (ocrStatus !== 'available' && ocrStatusMessage) || (ocrWarnings.length > 0 && ocrWarningsExpanded) || appError || settingsFeedback || analysisActionMessage) && (
+        {(healthMessage || ocrProblem || appError || settingsFeedback || analysisActionMessage) && (
           <div aria-atomic="true" aria-live="polite" className="analysis-notices" role="status">
             {healthMessage && <p className="entry-notice warning">{healthMessage}</p>}
-            {ocrStatus !== 'available' && ocrStatusMessage && (
-              <p className={ocrStatus === 'unavailable' ? 'entry-notice warning' : 'entry-notice'}>
-                {ocrStatusMessage}
-              </p>
-            )}
-            {ocrWarnings.length > 0 && ocrWarningsExpanded &&
-              ocrWarnings.map((warning) => (
-                <p className="entry-notice diagnostic" key={warning}>
-                  {warning}
-                </p>
-              ))}
+            {ocrProblem && <p className="entry-notice warning">{ocrProblem}</p>}
             {appError && <p className="entry-notice error">{appError}</p>}
             {settingsFeedback && <p className="entry-notice">{settingsFeedback}</p>}
             {analysisActionMessage && <p className="entry-notice">{analysisActionMessage}</p>}
@@ -2119,60 +2112,81 @@ export function AnalysisScreen({
                     </button>
                   ))}
                 </div>
-                {/* Export sits right-aligned under the run finish time, reachable from both steps and pathway views. */}
-                <div className="candidate-export-shell" ref={exportMenuRef}>
-                  <button
-                    aria-expanded={openPopover === 'export'}
-                    className="analysis-pill success"
-                    disabled={!canExportAll || exportRunPending}
-                    onClick={() => togglePopover('export')}
-                    type="button"
-                  >
-                    {exportRunPending ? 'exporting...' : 'export'}
-                  </button>
-                  {openPopover === 'export' ? (
-                    <div className="candidate-export-popover">
-                      <div className="candidate-export-name-stack">
-                        <label className="candidate-export-name-wrap">
-                          <span className="sr-only">export zip name</span>
-                          <input
-                            aria-label="export zip name"
-                            className="candidate-export-name-field"
-                            onChange={(event) => setExportNameDraft(event.target.value)}
-                            placeholder="file name (optional)"
-                            value={exportNameDraft}
-                          />
-                          <span className="candidate-export-name-suffix">.zip</span>
-                        </label>
-                        <span className="candidate-export-name-preview">
-                          {resolvedExportFilenamePreview
-                            ? `→ ${resolvedExportFilenamePreview}`
-                            : '→ named by the server'}
-                        </span>
+                <div className="review-mode-side">
+                  <RunTextControl
+                    available={ocrAvailable}
+                    onQueryChange={setTextQuery}
+                    onRead={() => onReadText(selectedRun.summary.id)}
+                    onStop={() => onStopReadingText(selectedRun.summary.id)}
+                    pending={textPending}
+                    query={reviewMode === 'steps' ? textQuery : null}
+                    text={selectedRun.summary.text}
+                    total={selectedRun.candidates.length}
+                  />
+                  {/* Export sits right-aligned under the run finish time, reachable from both steps and pathway views. */}
+                  <div className="candidate-export-shell" ref={exportMenuRef}>
+                    <button
+                      aria-expanded={openPopover === 'export'}
+                      className="analysis-pill success"
+                      disabled={!canExportAll || exportRunPending}
+                      onClick={() => togglePopover('export')}
+                      type="button"
+                    >
+                      {exportRunPending ? 'exporting...' : 'export'}
+                    </button>
+                    {openPopover === 'export' ? (
+                      <div className="candidate-export-popover">
+                        <div className="candidate-export-name-stack">
+                          <label className="candidate-export-name-wrap">
+                            <span className="sr-only">export zip name</span>
+                            <input
+                              aria-label="export zip name"
+                              className="candidate-export-name-field"
+                              onChange={(event) => setExportNameDraft(event.target.value)}
+                              placeholder="file name (optional)"
+                              value={exportNameDraft}
+                            />
+                            <span className="candidate-export-name-suffix">.zip</span>
+                          </label>
+                          <span className="candidate-export-name-preview">
+                            {resolvedExportFilenamePreview
+                              ? `→ ${resolvedExportFilenamePreview}`
+                              : '→ named by the server'}
+                          </span>
+                        </div>
+                        <div className="candidate-export-option-list">
+                          <button
+                            className="analysis-task-link subtle"
+                            disabled={!canExportAccepted || exportRunPending}
+                            onClick={() => void handleSelectedRunExport('accepted')}
+                            type="button"
+                          >
+                            export accepted
+                          </button>
+                          <button
+                            className="analysis-task-link subtle"
+                            disabled={!canExportAll || exportRunPending}
+                            onClick={() => void handleSelectedRunExport('all')}
+                            type="button"
+                          >
+                            export all
+                          </button>
+                        </div>
+                        {selectedRun.summary.text.waiting > 0 ? (
+                          <span className="analysis-export-status">
+                            text is still being read: {selectedRun.summary.text.waiting} to go
+                          </span>
+                        ) : selectedRun.summary.text.earlier > 0 ? (
+                          <span className="analysis-export-status" title={EARLIER_TEXT}>
+                            text read by an earlier version
+                          </span>
+                        ) : null}
+                        {selectedRunExportLabel ? (
+                          <span className="analysis-export-status">{selectedRunExportLabel}</span>
+                        ) : null}
                       </div>
-                      <div className="candidate-export-option-list">
-                        <button
-                          className="analysis-task-link subtle"
-                          disabled={!canExportAccepted || exportRunPending}
-                          onClick={() => void handleSelectedRunExport('accepted')}
-                          type="button"
-                        >
-                          export accepted
-                        </button>
-                        <button
-                          className="analysis-task-link subtle"
-                          disabled={!canExportAll || exportRunPending}
-                          onClick={() => void handleSelectedRunExport('all')}
-                          type="button"
-                        >
-                          export all
-                        </button>
-                      </div>
-                      {selectedRunExportLabel ? (
-                        <span className="analysis-export-status">{selectedRunExportLabel}</span>
-                      ) : null}
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -2638,6 +2652,18 @@ export function AnalysisScreen({
                     </div>
                   </div>
                 </div>
+
+                {stepsFound ? (
+                  <div className="candidate-view-bar">
+                    <span className="candidate-view-note">
+                      {foundCandidates.length === 0 ? 'no step' : foundCandidates.length} of {labelVisibleCandidates.length}{' '}
+                      {labelVisibleCandidates.length === 1 ? 'step' : 'steps'} with “{textQuery.trim()}” on the screen{' '}
+                      <button className="analysis-task-link subtle" onClick={() => setTextQuery('')} type="button">
+                        show all
+                      </button>
+                    </span>
+                  </div>
+                ) : null}
 
                 {labelHiddenCount > 0 ? (
                   <div className="candidate-view-bar">

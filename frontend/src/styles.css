@@ -291,6 +291,50 @@ a {
   font-size: 13px;
 }
 
+.confirm-dialog-detail p {
+  margin: 0;
+}
+
+.confirm-dialog-detail p + p {
+  margin-top: 8px;
+}
+
+/* For what costs others something (ReadTextQuestion): marked like a crash-test dummy. */
+.confirm-dialog.is-caution {
+  --caution-yellow: #efc739;
+  background: #d6d6d6;
+}
+
+.confirm-dialog.is-caution .confirm-dialog-detail {
+  color: rgba(0, 0, 0, 0.7);
+}
+
+.confirm-dialog-marks {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.confirm-dialog-mark {
+  width: 28px;
+  height: 28px;
+}
+
+.confirm-dialog-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.confirm-dialog-link span {
+  margin-left: 1px;
+}
+
+.analysis-pill.caution {
+  background: #efc739;
+  color: #000;
+}
+
 /* ── "how it works" demo ─────────────────────────────────────────────── */
 
 .demo-overlay {
@@ -2087,23 +2131,6 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   color: #8c6624;
 }
 
-.entry-notice.diagnostic {
-  color: rgba(0, 0, 0, 0.54);
-  font-size: 0.8rem;
-}
-
-.entry-notice-dismiss {
-  flex-shrink: 0;
-  border: none;
-  background: transparent;
-  padding: 0;
-  color: rgba(0, 0, 0, 0.55);
-  font-size: 0.8rem;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
 /* Progress of the running task: one line in the top bar, so updates never move the page. */
 .analysis-live-status {
   flex: 1 1 auto;
@@ -2115,39 +2142,6 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.nav-ocr-inline {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.entry-notice-ocr-summary {
-  border: none;
-  background: transparent;
-  padding: 0;
-  color: rgba(0, 0, 0, 0.54);
-  font-size: 0.8rem;
-  cursor: pointer;
-  text-align: left;
-}
-
-.entry-notice-ocr-summary:hover {
-  color: rgba(0, 0, 0, 0.75);
-  text-decoration: underline;
-}
-
-.entry-notice-dismiss:hover {
-  color: rgba(0, 0, 0, 0.85);
-}
-
-.entry-notice-dismiss:focus-visible {
-  outline: 2px solid rgba(72, 175, 124, 0.32);
-  outline-offset: 4px;
-  border-radius: 4px;
 }
 
 .entry-notice.error {
@@ -6275,6 +6269,56 @@ button:disabled {
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
 }
 
+.review-mode-side {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px 18px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+/* How far the text of a run is, and finding words in it. */
+.run-text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.run-text-note {
+  color: rgba(0, 0, 0, 0.56);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-text-note.is-warning {
+  color: #8c6624;
+}
+
+.run-text .analysis-task-link {
+  font-size: 12px;
+}
+
+.run-text-find {
+  width: 168px;
+  padding: 5px 9px;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 4px;
+  background: #fff;
+  color: #111;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.run-text-find:focus-visible {
+  outline: 2px solid rgba(72, 175, 124, 0.32);
+  outline-offset: 1px;
+}
+
 .review-mode-switch {
   display: flex;
   align-items: baseline;
@@ -8055,6 +8099,88 @@ button:disabled {
   align-items: center;
 }
 
+/* The text read on a screenshot: its lines, and where they are on it. */
+.candidate-step-text[open] {
+  order: 1;
+  flex: 1 0 100%;
+  min-width: 0;
+}
+
+.candidate-step-text-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.step-text-lines {
+  width: 100%;
+  max-height: 220px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  color: rgba(0, 0, 0, 0.78);
+  font-size: 12px;
+  line-height: 1.35;
+  user-select: text;
+}
+
+.step-text-lines li {
+  padding: 1px 4px;
+  overflow-wrap: anywhere;
+}
+
+.step-text-lines li.is-highlighted {
+  background: rgba(205, 109, 30, 0.14);
+}
+
+.step-text-note,
+.step-text-piece {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.56);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.step-text-piece {
+  max-height: 220px;
+  overflow-y: auto;
+  color: rgba(0, 0, 0, 0.78);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.step-text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+
+.step-text-box {
+  position: absolute;
+  border: 1px solid rgba(205, 109, 30, 0.4);
+  background: rgba(205, 109, 30, 0.04);
+}
+
+.step-text-box.is-highlighted {
+  border-color: #cd6d1e;
+  background: rgba(205, 109, 30, 0.2);
+}
+
+.candidate-gallery-text-overlay .step-text-lines {
+  max-height: none;
+  overflow-y: visible;
+}
+
+.candidate-gallery-text-actions {
+  display: inline-flex;
+  gap: 12px;
+}
+
 .candidate-annotation-toggle {
   border: none;
   background: transparent;
@@ -8576,6 +8702,7 @@ button:disabled {
 .candidate-gallery-scores-row {
   display: flex;
   align-items: center;
+  gap: 14px;
   padding-top: 2px;
 }
 

@@ -70,8 +70,7 @@ Otherwise, there are two ways to run Stepthrough on your own computer:
 
 - **With Docker (recommended).** You install one program, Docker Desktop, and type three commands. It works
   the same way on Windows and on a Mac.
-- **From the source code.** This is for people who want to change Stepthrough, or who want text recognition
-  on a Mac with an Apple chip (M1 or later). It needs more programs.
+- **From the source code.** This is for people who want to change Stepthrough. It needs more programs.
 
 Both ways use a **terminal**: a window in which you type commands. You do not need to know how it works. Copy
 the commands below one line at a time, and press Enter after each line.
@@ -139,15 +138,6 @@ window, type `cd Stepthrough` first.
 folder. Each command below adds one line; afterwards, type `docker compose up -d` to apply it. To undo your
 settings, delete the file (`del .env` on Windows, `rm .env` on a Mac), add the line from step 2 again
 (`echo STEPTHROUGH_AUTH=none>>.env`) and type `docker compose up -d`.
-
-- **Text recognition (OCR).** Reading the text in each screenshot needs a larger version of Stepthrough
-  (about 600 MB to download), and the first run that uses it downloads its recognition models as well. It
-  works on Windows computers and on Macs with an Intel processor, but not on Macs with an Apple chip (M1 or
-  later). On those, install Stepthrough from the source code instead.
-
-  ```
-  echo STEPTHROUGH_TAG=stable-ocr>>.env
-  ```
 
 - **A different address.** If another program already uses port 8080, choose another port, such as 8090,
   and then open http://localhost:8090 instead:
@@ -223,15 +213,8 @@ cd Stepthrough
 Then open **http://localhost:5173** in your browser. To stop Stepthrough, press Control-C in the terminal.
 Next time, you only need `cd Stepthrough` and `./start.sh`.
 
-**Text recognition (OCR)** is optional and needs a large extra download. In the Stepthrough folder, type:
-
-```
-cd backend
-uv sync --group ocr
-```
-
-From then on, use `uv sync --group ocr` whenever you update. A plain `uv sync` (which `./setup.sh` runs)
-removes text recognition again.
+**Text recognition** downloads its models (23 MB) the first time you use it, so you need to be online then. It does not
+work on Macs with an Intel processor or with macOS before version 14; on those, use Docker instead.
 
 **Where your data is.** Everything is stored in the `data` folder inside the Stepthrough folder.
 
@@ -402,7 +385,7 @@ settings for a short explanation of each one.
 | **scrolling** | **each stop**: every place where the page stops is a step; **merge stops**: only the first one is kept | merge stops when only the end of a long scroll matters |
 | **group typing** | a burst of typing with short pauses becomes one step | turn it off if every pause matters |
 | **opening screen** | include the screen the recording starts on, as step 0 | turn it off if the first screen is not part of the task |
-| **read text (ocr)** | reads the text in each screenshot into the export (`ocr_text`) | when you need the words themselves; it does not help find steps, and it makes runs slower |
+| **read text (ocr)** | reads the text on each screenshot after the steps are found, to show, search and export it | when you need the words themselves; it does not help find steps. You can also ask for it afterwards, see [The text on the screens](#the-text-on-the-screens) |
 | **pixel threshold** (advanced) | how much a pixel must change, compared with the flicker measured in the recording | raise it for very grainy recordings |
 | **analysis rate** (advanced) | how many frames per second are compared | rarely; lower is faster |
 
@@ -448,6 +431,8 @@ While the video plays, the card of the step on screen is outlined, so you can se
 | select several steps | tick or drag across their boxes; shift-click a box (or shift/⌘/ctrl-click thumbnails in gallery view) to select a range or toggle items. **select: all**, **none** and **invert** above the steps act on the steps shown, as does the box above the list; `x` (and `shift+x`) does the same for the step in focus |
 | accept, reject or reset many steps at once | select them, then **accept**, **reject** or **reset** next to how many are selected. Steps that are so already are left as they are, and the selection stays, so a mistaken choice can be put right at once |
 | do any of this from a menu | right-click a step, in any of the three views (or `shift+F10` for the step in focus). On one of several selected steps, the menu is for all of them |
+| read the text on a screen | **text** on a card or beside the screenshot in the gallery view, once it has been read (see [The text on the screens](#the-text-on-the-screens)) |
+| show only the steps with certain words on the screen | **find text**, beside **export** |
 | go to an earlier visit of the same screen | **similar to step N** (the same picture) or **same screen as step N** (scrolled, or with something changed) |
 | go to the screen someone went back to | **then back to step N**, on a step you said so of |
 | say that someone went back to an earlier screen where no step shows it | right-click the step they went back after, **return to** (see [Pathway](#pathway)) |
@@ -463,6 +448,30 @@ on a step outside the selection is about that step only, and the selection stays
 An accepted step has the number it has in the pathway and the export, **step 5**; a screenshot you have not accepted
 is a **candidate**, numbered in the order it was found. So rejecting a candidate leaves no gap: the steps after it
 count on. The opening screen is **start**.
+
+### The text on the screens
+
+Stepthrough can read the text on every screenshot. Turn on **read text (ocr)** before an analysis, or press **read text**
+beside **export** for a run that is done. Finding steps does not wait for it: the steps are there first and the text
+follows, as **reading text, 12 of 66** says. You can go on working or close the page meanwhile, and **stop** leaves the
+rest unread. The text of a step you add by hand is read too.
+
+- **text** on a card shows what was read, line by line. In the gallery view it also marks where each line is: point at a
+  line to see its place, or at the screenshot to see its line. The text stays open as you go through the steps.
+- **find text** shows only the steps with the words you type, in any order; put words that belong together between
+  quotation marks. Case and accents do not matter.
+- The export has the text in `ocr_text`, and each line with its place in `text_lines` (in `steps.json`). It also has the
+  text of each screenshot as **PAGE XML**, in `images/page`, for tools made to correct and work with recognised text, such
+  as Transkribus and eScriptorium: they open the `images` folder with its text as it is.
+
+It reads the Latin alphabet with the accents of European languages, Chinese and Japanese; not Cyrillic, Greek, Arabic,
+Hebrew, Korean or the scripts of India and South-East Asia. It is made for the text of interfaces, which stands upright
+in lines: text that is turned, handwritten or drawn can be missed, and an icon can be read as a letter. So check the
+words you quote against the screenshot. Reading happens where Stepthrough runs, and nothing is sent anywhere.
+
+**Text read by an earlier version** (up to 1.4.5) can be wrong: to save time, those versions gave a screen the text of an
+earlier one that looked much like it. **read again** replaces it, also in runs from long ago. In an export, `text_state`
+is `earlier` for such text.
 
 ### Comparing runs
 
@@ -694,8 +703,10 @@ For each step, the export has its time, the screenshot's file name, its status, 
 Stepthrough found it or you added it by hand (`origin`: `detected` or `manual`), the phase you put it in
 (`phase`), and its label (`transition_type`). It also has when the change started (`change_started_ms`), when the screen came to rest
 (`settled_ms`), how long it stayed on screen (`time_on_screen_ms`), how many typing states were grouped
-together (`grouped_states`), links to earlier visits of the same screen, the areas that changed and, if text
-recognition was on, the text in the screenshot (`ocr_text`).
+together (`grouped_states`), links to earlier visits of the same screen, the areas that changed and, if it was
+read, the text on the screenshot (`ocr_text`). `text_state` says whether it was read; in `steps.json`,
+`text_lines` has each line with its place on the screenshot, and `text_page_xml` the file in `images/page` that has
+the same as PAGE XML.
 
 `steps.json` also records the size and frame rate of the recording, the settings as you chose them and as
 they were actually used, what was measured (such as the flicker level), and `field_notes` explaining every
@@ -802,7 +813,7 @@ first.
 
 Changes in text are visual changes, so Stepthrough finds them without text recognition. If a single changed
 word is missed, lower the **smallest change**. Only turn on **read text (ocr)** if you need the words
-themselves in the export.
+themselves.
 
 ### The run found almost no steps
 

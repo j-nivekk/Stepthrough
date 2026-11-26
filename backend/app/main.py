@@ -77,8 +77,13 @@ from .models import (
     RecordingUpdate,
     RunEventResponse,
     RunSettings,
+    RunText,
+    RunTextResponse,
     RunUpdate,
     SavedRunSettingsResponse,
+    StepText,
+    StepTextDetail,
+    TextLine,
     UserResponse,
 )
 from .repository import (
@@ -127,12 +132,13 @@ from .repository import (
     update_run,
 )
 from .services.export import build_accepted_steps, create_export_bundle
-from .services.ocr import probe_paddleocr_availability
 from .services.pathway import build_pathway, pathway_screen_members, set_phase, tidy_phases
 from .services.run_control import CancellationRequested
 from .services.stable_detection import detect_candidates_stable, resolve_stable_config
 from .services.ingest import ensure_working_copy, stop_working_copy, working_copy_path
+from .services import text_models, text_queue
 from .services.jobs import JobManager
+from .services.step_text import parse_reading, text_state
 from .services.similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string
 from .services.video import (
     UploadTooLargeError,
@@ -157,6 +163,7 @@ from .storage import (
     relative_data_path,
     run_dir,
 )
+from .text_reading import TextReading
 from .user_admin import delete_expired_accounts
 from .utils import sanitize_filename, utc_now
 
@@ -177,10 +184,10 @@ visitors.configure(server_config.max_upload_bytes, server_config.max_project_fil
 
 @dataclass(frozen=True)
 class OcrHealthState:
-    status: Literal["checking", "available", "unavailable"]
+    status: Literal["checking", "available", "unavailable", "off"]
     available: bool | None
     message: str
-    warnings: tuple[str, ...] = ()
+
 
 # A server does not publish its API description: it is no secret (the code is public), but nobody needs it there.
 _api_docs = server_config.deployment != "server"
@@ -277,14 +284,12 @@ app.add_middleware(traffic.TrafficMiddleware, enabled=lambda: _recording())
 
 
 def _checking_ocr_state() -> OcrHealthState:
-    return OcrHealthState(
-        status="checking",
-        available=None,
-        message="Checking PaddleOCR availability in the background.",
-    )
+    return OcrHealthState(status="checking", available=None, message="Checking whether text recognition works here.")
 
 
 def _get_ocr_state() -> OcrHealthState:
+    if not server_settings.value("text_readers"):
+        return OcrHealthState(status="off", available=False, message=PUBLIC_OCR_MESSAGES["off"])
     return getattr(app.state, "ocr_state", _checking_ocr_state())
 
 
@@ -293,36 +298,27 @@ def _set_ocr_state(state: OcrHealthState) -> None:
 
 
 def _refresh_ocr_state() -> None:
-    clear_probe_cache = getattr(probe_paddleocr_availability, "cache_clear", None)
-    if callable(clear_probe_cache):
-        clear_probe_cache()
-    try:
-        result = probe_paddleocr_availability()
-    except Exception as exc:  # pragma: no cover - defensive fallback
-        details = " ".join(str(exc).split()) or exc.__class__.__name__
-        _set_ocr_state(
-            OcrHealthState(
-                status="unavailable",
-                available=False,
-                message=f"PaddleOCR availability check failed in the backend environment: {details}",
-            )
-        )
+    """Whether text can be read here. The packages for it are loaded in a process of their own: they can be there and
+    still not load, and they would stay in this one's memory."""
+    answer = text_queue.check()
+    if not answer.get("ok"):
+        if answer.get("missing"):
+            why = f"the package {answer['missing']} is not installed (see backend/README.md)"
+        else:
+            why = str(answer.get("error"))
+        _set_ocr_state(OcrHealthState(status="unavailable", available=False, message=f"Text recognition does not work here: {why}."))
         return
-
+    if text_models.present():
+        models = f"Its models are in {text_models.folder()}."
+    else:
+        models = f"Its models ({text_models.TOTAL_MB} MB) are fetched the first time, and kept in {text_models.folder()}."
     _set_ocr_state(
-        OcrHealthState(
-            status="available" if result.available else "unavailable",
-            available=result.available,
-            message=result.message,
-            warnings=result.warnings,
-        )
+        OcrHealthState(status="available", available=True, message=f"Text recognition works (ONNX Runtime {answer.get('onnxruntime')}). {models}")
     )
 
 
 def _start_background_ocr_probe() -> None:
-    worker = Thread(target=_refresh_ocr_state, name="stepthrough-ocr-probe", daemon=True)
-    app.state.ocr_probe_thread = worker
-    worker.start()
+    Thread(target=_refresh_ocr_state, name="stepthrough-ocr-probe", daemon=True).start()
 
 
 def _delete_expired_accounts_hourly() -> None:
@@ -349,6 +345,8 @@ def _delete_expired_accounts_hourly() -> None:
 
 @app.on_event("shutdown")
 def shutdown() -> None:
+    if hasattr(app.state, "text_reading"):  # not when the start-up failed
+        _text_reading().close()
     usage.flush()
     traffic.flush()
 
@@ -407,11 +405,25 @@ def startup() -> None:
     app.state.live = LiveHub()
     app.state.task_writes = TaskWrites()
     fail_interrupted_runs(INTERRUPTED_RUN_MESSAGE)
+    app.state.text_reading = _new_text_reading()
+    app.state.text_reading.resume()
     _start_background_ocr_probe()
 
 
 def _job_manager() -> JobManager:
     return app.state.job_manager
+
+
+def _new_text_reading() -> TextReading:
+    return TextReading(
+        one_at_a_time=_one_at_a_time,
+        say=lambda run_id, level, message: _emit_run_event(run_id, phase="completed", level=level, message=message),
+        announce=_announce_run,
+    )
+
+
+def _text_reading() -> TextReading:
+    return app.state.text_reading
 
 
 def _live() -> LiveHub:
@@ -551,6 +563,13 @@ def _serialize_run_summary(row: dict) -> DetectionRunSummary:
         modified_at=row.get("last_modified_at") or row.get("modified_at"),
         modified_by_name=_modifier_name(row),
         export_bundle_id=row.get("export_bundle_id"),
+        text=RunText(
+            waiting=row.get("text_waiting", 0),
+            read=row.get("text_read", 0),
+            failed=row.get("text_failed", 0),
+            earlier=row.get("text_earlier", 0),
+            problem=_text_reading().problem(row["id"]),
+        ),
         is_abortable=_run_is_abortable(row),
         is_deletable=_run_is_deletable(row),
     )
@@ -603,6 +622,7 @@ def _serialize_candidate(row: dict) -> CandidateFrameResponse:
         screen_kind=row.get("screen_kind"),
         pathway_row=row.get("pathway_row"),
         returns_to=row.get("returns_to"),
+        text_state=text_state(row),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -1001,6 +1021,10 @@ def _run_detection_job(run_id: str) -> None:
 
         candidate_count = len(normalized_candidates)
         completion_message = f"Prepared {candidate_count} screenshot candidates, one per stable screen"
+        read_text = settings.stable is not None and settings.stable.enable_ocr and _get_ocr_state().available is not False
+        if read_text:
+            # The steps are there, and the run is done; their text follows, without anyone waiting for it.
+            _text_reading().prepare(run_id)
 
         _set_run_state(
             run_id,
@@ -1012,6 +1036,8 @@ def _run_detection_job(run_id: str) -> None:
             candidate_count=candidate_count,
             completed_at=utc_now(),
         )
+        if read_text:
+            _read_text_of_finished_run(run_id)
     except CancellationRequested as exc:
         _set_run_state(
             run_id,
@@ -1038,6 +1064,13 @@ def _run_detection_job(run_id: str) -> None:
         usage.analysis_finished(run_id, get_run(run_id))
 
 
+def _read_text_of_finished_run(run_id: str) -> None:
+    try:
+        _text_reading().resume(run_id)
+    except Exception:  # pragma: no cover - whatever is wrong with reading its text, the analysis is fine
+        logger.exception("Could not start reading the text of run %s", run_id)
+
+
 @app.get("/", include_in_schema=False, response_model=None)
 def root() -> dict[str, str] | FileResponse:
     if server_config.frontend_dir is not None:
@@ -1049,6 +1082,7 @@ PUBLIC_OCR_MESSAGES = {
     "checking": "Checking whether text recognition is available.",
     "available": "Text recognition is available.",
     "unavailable": "Text recognition is not available on this server.",
+    "off": "Text recognition is turned off on this server.",
 }
 
 
@@ -1069,7 +1103,6 @@ def health(request: Request, user: MaybeUser) -> HealthResponse:
         missing_tools=list(diagnostics.missing_tools),
         message=diagnostics.message,
         ocr_message=ocr_state.message if detailed else PUBLIC_OCR_MESSAGES[ocr_state.status],
-        ocr_warnings=list(ocr_state.warnings) if detailed else [],
     )
 
 
@@ -1088,9 +1121,11 @@ def admin_reset_db(
     # A custom header forces a CORS preflight, so other websites cannot trigger this from a browser.
     if confirm != "reset-database":
         raise HTTPException(status_code=400, detail=f"Send the `{ADMIN_CONFIRM_HEADER}: reset-database` header to confirm.")
+    _text_reading().close()
     reset_db()
     server_settings.load(server_config.max_concurrent_runs)
     app.state.job_manager = JobManager(max_concurrent_runs=server_settings.analyses_limit())
+    app.state.text_reading = _new_text_reading()
     return Response(status_code=204)
 
 
@@ -1468,6 +1503,13 @@ def runs_show(run_id: str, user: CurrentUser) -> DetectionRunDetail:
     return _build_run_detail(run_id)
 
 
+@app.get("/runs/{run_id}/summary", response_model=DetectionRunSummary)
+def runs_summary(run_id: str, user: CurrentUser) -> DetectionRunSummary:
+    """The run without its steps: to follow the reading of its text."""
+    _project, _recording, run = _run_for(run_id, user, "viewer")
+    return _serialize_run_summary(run)
+
+
 @app.patch("/runs/{run_id}", response_model=DetectionRunSummary)
 def runs_update(run_id: str, payload: RunUpdate, user: CurrentUser, client: SharedClient = None) -> DetectionRunSummary:
     """Name a run, or take its name away; its number stays."""
@@ -1556,6 +1598,7 @@ def runs_duplicate(run_id: str, user: CurrentUser, client: SharedClient = None) 
             shutil.rmtree(new_run_path, ignore_errors=True)
             raise
 
+    _text_reading().resume(new_run_id)  # what was still to be read in the original is so in the copy
     _emit_run_event(
         new_run_id,
         phase="completed",
@@ -1680,6 +1723,65 @@ def runs_cancel(run_id: str, user: CurrentUser, client: SharedClient = None) -> 
     return _serialize_run_summary(get_run(run_id))
 
 
+@app.post("/runs/{run_id}/text", response_model=DetectionRunSummary)
+def runs_read_text(run_id: str, request: Request, user: CurrentUser, client: SharedClient = None) -> DetectionRunSummary:
+    """Read the text of the run's screenshots: of the steps this version has not read yet, also those an earlier one
+    read. It is read in the background (app/text_reading.py)."""
+    project, recording, run = _run_for(run_id, user, "owner")
+    if run["status"] in ACTIVE_RUN_STATUSES:
+        raise HTTPException(status_code=409, detail="The text of a run can be read once its analysis has ended.")
+    ocr_state = _get_ocr_state()
+    if ocr_state.available is False:
+        detailed = auth_mode(request) == "none" or user.is_admin
+        raise HTTPException(status_code=503, detail=ocr_state.message if detailed else PUBLIC_OCR_MESSAGES[ocr_state.status])
+    if _text_reading().ask(run_id):
+        _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    return _serialize_run_summary(get_run(run_id))
+
+
+@app.delete("/runs/{run_id}/text", response_model=DetectionRunSummary)
+def runs_stop_reading_text(run_id: str, user: CurrentUser, client: SharedClient = None) -> DetectionRunSummary:
+    """Stop reading the text of the run's screenshots. What has been read stays."""
+    project, recording, _run = _run_for(run_id, user, "owner")
+    if _text_reading().stop(run_id):
+        _announce("run", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
+    return _serialize_run_summary(get_run(run_id))
+
+
+@app.get("/runs/{run_id}/text", response_model=RunTextResponse)
+def runs_text(run_id: str, user: CurrentUser) -> RunTextResponse:
+    """The text of every step of the run, in one piece each: to look for words in."""
+    _project, _recording, run = _run_for(run_id, user, "viewer")
+    return RunTextResponse(
+        summary=_serialize_run_summary(run).text,
+        steps=[
+            StepText(candidate_id=step["id"], state=text_state(step), text=step.get("ocr_text"))
+            for step in list_candidates(run_id)
+        ],
+    )
+
+
+@app.get("/candidates/{candidate_id}/text", response_model=StepTextDetail)
+def candidates_text(candidate_id: str, user: CurrentUser) -> StepTextDetail:
+    """The text of a step's screenshot: its lines, and where they are on it."""
+    step = get_candidate(candidate_id)
+    if not step:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    _run_for(step["run_id"], user, "viewer", not_found="Candidate not found")
+    reading = parse_reading(step.get("text_reading"))
+    return StepTextDetail(
+        candidate_id=candidate_id,
+        state=text_state(step),
+        text=step.get("ocr_text"),
+        engine=reading["engine"] if reading else None,
+        width=reading["width"] if reading else None,
+        height=reading["height"] if reading else None,
+        lines=[
+            TextLine(text=line[0], x=line[1], y=line[2], width=line[3], height=line[4], score=line[5]) for line in reading["lines"]
+        ] if reading else [],
+    )
+
+
 @app.delete("/runs/{run_id}", status_code=204)
 def runs_delete(run_id: str, user: CurrentUser, client: SharedClient = None) -> Response:
     project, recording, run = _run_for(run_id, user, "owner")
@@ -1689,6 +1791,7 @@ def runs_delete(run_id: str, user: CurrentUser, client: SharedClient = None) -> 
     with _one_at_a_time(run_id):
         run_path, _frames_path = _run_artifact_paths(project, recording, run_id)
         delete_run_record(run_id)
+        _text_reading().forget(run_id)
         shutil.rmtree(run_path, ignore_errors=True)
     _announce("recording", project_id=project["id"], recording_id=recording["id"], run_id=run_id, user=user, client=client)
     return Response(status_code=204)
@@ -1866,7 +1969,15 @@ def _insert_manual_candidate(project: dict, recording: dict, run: dict, timestam
         message=f"Added manual step at {timestamp_tc}",
         progress=run.get("progress"),
     )
+    if _reads_text(run_id, run) and _get_ocr_state().available is not False:
+        _text_reading().ask(run_id, only={candidate_id})
     return candidate_id
+
+
+def _reads_text(run_id: str, run: dict) -> bool:
+    """Whether the text of this run's screenshots is read, so that of a step added to it is too."""
+    stable = _json_column(run, "analysis_stable") or {}
+    return bool(stable.get("enable_ocr")) or any(step.get("text_state") for step in list_candidates(run_id))
 
 
 @app.post("/runs/{run_id}/candidates/manual", response_model=CandidateFrameResponse)

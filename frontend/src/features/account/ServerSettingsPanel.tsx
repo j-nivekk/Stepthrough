@@ -287,6 +287,37 @@ export function ServerSettingsPanel() {
           </div>
 
           <div className="analysis-parameter-group">
+            <NumberSetting
+              label="text readers"
+              max={8}
+              min={0}
+              onSave={(value) => save({ text_readers: value })}
+              step={1}
+              value={settings.text_readers.value}
+            />
+            <span className="analysis-parameter-annotation">
+              processes that read the text of screenshots, after the analyses and at low priority, so nobody waits for
+              them; runs take turns. each uses up to 1 GB while there is something to read. 0 turns text recognition off and
+              stops what is being read. {fromConfiguration(settings.text_readers, String(settings.text_readers.default))}
+            </span>
+          </div>
+
+          <div className="analysis-parameter-group">
+            <NumberSetting
+              label="threads for each reader"
+              max={32}
+              min={1}
+              onSave={(value) => save({ text_threads: value })}
+              step={1}
+              value={settings.text_threads.value}
+            />
+            <span className="analysis-parameter-annotation">
+              about as many processor cores it keeps busy. more make one run faster; more readers keep more runs going.{' '}
+              {fromConfiguration(settings.text_threads, String(settings.text_threads.default))}
+            </span>
+          </div>
+
+          <div className="analysis-parameter-group">
             <div className="analysis-mode-row">
               <span>compression</span>
               <div className="analysis-mode-toggle">

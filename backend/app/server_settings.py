@@ -5,6 +5,8 @@ database once an administrator changes it, so it outlasts restarts. Changes take
 
 - ``analyses_at_a_time``: how many analyses run together (0: no limit); the rest wait their turn. Analyses share
   the server's one process, so more than two or three mostly slows everything else down.
+- ``text_readers``: how many processes read the text of screenshots (``app/text_reading.py``); 0 turns text recognition
+  off. ``text_threads``: how many threads, and so about how many processor cores, each of them uses.
 - ``compression``: send JSON, pages, scripts and styles compressed (``app/compression.py``).
 - ``live_spread_seconds``: in shared accounts, browsers showing a task reload it after a change at a random moment
   within this many seconds (after a short pause), so that they do not all ask at once.
@@ -22,6 +24,7 @@ database once an administrator changes it, so it outlasts restarts. Changes take
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -32,6 +35,8 @@ from .report_window import MAX_DAYS
 from .accounts import CurrentUser, require_admin
 from .repository import get_server_settings, set_server_settings
 
+DEFAULT_TEXT_READERS = 1
+MOST_TEXT_THREADS = 4  # by default, where there are cores enough
 DEFAULT_LIVE_SPREAD_SECONDS = 1.5
 DEFAULT_USAGE_KEEP_DAYS = 14
 DEFAULT_VISITOR_KEEP_HOURS = 72
@@ -45,9 +50,20 @@ _changed: dict[str, Any] = {}
 _configured_analyses: int | None = None
 
 
+def _default_text_threads() -> int:
+    """Half the processor's cores, so that analyses and the app keep the others, but no more than help."""
+    try:
+        cores = len(os.sched_getaffinity(0))
+    except AttributeError:  # not on macOS and Windows
+        cores = os.cpu_count() or 1
+    return max(1, min(MOST_TEXT_THREADS, cores // 2))
+
+
 def defaults() -> dict[str, Any]:
     return {
         "analyses_at_a_time": _configured_analyses or 0,
+        "text_readers": DEFAULT_TEXT_READERS,
+        "text_threads": _default_text_threads(),
         "compression": True,
         "live_spread_seconds": DEFAULT_LIVE_SPREAD_SECONDS,
         "usage_keep_days": DEFAULT_USAGE_KEEP_DAYS,
@@ -90,6 +106,8 @@ def keep_days() -> int | None:
 
 class ServerSettingsUpdate(BaseModel):
     analyses_at_a_time: int | None = Field(default=None, ge=0, le=64)
+    text_readers: int | None = Field(default=None, ge=0, le=8)
+    text_threads: int | None = Field(default=None, ge=1, le=32)
     compression: bool | None = None
     live_spread_seconds: float | None = Field(default=None, ge=0, le=10)
     usage_keep_days: int | None = Field(default=None, ge=0, le=MAX_DAYS)  # null: for ever
@@ -123,6 +141,8 @@ def change_server_settings(payload: ServerSettingsUpdate, request: Request, user
     load(_configured_analyses)
     if "analyses_at_a_time" in changes:
         request.app.state.job_manager.set_max_concurrent_runs(analyses_limit())
+    if "text_readers" in changes or "text_threads" in changes:
+        request.app.state.text_reading.apply_limits()
     if "usage_keep_days" in changes:
         usage.purge(keep_days())  # a shorter time applies to what is kept already
         traffic.purge(keep_days())

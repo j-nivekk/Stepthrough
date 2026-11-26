@@ -43,10 +43,9 @@ import numpy as np
 from ..analysis_metadata import STABLE_RECORDING_TYPES
 from ..models import RunSettings, StableSettings
 from ..utils import timecode_from_ms, utc_now
-from .ocr import OcrCache, OcrUsageStats, extract_text_from_image, load_ocr_engine
 from . import screens
 from .run_control import CancellationCallback, CancellationRequested, ProgressCallback
-from .similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string, text_distance
+from .similarity import annotate_candidate_similarity, fingerprint_image, hash_to_hex, histogram_to_string
 from .video import extract_frame
 
 ENGINE_VERSION = "stable_v3/1.2.0"
@@ -843,8 +842,7 @@ def detect_candidates_stable(
         "info",
     )
 
-    ocr = _load_ocr(config, progress)
-    candidates = _extract_candidates(steps, config, ocr, pts, end_ms, n, (width / aw, height / ah), (aw, ah),
+    candidates = _extract_candidates(steps, config, pts, end_ms, n, (width / aw, height / ah), (aw, ah),
                                      video_path, frames_dir, duration_ms, progress, cancelled, revisit_of)
     keeps = [comparer.keep_mask(int(frame_bins[step.start]), int(frame_bins[step.start])) for step in steps]
     _relate_screens(candidates, steps, keeps, revisit_of, ah, progress, cancelled)
@@ -899,20 +897,9 @@ def _relate_screens(
         candidate["same_screen_reason"] = screen.reason or None
 
 
-def _load_ocr(config: StableDetectorConfig, progress: ProgressCallback) -> tuple[Any, Any, Any] | None:
-    if not config.enable_ocr:
-        return None
-    engine, warning = load_ocr_engine()
-    if warning or engine is None:
-        progress("primary_scan", f"OCR disabled: {warning or 'PaddleOCR is not available.'}", SCAN_RANGE[1], "warning")
-        return None
-    return engine, OcrCache(), OcrUsageStats()
-
-
 def _extract_candidates(
     steps: list[_Step],
     config: StableDetectorConfig,
-    ocr: tuple[Any, Any, Any] | None,
     pts: np.ndarray,
     end_ms: float,
     n: int,
@@ -933,7 +920,6 @@ def _extract_candidates(
 
     progress("primary_extract", f"Extracting {len(steps)} candidate screenshots", EXTRACT_RANGE[0], "info")
     candidates: list[dict[str, Any]] = []
-    previous_text: str | None = None
     previous_dwell = 0
     for position, step in enumerate(steps, start=1):
         if cancelled():
@@ -946,16 +932,10 @@ def _extract_candidates(
         image_path = frames_dir / f"candidate-{position:03d}__{timecode_from_ms(timestamp_ms, slug_style=True)}.png"
         extract_frame(video_path, image_path, timestamp_ms)
 
-        ocr_text = None
-        if ocr is not None:
-            screenshot = cv2.imread(str(image_path))
-            if screenshot is not None:
-                ocr_text = extract_text_from_image(screenshot, *ocr)
-
         t = step.transition
         breakdown = {
             "visual": round(t.changed_share, 4) if t else 1.0,
-            "text": round(text_distance(previous_text, ocr_text), 4) if (ocr is not None and t) else 0.0,
+            "text": 0.0,  # set when the text has been read (app/text_reading.py)
             "motion": round(min(1.0, abs(t.travel_dy) / ah), 4) if t else 0.0,
             "changed_regions": [
                 {"x": round(x * sx), "y": round(y * sy), "width": round(w * sx), "height": round(h * sy),
@@ -991,7 +971,7 @@ def _extract_candidates(
                 "image_hash": hash_to_hex(fingerprint.average_hash),
                 "perceptual_hash": hash_to_hex(fingerprint.perceptual_hash),
                 "histogram_signature": histogram_to_string(fingerprint.histogram),
-                "ocr_text": ocr_text,
+                "ocr_text": None,
                 "score_breakdown": breakdown,
                 "revisit_group_id": None,
                 "similar_to_candidate_id": None,
@@ -1000,13 +980,10 @@ def _extract_candidates(
                 "updated_at": now,
             }
         )
-        previous_text = ocr_text
         previous_dwell = dwell_ms
         value = EXTRACT_RANGE[0] + (position / max(1, len(steps))) * (EXTRACT_RANGE[1] - EXTRACT_RANGE[0])
         progress("primary_extract", f"Processed screenshot {position} of {len(steps)}", value, "info")
 
-    if ocr is not None and ocr[2].model_invocations:
-        progress("primary_extract", f"OCR read {ocr[2].model_invocations} screenshot(s).", EXTRACT_RANGE[1], "info")
     annotate_candidate_similarity(candidates)  # similarity distances (and scene score fallbacks)
     for candidate in candidates:
         candidate["revisit_group_id"] = None
