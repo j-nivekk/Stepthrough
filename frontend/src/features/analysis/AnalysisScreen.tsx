@@ -66,6 +66,7 @@ import { AnalysisTasksPanel } from './components/AnalysisTasksPanel';
 import { AnalysisVideosPanel } from './components/AnalysisVideosPanel';
 import { RunComparison, type CarryOverPair } from './components/RunComparison';
 import { RunTextControl } from './components/RunTextControl';
+import { WhatsNewTour, whatsNewDue } from '../../components/WhatsNewTour';
 import { StepMenu } from './components/StepMenu';
 import { defaultComparisonPair } from '../../lib/runComparison';
 import type { ImportQueueItem } from '../../lib/importQueue';
@@ -441,6 +442,15 @@ export function AnalysisScreen({
   );
   // The pathway takes the place of the whole step review, so its shortcuts are off while it shows.
   const showPathway = canReviewCandidates && isCompletedReview && reviewMode === 'pathway';
+  // What changed in this version is in the steps of a finished run: the tour of it opens there, once per browser, for
+  // someone who knew the app before (WhatsNewTour).
+  const [whatsNew, setWhatsNew] = useState(false);
+  const showsSteps = canReviewCandidates && isCompletedReview && reviewMode === 'steps';
+  useEffect(() => {
+    if (!showsSteps || !whatsNewDue()) return;
+    const timer = window.setTimeout(() => setWhatsNew(true), 600); // once the steps are drawn
+    return () => window.clearTimeout(timer);
+  }, [showsSteps]);
   const previewMatchesSelectedRun = Boolean(
     previewRecording && selectedRun && previewRecording.id === selectedRun.summary.recording_id,
   );
@@ -2848,6 +2858,7 @@ export function AnalysisScreen({
           </section>
         ) : null}
       </div>
+      {whatsNew ? <WhatsNewTour onClose={() => setWhatsNew(false)} /> : null}
     </div>
   );
 }

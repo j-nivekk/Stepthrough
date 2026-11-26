@@ -5,7 +5,6 @@ import { getRunPathway, mergePathwayScreens, notePathwayFigure, restoreRunPhases
 import interItalicUrl from '../../assets/fonts/InterVariable-Italic.ttf?url';
 import interUrl from '../../assets/fonts/InterVariable.ttf?url';
 import { markPathwayTutorialSeen, PathwayTutorial, pathwayTutorialSeen } from '../../components/pathwayTutorial/PathwayTutorial';
-import { markWhatsNewSeen, WhatsNewTour, whatsNewSeen } from '../../components/WhatsNewTour';
 import { downloadBlob, downloadText } from '../../lib/accountLinks';
 import { APP_VERSION } from '../../lib/buildInfo';
 import { buildPathwayFigure, formatPathwayTime, pathwayColumnsFor, pathwayFrameWidth, pathwayScale, type PathwayFigureOptions, type PathwayNotesPlacement } from '../../lib/pathwayFigure';
@@ -116,14 +115,9 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   const [invite, setInvite] = useState(() => !pathwayTutorialSeen());
   useEffect(() => {
     if (invite) track({ kind: 'tutorial_invited' });
-    // Someone new to pathways learns the pathway as it is now from the tutorial: nothing is new to them.
-    if (invite) markWhatsNewSeen();
     // once, when the pathway first shows with the invitation
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Someone who knew the pathway before gets the tour of what changed, once per browser, when there is a pathway
-  // on the page to show it on.
-  const [whatsNew, setWhatsNew] = useState(false);
   // After the invitation goes, a note in its place says where the tutorial is from then on. Its colour drains
   // from right to left as a countdown, and the note goes when it is empty (or with its ×).
   const [aboutNote, setAboutNote] = useState(false);
@@ -214,12 +208,6 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   // the analysis page renders every second for its clock. That would draw the chart anew each second and take
   // away the step a pointer is resting on.
   const figureMarkup = useMemo(() => (figure ? { __html: figure.svg } : undefined), [figure]);
-  const hasFigure = Boolean(figure);
-  useEffect(() => {
-    if (!hasFigure || invite || whatsNewSeen()) return;
-    const timer = window.setTimeout(() => setWhatsNew(true), 600); // once the chart is drawn
-    return () => window.clearTimeout(timer);
-  }, [hasFigure, invite]);
 
   const scale = figure ? pathwayScale(figure.width, space, view.zoom) : 1;
   const heldRef = useRef<HeldPlace | null>(null);
@@ -512,7 +500,6 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
     <div className="pathway-panel" ref={areaRef}>
       {invitation}
       {tutorial}
-      {whatsNew && !tutorialOpen ? <WhatsNewTour onClose={() => setWhatsNew(false)} /> : null}
       {pathway && figure && figureMarkup ? (
         <PathwayCanvas
           ariaLabel={`pathway of ${filename}: select a box or a step number to change it`}

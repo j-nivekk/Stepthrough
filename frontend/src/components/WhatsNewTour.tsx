@@ -2,14 +2,17 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { createPortal } from 'react-dom';
 
 /** The version whose changes the tour shows: it opens once per browser for each. */
-export const WHATS_NEW_VERSION = '1.4.5';
+export const WHATS_NEW_VERSION = '1.5.0';
 const SEEN_KEY = 'stepthrough.whats-new';
 
-export function whatsNewSeen(): boolean {
+/** Whether to open the tour by itself: for someone who saw the tour of an earlier version, so knew the app before.
+ *  Someone new to it finds the tour under about. */
+export function whatsNewDue(): boolean {
   try {
-    return window.localStorage.getItem(SEEN_KEY) === WHATS_NEW_VERSION;
+    const seen = window.localStorage.getItem(SEEN_KEY);
+    return seen !== null && seen !== WHATS_NEW_VERSION;
   } catch {
-    return true; // without storage it would come back every time: better not at all
+    return false;
   }
 }
 
@@ -30,89 +33,89 @@ interface Stop {
 
 const all = (selector: string) => [...document.querySelectorAll(selector)];
 const one = (selector: string) => all(selector).slice(0, 1);
-
-/** The boxes of the pathway (their screenshots), in order. */
-const boxes = () => all('.pathway-figure [data-screen] image');
-
-/** The numbers under the boxes, in order; those of a box with several steps first. */
-const numbers = () => {
-  const found = all('.pathway-figure [data-peek]');
-  const several = (number: Element) => (number.getAttribute('data-peek') ?? '').includes(' ');
-  return [...found.filter(several), ...found.filter((number) => !several(number))];
+/** The first of these that is on the page. */
+const first = (...selectors: string[]) => {
+  for (const selector of selectors) {
+    const found = one(selector);
+    if (found.length) return found;
+  }
+  return [];
 };
 
-/** The screenshot of the first box with several steps, or of the first box. */
-const stackedBox = () => {
-  const image = numbers()[0]?.closest('[data-screen]')?.querySelector('image');
-  return image ? [image] : boxes().slice(0, 1);
+/** Where text is asked for: the run's button, or else the bar it is in, beside export (where the run opens). */
+const readText = () => {
+  const button = all('.run-text button').filter((element) => /read|try again/.test(element.textContent ?? '')).slice(0, 1);
+  return button.length ? button : first('.review-mode-side', '.review-mode-bar');
+};
+
+/** Where a step's text opens: on a card, or beside the screenshot in the gallery. */
+const textLinks = () => {
+  const card = one('.candidate-step-text summary');
+  if (card.length) return card;
+  return all('.candidate-gallery-scores-toggle').filter((button) => button.textContent?.trim() === 'text').slice(0, 1);
 };
 
 const STOPS: Stop[] = [
   {
-    title: 'screens are known again',
+    title: 'the text on the screens',
     text: (
       <>
-        a box now keeps its screen when it is scrolled, when something on it changed, and when someone comes back to
-        it later. menus, dialogs and sheets are told from pages, also when they dim nothing. runs analysed from now on
-        have this: run the analysis again for an older one. the steps stay the same.
+        stepthrough reads the text on each screenshot, of any run, also older ones: <b>read text</b> beside{' '}
+        <b>export</b>, or <b>read text (ocr)</b> before an analysis. the steps come first and the text follows, much
+        faster than before and in more languages. you can go on working meanwhile.
       </>
     ),
-    find: stackedBox,
+    find: readText,
   },
   {
-    title: 'check it, then correct it',
+    title: 'text of 1.4 can be wrong',
     text: (
       <>
-        it goes by what a screen looks like: a feed with other posts can get a box of its own, and two products from
-        one template can share one. click a box or a step number for its toolbox, or <b>drag</b> it onto another box.
+        up to 1.4.5, a screenshot could get the text of an earlier one that looked much like it. a run with such text
+        says <b>text read by an earlier version</b>, and <b>read again</b> replaces it. in exports it is marked{' '}
+        <code>earlier</code>.
       </>
     ),
-    find: () => (boxes().length > 1 ? boxes().slice(1, 2) : boxes()),
+    find: () => first('.run-text', '.review-mode-bar'),
   },
   {
-    title: 'they went back, and no step shows it',
+    title: 'read it, find it',
     text: (
       <>
-        right-click the step they went back after and choose <b>return to</b>. the way back is dashed, with{' '}
-        <b>back</b> instead of a number, and the trip counts as a detour. no step is added.
-      </>
-    ),
-    find: () => numbers().slice(0, 1),
-  },
-  {
-    title: 'menus in the steps, too',
-    text: (
-      <>
-        in <b>steps</b>, right-click one in the grid, list or gallery for all you can do with it; with several selected,
-        the menu is for all of them. cards say <b>same screen as step 12</b> where someone came back, and jump there.
-      </>
-    ),
-    find: () => one('[aria-label="what to review"]'),
-  },
-  {
-    title: 'numbers, and optional detours',
-    text: (
-      <>
-        since 1.4.4, the opening screen is the <b>start</b> and the steps count from there. trips off the main way that
-        come back to it can be left out of the counts with <b>detours: left out</b>, which shows when there are any.
+        <b>text</b> on a step shows what was read. in the gallery the lines are also marked on the screenshot: point at
+        a line to see where it is. <b>find text</b> shows only the steps with the words you type.
       </>
     ),
     find: () => {
-      const control = one('[aria-label="optional detours"]');
-      return control.length ? control : one('.pathway-controls');
+      const links = textLinks();
+      return links.length ? links : first('.run-text-find', '[aria-label="step layout"]');
     },
   },
   {
-    title: 'screens on a row',
+    title: 'in exports, also as PAGE XML',
     text: (
       <>
-        the slider sets how many screens fit on a row, and what you are looking at stays in place. downloads have the
-        same rows. this tour stays under <b>about</b>.
+        <code>steps.json</code> has each line with its place on the screenshot. the text of each screenshot is also in{' '}
+        <code>images/page</code> as PAGE XML, which Transkribus and eScriptorium open with the screenshots.
       </>
     ),
-    find: () => all('[aria-label="size of the figure on the page"]').map((slider) => slider.closest('label') ?? slider),
+    find: () => one('.candidate-export-shell'),
+  },
+  {
+    title: 'how long it takes',
+    text: (
+      <>
+        an analysis that waits or runs says when it should be ready, and so does its text:{' '}
+        <b>34%, ready in about 20 s</b>. the server works it out from what it took before, so it is rough. this tour
+        stays under <b>about</b>.
+      </>
+    ),
+    find: () => first('.analysis-tasks .analysis-task-row', '.analysis-tasks'),
   },
 ];
+
+/** Where the stops are, for when they are not on the page. */
+const WHERE = 'open the steps of a finished run to see it in place.';
 
 interface Rect {
   left: number;
@@ -141,10 +144,11 @@ function around(elements: Element[]): Rect | null {
 }
 
 /**
- * What changed in the pathway, shown on the pathway itself: each stop lights up one control, with the rest of the
- * page dimmed, and says what it does now. Next, back and skip (or the arrow keys and Escape); the page cannot be
- * used meanwhile. Opened by itself once per browser for each version (PathwayPanel), and from about at any time.
- * Without a pathway on the page, the notes are shown in the middle of the window, with a word to open one.
+ * What changed, shown in place: each stop lights up one control, with the rest of the page dimmed, and says what it
+ * does now. Next, back and skip (or the arrow keys and Escape); the page cannot be used meanwhile. Opened by itself
+ * once per browser for each version, where the changes are (for 1.5.0 the steps of a finished run: AnalysisScreen),
+ * and from about at any time. Without them on the page, the notes are shown in the middle of the window, with a word
+ * to open them.
  */
 export function WhatsNewTour({ onClose }: { onClose: () => void }) {
   const [index, setIndex] = useState(0);
@@ -163,18 +167,24 @@ export function WhatsNewTour({ onClose }: { onClose: () => void }) {
   // Each stop brings what it points at into view (skipping scroll when already clearly visible, e.g. sticky bars),
   // then follows it as the page scrolls or the window changes.
   useEffect(() => {
-    const first = stop.find()[0];
-    if (first) {
+    const show = (smooth: boolean) => {
+      const first = stop.find()[0];
+      if (!first) return;
       const rect = first.getBoundingClientRect();
       const visible = rect.top >= 16 && rect.bottom <= window.innerHeight - 16;
       if (!visible) {
-        first.scrollIntoView({ block: 'center', inline: 'nearest', behavior: stillPreferred() ? 'auto' : 'smooth' });
+        first.scrollIntoView({ block: 'center', inline: 'nearest', behavior: smooth && !stillPreferred() ? 'smooth' : 'auto' });
       }
-    }
+    };
+    show(true);
     const measure = () => setSpot(around(stop.find()));
     measure();
     const later = window.setTimeout(measure, 350); // once a smooth scroll has arrived
-    const settled = window.setTimeout(measure, 650);
+    // The page may scroll by itself as the tour opens (to a run just opened): then it is shown again.
+    const settled = window.setTimeout(() => {
+      show(false);
+      measure();
+    }, 900);
     window.addEventListener('scroll', measure, true);
     window.addEventListener('resize', measure);
     return () => {
@@ -265,7 +275,7 @@ export function WhatsNewTour({ onClose }: { onClose: () => void }) {
         </span>
         <p className="whats-new-title">{stop.title}</p>
         <p className="whats-new-text">{stop.text}</p>
-        {!spot ? <p className="whats-new-hint">open a pathway to see it in place.</p> : null}
+        {!spot ? <p className="whats-new-hint">{WHERE}</p> : null}
         <div className="whats-new-actions">
           <button className="analysis-task-link subtle" onClick={close} type="button">
             skip

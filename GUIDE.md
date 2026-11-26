@@ -501,9 +501,10 @@ five minutes (**start the tutorial**); after that it is under **about** at the b
 pathways**. On a practice recording you fold steps into screens, follow the journey, find what the automatic
 grouping got wrong, correct it, and prepare the figure. Nothing in it changes your own runs.
 
-After an update, a short tour shows what changed the first time you open a pathway: each stop lights up one control
-and says what it does. **skip** ends it, and it stays under **about** as **what's new in 1.4.5**. Used pathways before
-version 1.4? Correcting them works differently now (see below), and lesson 5 of the tutorial has you try it.
+After an update, a short tour shows what changed, the first time you open the steps of a finished run: each stop lights
+up one control and says what it does. **skip** ends it, and it stays under **about** as **what's new in 1.5.0**. Used
+pathways before version 1.4? Correcting them works differently now (see below), and lesson 5 of the tutorial has you try
+it.
 
 How to read it:
 
