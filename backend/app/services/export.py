@@ -100,14 +100,14 @@ _COMMON_NOTES = {
     ),
     "text_state": (
         "read; waiting: still to be read when this was exported; failed: could not be read; earlier: read by a version "
-        "before 1.4.6, which could give a screen the text of an earlier one that looked much like it; null: not read"
+        "before 1.5.0, which could give a screen the text of an earlier one that looked much like it; null: not read"
     ),
     "text_lines": (
-        "since 1.4.6: the lines of ocr_text with where they are, x, y, width, height in pixels of the screenshot, and "
+        "since 1.5.0: the lines of ocr_text with where they are, x, y, width, height in pixels of the screenshot, and "
         "how sure the engine was (score, 0 to 1); null when it was not read"
     ),
     "text_page_xml": (
-        "since 1.4.6: the same lines as PAGE XML (2013-07-15), for Transkribus, eScriptorium, OCR-D or Loghi: one file "
+        "since 1.5.0: the same lines as PAGE XML (2013-07-15), for Transkribus, eScriptorium, OCR-D or Loghi: one file "
         "per screenshot in images/page, named after it, so images can be opened there as it is; null when it was not read"
     ),
     "score_breakdown.changed_regions": (

@@ -1,6 +1,6 @@
 [project]
 name = "stepthrough-backend"
-version = "1.4.5"
+version = "1.5.0"
 description = "Local-first backend for walkthrough screenshot extraction"
 authors = [{ name = 'H. "Kevin" Jin', email = "h.jin@terminallyonline.nl" }]
 readme = "README.md"

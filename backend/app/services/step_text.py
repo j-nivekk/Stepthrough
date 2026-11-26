@@ -2,7 +2,7 @@
 
 ``text_reading`` is JSON: ``engine`` (what read it), ``width`` and ``height`` of the screenshot, and ``lines``, each as
 its text, x, y, width, height and how sure the engine was (0 to 1). ``ocr_text`` is the same text in one piece, and
-``text_state`` says how far it is. Steps that a version before 1.4.6 read have ``ocr_text`` only. That text can be wrong:
+``text_state`` says how far it is. Steps that a version before 1.5.0 read have ``ocr_text`` only. That text can be wrong:
 those versions gave a screen the text of an earlier one that looked much like it.
 """
 
@@ -38,7 +38,7 @@ def parse_reading(value: Any) -> dict[str, Any] | None:
 
 def text_state(candidate: dict[str, Any]) -> str | None:
     """How far the text of a step is: None (not read), ``waiting``, ``read``, ``failed``, or ``earlier`` (read by a
-    version before 1.4.6)."""
+    version before 1.5.0)."""
     return candidate.get("text_state") or ("earlier" if candidate.get("ocr_text") else None)
 
 
