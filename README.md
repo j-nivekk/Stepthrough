@@ -51,7 +51,8 @@ docker compose up -d
 ```
 
 Then open `http://localhost:8080`. The `.env` line tells Stepthrough it runs for you alone, so it opens without a
-login. [`GUIDE.md`](GUIDE.md#3-installing-and-starting-stepthrough) explains every step,
+login. The [Installing and starting](https://github.com/j-nivekk/Stepthrough/wiki/Installing-and-Starting) wiki page
+(also in [`docs/wiki/Installing-and-Starting.md`](docs/wiki/Installing-and-Starting.md)) explains every step,
 including updates, text recognition and what to do if something goes wrong. To run Stepthrough from the source code
 instead, read on.
 
@@ -67,8 +68,9 @@ To run Stepthrough from source, you must have the following installed on your sy
   - *Windows:* `winget install --id Gyan.FFmpeg -e`
 - **[uv](https://github.com/astral-sh/uv)**: Manages the Python dependencies, and installs Python 3.11+ if you do not have it.
 
-On Windows, `setup.sh` and `start.sh` do not run; [`GUIDE.md`](GUIDE.md#from-the-source-code) gives the commands to
-type instead.
+On Windows, `setup.sh` and `start.sh` do not run; the
+[From the source code](https://github.com/j-nivekk/Stepthrough/wiki/Installing-and-Starting#from-the-source-code)
+wiki section gives the commands to type instead.
 
 ---
 
@@ -105,8 +107,9 @@ By default, the backend runs at `http://127.0.0.1:8000` and the frontend at `htt
 
 ### On a server
 
-A Docker image runs Stepthrough for a group, behind a web server such as nginx. [`DEPLOY.md`](DEPLOY.md)
-covers installing, configuring, upgrading and backing it up.
+A Docker image runs Stepthrough for a group, behind a web server such as nginx. The
+[Server deployment (Docker)](https://github.com/j-nivekk/Stepthrough/wiki/Server-Deployment-Docker) wiki page
+(also in [`DEPLOY.md`](DEPLOY.md)) covers installing, configuring, upgrading and backing it up.
 
 ---
 
@@ -134,8 +137,8 @@ smoke test in it, and only then publishes. It runs for:
 
 **To release:** set the new version in `backend/app/__init__.py`, `backend/pyproject.toml` and
 `frontend/package.json` (a test checks they match), commit, push a tag such as `v1.5.1`, and write the release notes
-on GitHub. `DEPLOY.md` names the latest release in its checkout commands, and `README_IF_DOWNLOADED_FROM_ZENODO.md`
-the archived version: update both.
+on GitHub. `docs/wiki/Server-Deployment-Without-Docker.md` names the latest release in its checkout commands, and
+`README_IF_DOWNLOADED_FROM_ZENODO.md` the archived version: update both.
 
 ---
 
@@ -149,8 +152,9 @@ the archived version: update both.
 
 ## Documentation
 
-- [`GUIDE.md`](GUIDE.md): how Stepthrough works and how to use it, with a first tutorial, settings,
-  review, exports, recording tips and notes on research use.
+- **[Stepthrough Wiki](https://github.com/j-nivekk/Stepthrough/wiki)** (source in [`docs/wiki/`](docs/wiki/), indexed
+  in [`GUIDE.md`](GUIDE.md) and [`DEPLOY.md`](DEPLOY.md)): installation, first walkthrough tutorial, settings, review,
+  command bar, text recognition, pathways, exports, server deployment, evaluation and internals.
 - In the app, **about → how it works** shows the analysis of a sample recording, step by step, and **about → how
   to work with pathways** is a hands-on tutorial on the pathway chart.
 - [`docs/evaluation.md`](docs/evaluation.md): how well the detection works, how it was tested, and where it

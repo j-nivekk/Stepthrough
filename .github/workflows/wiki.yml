@@ -1,0 +1,115 @@
+# Syncs the documentation in docs/wiki/ (plus docs/evaluation.md and backend/README.md) to the GitHub Wiki
+# (Stepthrough.wiki.git) whenever those files change on main.
+#
+# Keeping the Markdown sources in the main repository keeps Zenodo archival snapshots complete and lets documentation
+# updates land in the same commits as code changes. Relative `.md` links between wiki pages work locally and in the
+# repo browser, and are rewritten to GitHub Wiki page links when synced.
+
+name: Sync wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/wiki/**"
+      - "docs/evaluation.md"
+      - "backend/README.md"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-wiki
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync docs/wiki to GitHub Wiki
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone wiki repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki-repo
+
+      - name: Render and mirror wiki pages
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          repo = "${{ github.repository }}"
+          blob_base = f"https://github.com/{repo}/blob/main"
+          tree_base = f"https://github.com/{repo}/tree/main"
+          wiki_src = Path("docs/wiki")
+          wiki_dst = Path("wiki-repo")
+
+          extra_sources = {
+              "Evaluation-and-Benchmarks.md": Path("docs/evaluation.md"),
+              "Architecture-and-Internals.md": Path("backend/README.md"),
+          }
+
+          page_names = {p.stem for p in wiki_src.glob("*.md")} | {
+              Path(name).stem for name in extra_sources
+          }
+
+          # Explicit cross-doc rewrites for mirrored repository docs
+          doc_rewrites = {
+              "../GUIDE.md#5-how-stepthrough-finds-steps": "How-Detection-Works-and-Settings",
+              "../GUIDE.md": "Home",
+              "../DEPLOY.md": "Server-Deployment-Docker",
+              "../backend/README.md": "Architecture-and-Internals",
+              "../docs/evaluation.md": "Evaluation-and-Benchmarks",
+              "../docs/evaluation.md#text-recognition": "Evaluation-and-Benchmarks#text-recognition",
+              "../backend/tests/eval": f"{tree_base}/backend/tests/eval",
+              "../backend/tests/eval/web": f"{tree_base}/backend/tests/eval/web",
+          }
+
+          link_re = re.compile(r"\]\(([^)]+)\)")
+
+          def rewrite_links(text: str) -> str:
+              def repl(match: re.Match[str]) -> str:
+                  target = match.group(1)
+                  if target in doc_rewrites:
+                      return f"]({doc_rewrites[target]})"
+                  if target.startswith(("http://", "https://", "mailto:", "#")):
+                      return match.group(0)
+                  path_part, sep, frag = target.partition("#")
+                  if path_part.endswith(".md"):
+                      stem = Path(path_part).stem
+                      if stem in page_names:
+                          return f"]({stem}{sep}{frag})"
+                  return match.group(0)
+              return link_re.sub(repl, text)
+
+          desired = set()
+          for src in sorted(wiki_src.glob("*.md")):
+              desired.add(src.name)
+              (wiki_dst / src.name).write_text(rewrite_links(src.read_text(encoding="utf-8")), encoding="utf-8")
+
+          for dst_name, src in extra_sources.items():
+              desired.add(dst_name)
+              (wiki_dst / dst_name).write_text(rewrite_links(src.read_text(encoding="utf-8")), encoding="utf-8")
+
+          for existing in wiki_dst.glob("*.md"):
+              if existing.name not in desired:
+                  existing.unlink()
+          PY
+
+      - name: Commit and push wiki changes
+        run: |
+          cd wiki-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki is already up to date."
+            exit 0
+          fi
+          git commit -m "Sync wiki from ${GITHUB_SHA::7}"
+          git push origin HEAD

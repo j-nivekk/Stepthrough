@@ -21,7 +21,7 @@ This source archive includes:
 - Python and JavaScript dependency lockfiles;
 - tests and code for generating synthetic evaluation recordings;
 - Docker build files, local launch scripts and deployment examples;
-- the user guide, evaluation documentation, citation metadata and licences;
+- the user guide and server documentation (`docs/wiki/`, indexed by `GUIDE.md` and `DEPLOY.md`), evaluation documentation, citation metadata and licences;
 - `ARCHIVE_INFO.json`, describing the source snapshot and its provenance;
 - `SHA256SUMS`, containing a SHA-256 checksum for every other file in the archive.
 

@@ -6,55 +6,55 @@ import { DURATION, LABEL_TEXT, STEPS } from './demoScript';
 import { track } from '../../lib/usage';
 
 const SPEED = 1.6; // the 14-second recording plays in about 9 seconds
-const GUIDE_URL = 'https://github.com/j-nivekk/Stepthrough/blob/main/GUIDE.md';
+const GUIDE_URL = 'https://github.com/j-nivekk/Stepthrough/wiki/';
 const HOLD_SECONDS = 2.2; // pause on a finished stage before moving on
 
 const STAGES: { name: string; title: string; text: string; guide: string }[] = [
   {
     name: 'recording',
-    guide: '#1-why-work-from-screen-recordings',
+    guide: 'Installing-and-Starting#why-work-from-screen-recordings',
     title: 'a screen recording',
     text:
       'a recording is a continuous stream of frames: everything the participant saw, including every animation and in-between moment. stepthrough looks for the screens they actually stopped on.',
   },
   {
     name: 'working copy',
-    guide: '#5-how-stepthrough-finds-steps',
+    guide: 'How-Detection-Works-and-Settings#how-stepthrough-finds-steps',
     title: 'a working copy with a steady clock',
     text:
       'phones only store a new frame when the screen changes, so their recordings have no fixed frame rate. every upload is first turned into a working copy: 15 frames every second for the analysis, upright, in standard colours, so every frame has its true time.',
   },
   {
     name: 'compare',
-    guide: '#5-how-stepthrough-finds-steps',
+    guide: 'How-Detection-Works-and-Settings#how-stepthrough-finds-steps',
     title: 'every frame compared with the current screen',
     text:
       'each frame is compared with the first frame of the screen it belongs to, so slow changes, such as a page loading, still add up. a pixel only counts if it changes by more than the compression noise measured on this recording. the status bar, a blinking cursor and any areas you mark are ignored.',
   },
   {
     name: 'stable screens',
-    guide: '#6-settings',
+    guide: 'How-Detection-Works-and-Settings#settings',
     title: 'screens that stay still',
     text:
       'a screen that stays still for at least the minimum time on screen (450 ms for phones) becomes a step. the "delivered" notice was on screen too briefly, and the chat it left behind is the same screen as before, so neither adds a step.',
   },
   {
     name: 'group & label',
-    guide: '#labels',
+    guide: 'How-Detection-Works-and-Settings#labels',
     title: 'typing grouped, every step labelled',
     text:
       'each pause while typing would look like a screen of its own; the burst becomes one step that shows the finished text. every step gets a label describing the change that led to it. labels describe; they never decide what is a step.',
   },
   {
     name: 'screenshots',
-    guide: '#8-exports',
+    guide: 'Exports-and-Project-Files',
     title: 'one screenshot per step',
     text:
       'for each step, one screenshot is taken 200 ms after the screen settles, inside the still period, so a screenshot never catches an animation half-way. how long each screen stayed on screen is kept as well.',
   },
   {
     name: 'review & export',
-    guide: '#7-reviewing-steps',
+    guide: 'Reviewing-Steps',
     title: 'you decide, then export',
     text:
       'automatic steps are a starting point. accept or reject them, add titles and notes, or mark a moment by hand. the export holds the screenshots, steps.csv for a spreadsheet, and steps.json with the settings used and what every field means.',

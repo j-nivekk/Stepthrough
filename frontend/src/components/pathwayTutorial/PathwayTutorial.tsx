@@ -19,7 +19,7 @@ import {
   type ScreenLink,
 } from './tutorialModel';
 
-const GUIDE_URL = 'https://github.com/j-nivekk/Stepthrough/blob/main/GUIDE.md';
+const GUIDE_URL = 'https://github.com/j-nivekk/Stepthrough/wiki/';
 /** How long "show me" shades a control green before it uses it, so it can be seen what is about to happen. */
 const DEMO_LEAD_MS = 700;
 const SEEN_KEY = 'stepthrough.pathway-tutorial.v1';
@@ -54,49 +54,49 @@ const LESSONS: Lesson[] = [
   {
     name: 'line to chart',
     title: 'a recording is a line; a pathway folds it',
-    guide: '#2-key-terms',
+    guide: 'Installing-and-Starting#key-terms',
     guideLabel: 'key terms: step, screen, pathway',
     task: 'switch from the recording to the pathway, and back, to watch the steps fold into screens.',
   },
   {
     name: 'read it',
     title: 'follow the journey',
-    guide: '#pathway',
+    guide: 'Pathways#how-to-read-a-pathway',
     guideLabel: 'reading a pathway',
     task: 'walk through the journey with ▶ until you reach step 7.',
   },
   {
     name: 'why together',
     title: 'why steps share a box',
-    guide: '#pathway',
+    guide: 'Pathways#automatic-grouping-screens-vs-steps',
     guideLabel: 'which steps count as the same screen',
     task: 'click the step numbers 2, 4 and 7 under the boxes to see why each is where it is.',
   },
   {
     name: 'check it',
     title: 'it sees pixels, not meaning',
-    guide: '#what-it-cannot-do',
+    guide: 'How-Detection-Works-and-Settings#what-it-cannot-do',
     guideLabel: 'what it cannot do',
     task: 'find the two mistakes. look inside the boxes, then say for each box whether it is right.',
   },
   {
     name: 'correct it',
     title: 'correct it, step by step',
-    guide: '#pathway',
+    guide: 'Pathways#correcting-the-pathway',
     guideLabel: 'when the pathway gets it wrong',
     task: 'put step 5 on home (box 1), and give step 7 a screen of its own.',
   },
   {
     name: 'decide',
     title: 'one screen or two is your decision',
-    guide: '#reporting-what-you-did',
+    guide: 'Using-Stepthrough-in-Research#reporting-what-you-did',
     guideLabel: 'reporting what you did',
     task: 'decide whether settings before and after the pop-up are one screen or two.',
   },
   {
     name: 'figure',
     title: 'export the figure and the data',
-    guide: '#8-exports',
+    guide: 'Exports-and-Project-Files',
     guideLabel: 'exports',
     task: 'move the notes into a key below the chart.',
   },
