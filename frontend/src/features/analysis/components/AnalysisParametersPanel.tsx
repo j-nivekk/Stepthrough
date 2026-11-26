@@ -85,7 +85,7 @@ export function AnalysisParametersPanel({
   togglePopover,
 }: AnalysisParametersPanelProps) {
   return (
-    <section className={`analysis-column analysis-parameter-column ${showHints ? 'hints-on' : ''}`} ref={parameterColumnRef}>
+    <section className={`analysis-column analysis-parameter-column ${showHints ? 'hints-on' : ''}`} id="analysis-parameter-section" ref={parameterColumnRef} tabIndex={-1}>
       <div className="analysis-column-head">
         <p>parameters</p>
         <button

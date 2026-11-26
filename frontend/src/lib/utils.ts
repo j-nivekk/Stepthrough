@@ -143,6 +143,11 @@ export function isEditableElement(target: EventTarget | null): boolean {
   return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
+/** Non-modal popovers let Escape reach the command field when it has focus. */
+export function isCommandBarInput(target: EventTarget | null): boolean {
+  return target instanceof Element && target.hasAttribute('data-command-input');
+}
+
 export function splitFilename(value: string): { base: string; extension: string } {
   const lastDotIndex = value.lastIndexOf('.');
   if (lastDotIndex <= 0 || lastDotIndex === value.length - 1) {

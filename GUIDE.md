@@ -449,6 +449,31 @@ An accepted step has the number it has in the pathway and the export, **step 5**
 is a **candidate**, numbered in the order it was found. So rejecting a candidate leaves no gap: the steps after it
 count on. The opening screen is **start**.
 
+### Command bar
+
+Press **/** outside a text field to open the bar at the bottom of the window. Type a command, use **Tab** to
+complete it or **↑** and **↓** to choose a suggestion, then press **Enter**. **Esc** closes the bar. Type
+`/help` to see the commands available in the current view, or `/keys` to see the keyboard shortcuts.
+
+`/top` and `/end` scroll the page. In a finished run, `/30` goes to step 30 and `/accept 3-7` accepts a range.
+With no numbers, `/accept`, `/reject` and `/reset` act on the selected steps that are visible, or the active
+step if nothing is selected. Use `candidate 5` when you mean the screenshot labelled **candidate 5**.
+`/pathway` opens the pathway, where `/zoom fit` fits the figure and `/steps` returns to the review.
+
+`/analysis` returns to the project's analysis page. Use `/goto parameters`, `/goto tasks` or `/goto timeline`
+to jump between sections. `/preview` opens the selected video, and `/closepreview` closes it. In step review,
+`/nextstep`, `/prevstep`, `/firststep` and `/laststep` follow the current filters.
+
+`/export accepted` and `/export all` download the open run from Steps or Pathway. Use `/exportproject` to
+download the selected project with its videos and runs, or give it a project name. `/exportruns selected`
+downloads the completed runs selected in the tasks list. Use `video` for the selected video's completed runs
+or `completed` for all completed runs in the project. In Pathway, `/exportfigure svg` or `/exportfigure png`
+downloads the figure.
+
+The Vim-style aliases appear below their command names. `/gg` and `/G` go to the top and bottom of the page,
+`/w accepted` exports the accepted steps, and `/q` closes an open video preview. `/map` lists the keyboard
+shortcuts.
+
 ### The text on the screens
 
 Stepthrough can read the text on every screenshot. Turn on **read text (ocr)** before an analysis, or press **read text**

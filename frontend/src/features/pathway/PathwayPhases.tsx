@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { formatPathwayTime } from '../../lib/pathwayFigure';
 import { pathwayNumber, stretchName } from '../../lib/stepNumbers';
+import { isCommandBarInput } from '../../lib/utils';
 import type { Pathway, PathwayPhase } from '../../types';
 import type { PhaseSteps } from '../../api';
 import type { PhaseRequest } from './PathwayCanvas';
@@ -103,7 +104,7 @@ export function PathwayPhases({ pathway, request, at, onClose, disabled, onSet, 
       onClose();
     }
     function key(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !isCommandBarInput(event.target)) {
         event.stopPropagation();
         onClose();
       }

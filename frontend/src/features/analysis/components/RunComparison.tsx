@@ -151,7 +151,7 @@ export function RunComparison({
     );
 
   return (
-    <section className="analysis-detail-section run-compare" id="analysis-run-compare">
+    <section className="analysis-detail-section run-compare" id="analysis-run-compare" tabIndex={-1}>
       <div className="analysis-detail-header">
         <div className="analysis-detail-copy">
           <p className="analysis-section-eyebrow">compare runs</p>

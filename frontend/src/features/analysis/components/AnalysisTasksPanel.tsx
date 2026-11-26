@@ -583,7 +583,7 @@ export const AnalysisTasksPanel = memo(function AnalysisTasksPanel({
   }
 
   return (
-    <section className="analysis-column">
+    <section className="analysis-column" id="analysis-tasks" tabIndex={-1}>
       {/* As the other two columns: the title and one link in the head, the rest below the rule (like parameters'
           load / save row), so that the three heads and rules stay on one line whatever the width. */}
       <div className="analysis-column-head">

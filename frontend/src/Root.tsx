@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import App from './App';
 import { LiveProvider } from './features/live/LiveProvider';
+import { CommandProvider } from './lib/commandRegistry';
 import { SIGNED_OUT_EVENT, getSession } from './api';
 import { AppWatermark } from './components/AppWatermark';
 import { LoginScreen } from './features/account/LoginScreen';
@@ -78,7 +79,9 @@ export function Root() {
   enableUsage(Boolean(session?.mode === 'password' && session.user && !session.user.is_admin));
   return (
     <LiveProvider enabled={shared}>
-      <App onSessionChange={enter} session={session} />
+      <CommandProvider>
+        <App onSessionChange={enter} session={session} />
+      </CommandProvider>
     </LiveProvider>
   );
 }

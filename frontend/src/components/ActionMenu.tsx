@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { isCommandBarInput } from '../lib/utils';
 
 /** The part of the window a menu keeps to, such as the pathway's canvas. */
 export interface MenuBounds {
@@ -283,7 +284,7 @@ export function FloatingActionMenu({ items, heading, x, y, onClose }: { items: A
       if (!inside(event.target)) onClose();
     };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || isCommandBarInput(event.target)) return;
       event.stopPropagation(); // it closes the menu, and leaves the selection behind it
       goBack();
       onClose();

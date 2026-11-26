@@ -62,6 +62,8 @@ import {
 } from './lib/analysis';
 import { downloadExportBundle, jumpToAnchor, sleep, triggerDownload } from './lib/utils';
 import { stepToReturnTo } from './lib/lastStep';
+import { useCommands } from './lib/commandRegistry';
+import { CommandBar } from './components/CommandBar';
 import { formatCalendarDate } from './lib/formatters';
 import { applyCandidateChanges, isSharedAccount, patchCandidate, withCandidateStatuses } from './lib/live';
 import { reviewNumbers, returnsTo } from './lib/stepNumbers';
@@ -1926,6 +1928,71 @@ function App({ session, onSessionChange }: AppProps) {
     onSessionChange({ mode: 'password', user: null });
   }
 
+  // The command bar's commands of every page (lib/commands.ts); the screens add their own while they are shown.
+  const scrollBehavior = (): ScrollBehavior =>
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+  const commandProjects = projectsQuery.data ?? [];
+  const projectChoices = () => commandProjects.map((project) => ({
+    value: project.name,
+    note: `${project.recording_count} ${project.recording_count === 1 ? 'video' : 'videos'}`,
+  }));
+  function namedProject(name: string): Project | { problem: string } {
+    const [project, duplicate] = commandProjects.filter((entry) => entry.name === name);
+    if (duplicate) return { problem: `more than one project is named ${name}. choose it from the projects list` };
+    return project ?? { problem: `there is no project called ${name}` };
+  }
+
+  useCommands({
+    top: { run: () => window.scrollTo({ top: 0, behavior: scrollBehavior() }) },
+    end: { run: () => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: scrollBehavior() }) },
+    projects: {
+      run: () => {
+        setShowUsers(false);
+        setProjectStage('projects');
+      },
+    },
+    project: commandProjects.length ? {
+      choices: projectChoices,
+      run: (name) => {
+        const project = namedProject(name);
+        if ('problem' in project) return project;
+        setShowUsers(false);
+        openProject(project.id, project.recording_count ? 'analysis' : 'import');
+        return `opened ${project.name}`;
+      },
+    } : undefined,
+    import: hasSelectedProject
+      ? {
+          run: () => {
+            setShowUsers(false);
+            setProjectStage('import');
+          },
+        }
+      : undefined,
+    analysis: hasSelectedProject && (workflowStage !== 'projects' || selectedProjectCanJumpToAnalysis)
+      ? {
+          run: () => {
+            setShowUsers(false);
+            if (workflowStage === 'import') return handleNavigateToAnalysis(true);
+            if (workflowStage === 'projects') setProjectStage('analysis');
+          },
+        }
+      : undefined,
+    exportproject: commandProjects.length || selectedProjectSummary ? {
+      choices: projectChoices,
+      current: () => selectedProjectSummary?.name ?? null,
+      check: (name) => !name && !selectedProjectSummary ? 'give a project name' : null,
+      run: (name) => {
+        const project = name ? namedProject(name) : selectedProjectSummary;
+        if (!project) return { problem: 'give a project name' };
+        if ('problem' in project) return project;
+        return downloadProjectFile(project.id);
+      },
+    } : undefined,
+    settings: { run: () => setCornerPanel('settings') },
+    about: { run: () => setCornerPanel('about') },
+  });
+
   // The watermark, the settings and account panels, and the overlays: the same on every page.
   const chrome = (
     <>
@@ -1966,6 +2033,7 @@ function App({ session, onSessionChange }: AppProps) {
       ) : null}
       {viewportWarning}
       {confirmDialog}
+      <CommandBar />
     </>
   );
 

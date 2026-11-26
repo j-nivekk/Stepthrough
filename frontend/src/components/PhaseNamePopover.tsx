@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { isCommandBarInput } from '../lib/utils';
 
 /**
  * Asks for the name of a new phase, where the menu that led here was, and says why when it could not be saved. With a
@@ -42,7 +43,7 @@ export function PhaseNamePopover({
       if (!(event.target instanceof Node) || !ref.current?.contains(event.target)) onClose();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || isCommandBarInput(event.target)) return;
       event.stopPropagation(); // the selection stays
       onClose();
     };

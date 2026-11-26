@@ -37,6 +37,11 @@ import {
   formatRunTitle,
 } from '../../lib/formatters';
 import { summarizeRunReview } from '../../lib/taskGroups';
+import { useCommands, type CommandHandlers } from '../../lib/commandRegistry';
+import { argNumber, parseFrames, parseStepReference, parseTime } from '../../lib/commands';
+import { useConfirm } from '../../components/ConfirmDialog';
+import { useReadTextQuestion } from '../../components/ReadTextQuestion';
+import { runTextNotice } from '../../lib/stepText';
 import { flushSync } from 'react-dom';
 import { StageNavigator } from '../../components/StageNavigator';
 import { formatRunSummaryLabel, parseRunPresetText } from '../../lib/runSettings';
@@ -44,6 +49,7 @@ import {
   buildReviewExportName,
   createLocalId,
   formatPlaybackTimestamp,
+  isCommandBarInput,
   isEditableElement,
   jumpToAnchor,
   normalizeZipFilename,
@@ -62,6 +68,7 @@ import type {
   RunDetail,
   RunSettings,
   RunSummary,
+  StableSettings,
   TransitionType,
 } from '../../types';
 import { AnalysisParametersPanel } from './components/AnalysisParametersPanel';
@@ -74,7 +81,7 @@ import { StepMenu } from './components/StepMenu';
 import { defaultComparisonPair } from '../../lib/runComparison';
 import type { ImportQueueItem } from '../../lib/importQueue';
 import type { WorkflowStage } from '../../lib/workflow';
-import { defaultStableSettings, formatStableSummary } from '../../lib/stableSettings';
+import { defaultStableSettings, formatStableSummary, getEffectiveStableValues, getRecordingTypeMetadata, sanitizeStableSettings, statusBarShare } from '../../lib/stableSettings';
 import {
   clampStepSize,
   fitStepGrid,
@@ -843,7 +850,7 @@ export function AnalysisScreen({
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !isCommandBarInput(event.target)) {
         event.stopPropagation();
         setOpenPopover(null);
       }
@@ -1404,6 +1411,7 @@ export function AnalysisScreen({
     const clamped = Math.max(0, durationMs > 0 ? Math.min(durationMs - 1, ms) : ms);
     video.currentTime = clamped / 1000;
     setPreviewPlaybackMs(clamped);
+    return clamped;
   }
 
   function handlePreviewPlayPause() {
@@ -1820,6 +1828,515 @@ export function AnalysisScreen({
     setSelectedTaskRunIds([]);
   }
 
+
+  // ── the command bar (components/CommandBar.tsx, lib/commands.ts): what its commands do on this page ──────────────
+  const { confirm: confirmCommand, dialog: commandDialog } = useConfirm();
+  const readTextQuestion = useReadTextQuestion();
+  const stepName = (step: CandidateFrame) => stepNumbers.get(step.id)?.name ?? `candidate ${step.detector_index}`;
+  const effectiveStable = getEffectiveStableValues(runSettings.stable, analysisMetadata);
+  const recordingType = runSettings.stable.recording_type;
+  const typeDefaults = getRecordingTypeMetadata(analysisMetadata, recordingType);
+  const parameterDefaults = getEffectiveStableValues({ ...projectDefaultSettings.stable, recording_type: recordingType }, analysisMetadata);
+  const statusBarVisible = recordingType === 'phone' && statusBarShare(selectedRecordingSummary?.width, selectedRecordingSummary?.height) > 0;
+  const onOff = (value: string, now: boolean) => (value ? value === 'on' : !now);
+
+  function updateStable(patch: Partial<StableSettings>) {
+    setRunSettings((current) => ({ ...current, stable: sanitizeStableSettings({ ...current.stable, ...patch }) }));
+  }
+
+  /** The steps a command means: those typed ("3-7", "3,5,9"), or else the selected ones shown, or else the active one. */
+  function commandSteps(arg: string, single = false): { steps: CandidateFrame[] } | { problem: string } {
+    if (!selectedRun) return { problem: 'no run is open' };
+    if (!arg.trim()) {
+      const byId = new Map(selectedRun.candidates.map((step) => [step.id, step]));
+      const selected = selectedShownCandidateIds.map((id) => byId.get(id)).filter((step): step is CandidateFrame => Boolean(step));
+      if (selected.length) return { steps: selected };
+      return activeCandidate ? { steps: [activeCandidate] } : { problem: 'no step is active' };
+    }
+    const reference = parseStepReference(arg);
+    if (!reference || (single && reference.numbers.length !== 1)) {
+      return { problem: single ? 'give one step number' : 'step numbers, as 12, 3-7 or 3,5,9' };
+    }
+    const byStep = new Map<number, CandidateFrame>();
+    const byCandidate = new Map<number, CandidateFrame>();
+    for (const step of selectedRun.candidates) {
+      const number = stepNumbers.get(step.id);
+      if (number?.number === 'start') byStep.set(0, step);
+      else if (number && !number.name.startsWith('candidate ')) byStep.set(Number(number.number), step);
+      else if (number) byCandidate.set(Number(number.number), step);
+    }
+    const steps: CandidateFrame[] = [];
+    const missing: number[] = [];
+    for (const number of reference.numbers) {
+      const step = reference.candidates ? byCandidate.get(number) : byStep.get(number) ?? byCandidate.get(number);
+      if (step) steps.push(step);
+      else missing.push(number);
+    }
+    if (missing.length) {
+      const label = reference.candidates ? 'candidate' : 'step';
+      return { problem: `there is no ${label} ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}` };
+    }
+    return { steps };
+  }
+
+  function stepsLabel(steps: CandidateFrame[], arg: string): string {
+    if (steps.length === 1) return stepName(steps[0]);
+    if (!arg.trim()) return `the ${steps.length} selected steps`;
+    const names = steps.map(stepName);
+    const range = /^(?:candidates?\s+)?(?:start|\d+)\s*-\s*\d+$/i.test(arg);
+    const span = range
+      ? `${names[0]} to ${names[names.length - 1]}`
+      : names.length <= 4 ? names.join(', ') : `${names.slice(0, 3).join(', ')}, …`;
+    return `${span} (${steps.length} steps)`;
+  }
+
+  const stepArgument = {
+    check: (arg: string) => {
+      const found = commandSteps(arg);
+      return 'problem' in found ? found.problem : null;
+    },
+    describe: (arg: string) => {
+      const found = commandSteps(arg);
+      return 'problem' in found ? null : stepsLabel(found.steps, arg);
+    },
+  };
+
+  async function decide(status: CandidateStatus, arg: string) {
+    const found = commandSteps(arg);
+    if ('problem' in found) return found;
+    const { steps } = found;
+    const label = stepsLabel(steps, arg);
+    if (steps.every((step) => step.status === status)) {
+      return `${label} already ${status === 'pending' ? 'undecided' : status}`;
+    }
+    if (steps.length === 1) {
+      handleCandidateStatusChange(steps[0], status);
+    } else if (selectedRun) {
+      const changing = steps.filter((step) => step.status !== status).map((step) => step.id);
+      const failed = await onBulkUpdateCandidates(selectedRun.summary.id, selectedRun.summary.recording_id, changing, status);
+      if (failed.length) return { problem: `could not update ${failed.length} of ${steps.length} steps` };
+    }
+    const did = status === 'accepted' ? 'accepted' : status === 'rejected' ? 'rejected' : 'reset';
+    return `${did} ${label}`;
+  }
+
+  function withActive(does: (step: CandidateFrame) => string | void) {
+    return activeCandidate ? does(activeCandidate) : { problem: 'no step is active' };
+  }
+
+  const recordingRuns = (() => {
+    const recordingId = selectedRecordingId;
+    return recordingId ? analysisTaskItems.filter((item) => item.recording.id === recordingId) : [];
+  })();
+  const runTitleOf = (run: RunSummary) => formatRunTitle(run, runNumberById.get(run.id));
+  const runNumberOf = (run: RunSummary) => run.run_number ?? runNumberById.get(run.id);
+
+  function openRun(item: AnalysisTaskItem) {
+    const finished = ['completed', 'failed', 'cancelled'].includes(item.run.status) && item.run.candidate_count > 0;
+    if (finished) handleReviewTaskOutputs(item.recording.id, item.run.id);
+    else onSelectRun(item.recording.id, item.run.id, 'analysis-run-detail');
+    return `opened ${runTitleOf(item.run)}`;
+  }
+
+  const switchToMode = (mode: 'steps' | 'pathway') => {
+    if (mode === reviewMode) return;
+    track({ kind: 'page', name: mode === 'pathway' ? 'pathway' : 'review' });
+    changeWithTransition(() => {
+      reviewSwitchRef.current = window.scrollY;
+      setReviewMode(mode);
+    });
+  };
+
+  const previewOpen = previewVideoUrl ? previewRecording : null;
+  const reviewingSteps = Boolean(selectedRun && !selectedRunStale && !comparison && showsSteps);
+  const textNotice = selectedRun ? runTextNotice(selectedRun.summary.text, selectedRun.candidates.length) : null;
+  const videoChoices = () => recordings.map((recording) => ({ value: recording.filename }));
+  function namedVideo(name: string): RecordingSummary | { problem: string } {
+    const [recording, duplicate] = recordings.filter((entry) => entry.filename === name);
+    if (duplicate) return { problem: `more than one video is named ${name}. choose it from the videos list` };
+    return recording ?? { problem: `there is no video called ${name}` };
+  }
+
+  const sections = [
+    { value: 'videos', anchor: 'analysis-videos', unfold: true },
+    { value: 'parameters', anchor: 'analysis-parameter-section', unfold: true },
+    { value: 'tasks', anchor: 'analysis-tasks', unfold: true },
+  ];
+  if (previewOpen) sections.push({ value: 'preview', anchor: 'analysis-video-preview', unfold: false });
+  if (comparison) sections.push({ value: 'comparison', anchor: 'analysis-run-compare', unfold: false });
+  if (selectedRun && !selectedRunStale && !comparison) {
+    sections.push({ value: 'run', anchor: 'analysis-run-detail', unfold: false });
+    if (reviewingSteps && canShowTimeline) sections.push({ value: 'timeline', anchor: 'analysis-timeline', unfold: false });
+    if (reviewingSteps) sections.push({ value: 'steps', anchor: 'analysis-review-toolbar', unfold: false });
+    if (showPathway) sections.push({ value: 'pathway', anchor: 'analysis-pathway', unfold: false });
+  }
+
+  const completedRuns = analysisTaskItems.filter((item) => item.run.status === 'completed');
+  function exportableRunIds(scope: string): string[] {
+    const selected = new Set(selectedTaskRunIds);
+    return completedRuns
+      .filter(({ recording, run }) => scope === 'completed' || (scope === 'video' ? recording.id === selectedRecordingId : selected.has(run.id)))
+      .map(({ run }) => run.id);
+  }
+
+  function moveToVisibleStep(position: 'first' | 'previous' | 'next' | 'last') {
+    if (!filteredCandidates.length) return { problem: 'no steps are visible' };
+    const last = filteredCandidates.length - 1;
+    const at = filteredCandidates.findIndex((step) => step.id === activeCandidate?.id);
+    let index = 0;
+    if (position === 'last') index = last;
+    if (position === 'next') index = at + 1;
+    if (position === 'previous') index = at < 0 ? last : at - 1;
+    const step = filteredCandidates[index];
+    if (!step) return { problem: position === 'next' ? 'this is the last visible step' : 'this is the first visible step' };
+    activateCandidate(step.id, { reveal: true, seekPreview: true });
+    return stepName(step);
+  }
+
+  const commandHandlers: CommandHandlers = {
+    // the analysis page
+    video: recordings.length ? {
+      choices: videoChoices,
+      current: () => selectedRecordingSummary?.filename ?? null,
+      run: (name) => {
+        const recording = namedVideo(name);
+        if ('problem' in recording) return recording;
+        onSelectRecording(recording.id);
+        return `selected ${recording.filename}`;
+      },
+    } : undefined,
+    preview: recordings.length ? {
+      choices: videoChoices,
+      current: () => selectedRecordingSummary?.filename ?? previewRecording?.filename ?? null,
+      check: (name) => !name && !selectedRecordingSummary && !previewRecording ? 'give a video name' : null,
+      run: (name) => {
+        const recording = name ? namedVideo(name) : selectedRecordingSummary ?? previewRecording;
+        if (!recording) return { problem: 'give a video name' };
+        if ('problem' in recording) return recording;
+        onOpenPreview(recording.id);
+        window.setTimeout(() => jumpToAnchor('analysis-video-preview'), 0);
+        return `previewing ${recording.filename}`;
+      },
+    } : undefined,
+    goto: {
+      choices: () => sections,
+      run: (value) => {
+        const section = sections.find((entry) => entry.value === value);
+        if (!section) return { problem: `the ${value} section is unavailable` };
+        if (setupFolded && section.unfold) foldSetup(false);
+        window.setTimeout(() => jumpToAnchor(section.anchor), 0);
+      },
+    },
+    run: recordingRuns.length
+      ? {
+          choices: () =>
+            recordingRuns.flatMap((item) => {
+              const review = summarizeRunReview(item.run);
+              const title = runTitleOf(item.run);
+              const number = runNumberOf(item.run);
+              const numberLabel = formatRunNumber(item.run, number);
+              const duplicate = recordingRuns.some((other) => other !== item && runTitleOf(other.run) === title);
+              const progress = item.run.status === 'completed' && review ? `${review.reviewed} of ${review.total} reviewed` : item.run.status.replace('_', ' ');
+              const numbered = number === undefined ? [] : [
+                { value: String(number), suggest: false },
+                { value: `#${number}`, suggest: false },
+              ];
+              return duplicate || title === numberLabel
+                ? [{ value: numberLabel, note: duplicate ? `${title}, ${progress}` : progress }, ...numbered]
+                : [{ value: title, note: `${numberLabel}, ${progress}` }, ...numbered, { value: numberLabel, suggest: false }];
+            }),
+          current: () => (selectedRun ? runTitleOf(selectedRun.summary) : null),
+          run: (value) => {
+            const lower = value.trim().toLowerCase();
+            const at = recordingRuns.findIndex((item) => item.run.id === selectedRun?.summary.id);
+            let item: AnalysisTaskItem | undefined;
+            if (lower === 'next' || lower === 'previous') {
+              // as the tasks list shows them: newest first, so "next" goes down the list
+              const index = at < 0 ? 0 : at + (lower === 'next' ? 1 : -1);
+              item = recordingRuns[index];
+              if (!item) return { problem: lower === 'next' ? 'this is the last run of the video' : 'this is the first run of the video' };
+            } else {
+              const number = /^#?(\d+)$/.exec(lower.replace(/^run\s+/, ''));
+              const named = recordingRuns.filter((entry) => runTitleOf(entry.run) === value);
+              item = number ? recordingRuns.find((entry) => runNumberOf(entry.run) === Number(number[1])) : named.length === 1 ? named[0] : undefined;
+              if (!item) return { problem: `there is no run ${value} of this video` };
+            }
+            return openRun(item);
+          },
+        }
+      : undefined,
+    tasks: { current: () => taskFilter, run: (value) => setTaskFilter(value as AnalysisTaskFilter) },
+    compare: recordingRuns.filter((item) => item.run.status === 'completed').length > 1
+      ? { run: () => handleCompareRuns(recordingRuns[0].recording.id) }
+      : undefined,
+    exportruns: completedRuns.length ? {
+      check: (scope) => {
+        if (bulkExportPending || exportRunPending) return 'an export is in progress';
+        if (exportableRunIds(scope).length) return null;
+        return scope === 'selected' ? 'select completed runs in the tasks list first' : 'the selected video has no completed runs';
+      },
+      run: (scope) => onExportTaskRuns(exportableRunIds(scope)),
+    } : undefined,
+    export: canExportAll && !selectedRunStale && !comparison ? {
+      check: (value) => {
+        if (exportRunPending || bulkExportPending) return 'an export is in progress';
+        return value === 'accepted' && !canExportAccepted ? 'no step is accepted yet' : null;
+      },
+      run: (value) => handleSelectedRunExport(value === 'accepted' ? 'accepted' : 'all'),
+    } : undefined,
+    fold: setupFoldable || setupFolded ? { run: () => (setupFolded ? 'folded already' : foldSetup(true)) } : undefined,
+    unfold: setupFoldable || setupFolded ? { run: () => (!setupFolded ? 'open already' : foldSetup(false)) } : undefined,
+    analyse: {
+      check: () => {
+        if (healthWarning) return healthMessage ?? 'video tools are not ready';
+        if (!selectedRecordingId) return 'select a video first';
+        return createRunPending ? 'an analysis is starting' : null;
+      },
+      run: () => {
+        onStartRun();
+        return `analysing ${selectedRecordingSummary?.filename ?? 'the video'}`;
+      },
+    },
+    // parameters
+    type: {
+      current: () => (runSettings.stable.recording_type === 'desktop' ? 'computer' : 'phone'),
+      run: (value) => updateStable({ recording_type: value === 'computer' ? 'desktop' : 'phone' }),
+    },
+    min: {
+      current: () => String(effectiveStable.minDwellMs),
+      defaultValue: () => String(parameterDefaults.minDwellMs),
+      run: (value) => updateStable({ min_dwell_ms: argNumber(value) }),
+    },
+    change: {
+      current: () => String(effectiveStable.minChangePercent),
+      defaultValue: () => String(parameterDefaults.minChangePercent),
+      run: (value) => updateStable({ min_change_percent: argNumber(value) }),
+    },
+    statusbar: statusBarVisible ? {
+      current: () => (effectiveStable.ignoreStatusBar ? 'ignore' : 'include'),
+      run: (value) => {
+        const ignore = value === 'ignore';
+        updateStable({ ignore_status_bar: ignore === typeDefaults.ignore_status_bar ? null : ignore });
+      },
+    } : undefined,
+    scrolling: {
+      current: () => (runSettings.stable.scroll_mode === 'merge' ? 'merge' : 'each'),
+      run: (value) => updateStable({ scroll_mode: value === 'merge' ? 'merge' : 'each_stop' }),
+    },
+    typing: {
+      current: () => (runSettings.stable.group_typing ? 'on' : 'off'),
+      run: (value) => updateStable({ group_typing: onOff(value, runSettings.stable.group_typing) }),
+    },
+    opening: {
+      current: () => (runSettings.stable.include_opening_screen ? 'on' : 'off'),
+      run: (value) => updateStable({ include_opening_screen: onOff(value, runSettings.stable.include_opening_screen) }),
+    },
+    text: {
+      current: () => (runSettings.stable.enable_ocr ? 'on' : 'off'),
+      check: (value) => (onOff(value, runSettings.stable.enable_ocr) && !ocrAvailable ? ocrStatusMessage ?? 'text cannot be read here' : null),
+      run: async (value) => {
+        const on = onOff(value, runSettings.stable.enable_ocr);
+        // turned on only after the question, as the switch does
+        if (on && !runSettings.stable.enable_ocr && !(await confirmCommand(readTextQuestion))) return { problem: 'text stays off' };
+        updateStable({ enable_ocr: on });
+        return on ? 'text will be read' : 'text will not be read';
+      },
+    },
+    threshold: {
+      current: () => String(effectiveStable.sensitivity),
+      defaultValue: () => String(parameterDefaults.sensitivity),
+      run: (value) => updateStable({ sensitivity: argNumber(value) }),
+    },
+    rate: {
+      current: () => String(effectiveStable.sampleFps),
+      defaultValue: () => String(parameterDefaults.sampleFps),
+      run: (value) => updateStable({ sample_fps: argNumber(value) }),
+    },
+    preset: {
+      run: (value) => {
+        if (value === 'universal') onResetToUniversalDefaults();
+        else onResetToProjectDefaults();
+        return `loaded the ${value === 'universal' ? 'universal' : 'project'} preset`;
+      },
+    },
+    defaults: {
+      run: (value) => {
+        if (value === 'universal') onResetToUniversalDefaults();
+        else onResetToProjectDefaults();
+        return `parameters back to the ${value === 'universal' ? 'universal' : "project's"} defaults`;
+      },
+    },
+    hints: {
+      current: () => (showHints ? 'on' : 'off'),
+      run: (value) => {
+        if (onOff(value, showHints) !== showHints) handleToggleHints();
+      },
+    },
+    // the video
+    ...(previewOpen
+      ? {
+          play: { run: () => previewVideoRef.current?.play() },
+          pause: { run: () => previewVideoRef.current?.pause() },
+          seek: {
+            current: () => formatPlaybackTimestamp(previewPlaybackMs),
+            run: (value) => {
+              const ms = parseTime(value);
+              if (ms === null) return { problem: 'a time, as 1:23 or 83.5' };
+              const reached = seekPreviewTo(ms);
+              return reached === undefined ? { problem: 'the video is still opening' } : `at ${formatPlaybackTimestamp(reached)}`;
+            },
+          },
+          frame: {
+            run: (value) => {
+              const frames = parseFrames(value) ?? 1;
+              seekPreviewTo(previewPlaybackMs + (frames * 1000) / 30);
+            },
+          },
+          speed: { current: () => String(playbackRate), run: (value) => setPlaybackRate(Number(value)) },
+          mark: { run: () => handleCreateManualCandidate() },
+          player: {
+            current: () => ({ sm: 'small', md: 'medium', lg: 'large' })[previewSizeKey],
+            run: (value) => setPreviewSizeKey(value === 'small' ? 'sm' : value === 'large' ? 'lg' : 'md'),
+          },
+          closepreview: { run: () => onPreviewRecording(previewOpen.id) },
+        }
+      : {}),
+    // the steps
+    ...(reviewingSteps && selectedRun
+      ? {
+          step: {
+            describe: (value: string) => {
+              const found = commandSteps(value, true);
+              return 'steps' in found ? `${stepName(found.steps[0])}, ${found.steps[0].timestamp_tc}` : null;
+            },
+            check: (value: string) => {
+              const found = commandSteps(value, true);
+              return 'problem' in found ? found.problem : null;
+            },
+            run: (value: string) => {
+              const found = commandSteps(value, true);
+              if ('problem' in found) return found;
+              activateCandidate(found.steps[0].id, { reveal: true });
+            },
+          },
+          nextstep: { run: () => moveToVisibleStep('next') },
+          prevstep: { run: () => moveToVisibleStep('previous') },
+          firststep: { run: () => moveToVisibleStep('first') },
+          laststep: { run: () => moveToVisibleStep('last') },
+          pending: {
+            run: () => {
+              const shown = filteredCandidates;
+              const from = shown.findIndex((step) => step.id === activeCandidate?.id);
+              const next = [...shown.slice(from + 1), ...shown.slice(0, from + 1)].find((step) => step.status === 'pending');
+              if (!next) return { problem: 'every step shown is decided' };
+              activateCandidate(next.id, { reveal: true });
+            },
+          },
+          accept: { ...stepArgument, run: (arg: string) => decide('accepted', arg) },
+          reject: { ...stepArgument, run: (arg: string) => decide('rejected', arg) },
+          reset: { ...stepArgument, run: (arg: string) => decide('pending', arg) },
+          select: {
+            check: (arg: string) => (!arg || ['all', 'none', 'invert', 'pending'].includes(arg) ? null : stepArgument.check(arg)),
+            run: (arg: string) => {
+              if (!arg) return withActive((step) => toggleCandidateSelection(step.id));
+              if (arg === 'all') setSelectedCandidateIds(shownCandidateIds);
+              else if (arg === 'none') setSelectedCandidateIds([]);
+              else if (arg === 'invert') setSelectedCandidateIds((current) => invertSelection(current, shownCandidateIds));
+              else if (arg === 'pending') setSelectedCandidateIds(filteredCandidates.filter((step) => step.status === 'pending').map((step) => step.id));
+              else {
+                const found = commandSteps(arg);
+                if ('problem' in found) return found;
+                const visible = keepShown(found.steps.map((step) => step.id), shownCandidateIds);
+                if (visible.length !== found.steps.length) return { problem: 'some of those steps are hidden by the current filters' };
+                setSelectedCandidateIds(visible);
+                return `selected ${stepsLabel(found.steps, arg)}`;
+              }
+            },
+          },
+          filter: {
+            current: () => activeCandidateFilter,
+            run: (value: string) =>
+              moveCardsWithTransition(
+                () => document.getElementById('analysis-candidate-review'),
+                '.candidate-card, .candidate-row',
+                () => setActiveCandidateFilter(value as CandidateFilter),
+              ),
+          },
+          view: { current: () => stepLayout.view, run: (value: string) => setStepLayout((current) => ({ ...current, view: value as StepLayout['view'] })) },
+          size: {
+            current: () => (stepLayout.size === null ? 'fit' : String(stepLayout.size)),
+            defaultValue: () => 'fit',
+            run: (value: string) => setStepLayout((current) => ({ ...current, size: argNumber(value) })),
+          },
+          find: {
+            check: () => (selectedRun.summary.text.read + selectedRun.summary.text.earlier === 0 ? 'the text of this run has not been read: /readtext' : null),
+            current: () => textQuery || null,
+            run: (value: string) => setTextQuery(value),
+          },
+          title: {
+            current: () => activeCandidate?.title || null,
+            run: (value: string) => withActive((step) => onUpdateCandidate(step.id, { title: value.trim(), previous_title: step.title ?? '' })),
+          },
+          note: {
+            current: () => activeCandidate?.notes || null,
+            run: (value: string) => withActive((step) => onUpdateCandidate(step.id, { notes: value.trim(), previous_notes: step.notes ?? '' })),
+          },
+          popup: {
+            current: () => (activeCandidate && isPopupStep(activeCandidate) ? 'on' : 'off'),
+            run: (value: string) =>
+              withActive((step) => {
+                const on = onOff(value, isPopupStep(step));
+                onUpdateCandidate(step.id, popupChange(step, on));
+                return `${stepName(step)} is ${on ? '' : 'not '}a pop-up`;
+              }),
+          },
+          same: {
+            check: (value: string) => {
+              const found = commandSteps(value, true);
+              if ('problem' in found) return found.problem;
+              if (!activeCandidate) return 'no step is active';
+              const target = found.steps[0];
+              return target.detector_index < activeCandidate.detector_index && target.status !== 'rejected'
+                ? null
+                : 'choose an earlier step that is not rejected';
+            },
+            describe: (value: string) => {
+              const found = commandSteps(value, true);
+              return 'steps' in found && activeCandidate ? `${stepName(activeCandidate)} shows the screen of ${stepName(found.steps[0])}` : null;
+            },
+            run: (value: string) =>
+              withActive((step) => {
+                const found = commandSteps(value, true);
+                if ('steps' in found) onUpdateCandidate(step.id, { screen_link: found.steps[0].id });
+              }),
+          },
+          newscreen: {
+            run: () =>
+              withActive((step) => {
+                onUpdateCandidate(step.id, { screen_link: 'new' });
+                return `${stepName(step)} is a new screen`;
+              }),
+          },
+          playfrom: { run: () => withActive((step) => handlePlayFromHere(step)) },
+          readtext: {
+            check: () => {
+              if (!ocrAvailable) return ocrStatusMessage ?? 'text cannot be read here';
+              if (textPending) return 'the text request is in progress';
+              return textNotice?.action?.does === 'read' ? null : textNotice?.label || 'the text is being read';
+            },
+            run: async () => {
+              if (!(await confirmCommand(readTextQuestion))) return { problem: 'the text is not read' };
+              onReadText(selectedRun.summary.id);
+              return 'reading the text';
+            },
+          },
+          pathway: { run: () => switchToMode('pathway') },
+        }
+      : {}),
+    ...(showPathway && !comparison && !selectedRunStale ? { steps: { run: () => switchToMode('steps') } } : {}),
+  };
+  useCommands(commandHandlers);
+
   return (
     <div className="entry-screen analysis-screen">
       <div className="analysis-stage-shell">
@@ -1989,7 +2506,7 @@ export function AnalysisScreen({
                 </svg>
               </button>
             </div>
-            <section className="analysis-panel analysis-preview-panel" data-size={previewSizeKey} id="analysis-video-preview">
+            <section className="analysis-panel analysis-preview-panel" data-size={previewSizeKey} id="analysis-video-preview" tabIndex={-1}>
                   <span className="analysis-preview-filename">{previewRecording?.filename}</span>
                   <video
                     className="analysis-preview-video"
@@ -2230,6 +2747,7 @@ export function AnalysisScreen({
             aria-busy={selectedRunStale || undefined}
             className={`analysis-detail-section stack-gap ${selectedRunStale ? 'is-stale' : ''}`}
             id="analysis-run-detail"
+            tabIndex={-1}
           >
             {/* One title row: the file name on the left, when it ran and its logs on the right. Its settings are in the
                 tasks list (details), so they are not repeated here. */}
@@ -2391,6 +2909,7 @@ export function AnalysisScreen({
 
             {showPathway ? (
               <PathwayPanel
+                commandsEnabled={!selectedRunStale}
                 onOpenAbout={onOpenAbout}
                 onUpdateCandidate={onUpdateCandidate}
                 projectName={activeProject?.name ?? ''}
@@ -2518,7 +3037,7 @@ export function AnalysisScreen({
                 )}
 
                 {canShowTimeline ? (
-                  <div className="candidate-timeline-wrapper">
+                  <div className="candidate-timeline-wrapper" id="analysis-timeline" tabIndex={-1}>
                     <div className="timeline-legend" aria-hidden="false">
                       {transitionLabels
                         .filter(({ type }) =>
@@ -2690,6 +3209,7 @@ export function AnalysisScreen({
                   className={`candidate-review-toolbar ${selectedShownCandidateIds.length > 0 ? 'has-selection' : ''} ${toolbarStuck ? 'is-stuck' : ''}`}
                   id="analysis-review-toolbar"
                   ref={setStepToolbar}
+                  tabIndex={-1}
                 >
                   <div className="candidate-review-nav-group">
                     <div aria-label="candidate review filters" className="candidate-filter-tabs" role="tablist">
@@ -2717,10 +3237,11 @@ export function AnalysisScreen({
                     </div>
                     {canReviewCandidates && (
                       <span
-                        aria-label="keyboard shortcuts: a to accept, r to reject, u to reset to undecided, x to select (shift+x for a range), p to play from the step, arrow keys to step, shift+F10 for a menu of every action"
+                        aria-label="keyboard shortcuts: slash for commands, a to accept, r to reject, u to reset to undecided, x to select (shift+x for a range), p to play from the step, arrow keys to step, shift+F10 for a menu of every action"
                         className="candidate-review-key-hint"
                         title="right-click a step for a menu of every action, or one of several selected steps for all of them"
                       >
+                        <span><span className="candidate-key-badge">/</span> commands</span>
                         <span><span className="candidate-key-badge">a</span> accept</span>
                         <span><span className="candidate-key-badge">r</span> reject</span>
                         <span><span className="candidate-key-badge">u</span> reset</span>
@@ -3073,6 +3594,7 @@ export function AnalysisScreen({
         ) : null}
       </div>
       {whatsNew ? <WhatsNewTour onClose={() => setWhatsNew(false)} /> : null}
+      {commandDialog}
     </div>
   );
 }

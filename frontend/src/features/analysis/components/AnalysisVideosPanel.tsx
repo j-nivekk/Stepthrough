@@ -115,6 +115,8 @@ export function AnalysisVideosPanel({
   return (
     <section
       className="analysis-column"
+      id="analysis-videos"
+      tabIndex={-1}
       onDragOver={(event) => {
         if (!isFileDrag(event)) {
           return;

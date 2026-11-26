@@ -4,6 +4,7 @@ import type { SimilarLink } from '../lib/analysis';
 import { formatPathwayTime } from '../lib/pathwayFigure';
 import type { GalleryLayoutSizing } from '../lib/stepLayout';
 import { START } from '../lib/stepNumbers';
+import { isCommandBarInput } from '../lib/utils';
 import type { CandidateChanges, CandidateFrame, CandidateStatus, StepTextDetail } from '../types';
 import {
   BackLink,
@@ -567,7 +568,7 @@ function GalleryInspector({
   useEffect(() => {
     if (!scoresOpen && !textOpen) return;
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !isCommandBarInput(event.target)) {
         event.stopPropagation();
         setScoresOpen(false);
         onToggleText(false);

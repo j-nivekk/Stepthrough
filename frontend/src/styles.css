@@ -14,6 +14,16 @@
   font-display: swap;
 }
 
+/* The command bar's face (components/CommandBar.tsx): Maple Mono (SIL Open Font License 1.1, assets/fonts/OFL-MapleMono.txt),
+   one weight, Latin only. Fetched the first time the bar shows. */
+@font-face {
+  font-family: "Maple Mono";
+  src: url("./assets/fonts/MapleMono-Regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
   font-family: "Inter", "Avenir Next", "Helvetica Neue", "Trebuchet MS", sans-serif;
@@ -11508,4 +11518,195 @@ button:disabled {
 /* Opening a run at its steps puts their top below the bar that stays over them (.candidate-review-toolbar). */
 #analysis-candidate-review {
   scroll-margin-top: 56px;
+}
+
+/* The command bar (components/CommandBar.tsx): a line across the bottom of the window, in neutral greys rather than the
+   app's warm ones, so that it reads as a tool laid over the page. Commands and what they take are in Maple Mono, what
+   they do in Inter. */
+.command-bar {
+  --command-mono: "Maple Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  position: fixed;
+  z-index: 60;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #ececec;
+  border-top: 1px solid #c4c4c4;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.07);
+  color: #1d1d1d;
+  animation: command-bar-in var(--motion-base) var(--ease-out);
+}
+
+@keyframes command-bar-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.command-bar-line {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 42px;
+  padding: 0 18px;
+}
+
+.command-bar-field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--command-mono);
+  font-size: 14px;
+  font-variant-ligatures: none;
+  line-height: 20px;
+}
+
+.command-bar-input {
+  position: relative;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-ligatures: none;
+  line-height: inherit;
+  caret-color: #1d1d1d;
+}
+
+/* behind the input: what is typed (unseen) and, after it, the rest of the best match or what the command takes */
+.command-bar-ghost {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: #9b9b9b;
+  pointer-events: none;
+  white-space: pre;
+}
+
+.command-bar-typed {
+  visibility: hidden;
+}
+
+.command-bar-status {
+  flex: 0 1 auto;
+  max-width: 55%;
+  overflow: hidden;
+  color: #6b6b6b;
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-bar-status.is-problem {
+  color: var(--danger);
+}
+
+.command-bar-list {
+  max-height: min(48vh, 340px);
+  overflow-y: auto;
+  padding: 6px 0;
+  border-bottom: 1px solid #d4d4d4;
+  background: #f2f2f2;
+}
+
+.command-bar-group + .command-bar-group {
+  margin-top: 6px;
+}
+
+.command-bar-group-title {
+  margin: 0;
+  padding: 4px 18px 2px;
+  color: #8a8a8a;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.command-bar-item {
+  display: grid;
+  grid-template-columns: minmax(220px, max-content) minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 18px;
+  padding: 5px 18px;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+.command-bar-item:hover,
+.command-bar-item[aria-selected="true"] {
+  background: #dddddd;
+}
+
+.command-bar-item.is-elsewhere {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.command-bar-item.is-elsewhere:hover {
+  background: transparent;
+}
+
+.command-bar-label {
+  font-family: var(--command-mono);
+  font-size: 13px;
+  font-variant-ligatures: none;
+  white-space: nowrap;
+}
+
+.command-bar-aliases {
+  display: block;
+  color: #6b6b6b;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.command-bar-note {
+  overflow: hidden;
+  color: #5f5f5f;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-bar-where {
+  color: #8a8a8a;
+  font-family: var(--command-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* what a command did, for a moment, where the bar was */
+.command-bar-said {
+  position: fixed;
+  z-index: 60;
+  left: 18px;
+  bottom: 16px;
+  max-width: min(560px, calc(100vw - 36px));
+  padding: 6px 12px;
+  border: 1px solid #c4c4c4;
+  background: #ececec;
+  color: #1d1d1d;
+  font-size: 12px;
+  line-height: 1.3;
+  pointer-events: none;
+  animation:
+    command-bar-in var(--motion-base) var(--ease-out),
+    command-bar-said-out var(--motion-slow) var(--ease-out) 2.2s forwards;
+}
+
+@keyframes command-bar-said-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .command-bar,
+  .command-bar-said {
+    animation: none;
+  }
 }

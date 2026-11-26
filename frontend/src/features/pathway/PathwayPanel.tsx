@@ -29,8 +29,11 @@ import { PathwayCanvas, type PhaseRequest } from './PathwayCanvas';
 import { usePathwayPeek } from './usePathwayPeek';
 import { track } from '../../lib/usage';
 import { PlaceholderFigure } from '../../components/Placeholders';
+import { useCommands } from '../../lib/commandRegistry';
+import { argNumber } from '../../lib/commands';
 
 interface PathwayPanelProps {
+  commandsEnabled: boolean;
   /** Opens the about panel at the bottom right, where the tutorial stays within reach. */
   onOpenAbout: () => void;
   onUpdateCandidate: (candidateId: string, changes: CandidateChanges) => void;
@@ -104,7 +107,7 @@ async function embedImage(url: string, maxWidth: number): Promise<string> {
   return canvas.toDataURL('image/jpeg', 0.86);
 }
 
-export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, recording, run }: PathwayPanelProps) {
+export function PathwayPanel({ commandsEnabled, onOpenAbout, onUpdateCandidate, projectName, recording, run }: PathwayPanelProps) {
   const queryClient = useQueryClient();
   const editingCandidates = useIsMutating({ mutationKey: ['candidate-update'] }) > 0;
   const [view, setView] = useState<PathwayView>(() => loadPathwayView());
@@ -241,6 +244,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
       if (format === 'svg') downloadText(name, `<?xml version="1.0" encoding="UTF-8"?>\n${file.svg}\n`, 'image/svg+xml');
       else downloadBlob(name, await renderPathwayPng(file, { regular: interUrl, italic: interItalicUrl }));
       void notePathwayFigure(run.summary.id, format).catch(() => undefined); // for the usage and progress reports
+      return true;
     } catch (error) {
       setDownloadError(error instanceof Error ? error.message : 'could not make the figure.');
     } finally {
@@ -314,9 +318,62 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
     </div>
   ) : null;
 
+  // The command bar's pathway commands (lib/commands.ts), while the pathway is shown.
+  const onOrToggle = (value: string, now: boolean) => (value ? value === 'on' : !now);
+  useCommands(!commandsEnabled ? null : run.accepted_steps.length === 0 ? { tutorial: { run: openTutorial } } : {
+    boxes: {
+      current: () => view.detail,
+      run: (value) => {
+        const detail = value as PathwayDetail;
+        if (view.detail !== detail) track({ kind: 'boxes_switched', to: detail });
+        setView((current) => ({ ...current, detail }));
+      },
+    },
+    notes: {
+      current: () => view.notes === 'hidden' ? 'off' : view.notes,
+      run: (value) => setView((current) => ({ ...current, notes: (value === 'key' ? 'key' : value === 'off' ? 'hidden' : 'under') as PathwayNotesPlacement })),
+    },
+    detours: hasDetours
+      ? { current: () => (view.countDetours ? 'counted' : 'out'), run: (value) => setView((current) => ({ ...current, countDetours: value === 'counted' })) }
+      : undefined,
+    times: { current: () => (view.times ? 'on' : 'off'), run: (value) => setView((current) => ({ ...current, times: onOrToggle(value, current.times) })) },
+    legend: {
+      current: () => (view.caption ? 'on' : 'off'),
+      run: (value) => setView((current) => ({ ...current, caption: onOrToggle(value, current.caption) })),
+    },
+    phases: pathway
+      ? {
+          run: () => {
+            const button = document.querySelector('[data-phases-toggle]')?.getBoundingClientRect();
+            setPhases({ list: true, at: { x: button?.left ?? 24, y: (button?.bottom ?? 80) + 6 } });
+          },
+        }
+      : undefined,
+    zoom: {
+      current: () => (view.zoom === null ? 'fit' : String(Math.round(view.zoom * 100))),
+      defaultValue: () => 'fit',
+      run: (value) => {
+        const percent = argNumber(value);
+        const control = document.querySelector('.pathway-panel .candidate-size-slider') ?? document.querySelector('.pathway-panel');
+        if (!control) return;
+        setSize(control, percent === null ? null : clampPathwayZoom(percent / 100));
+      },
+    },
+    download: figure
+      ? {
+          check: () => (downloading !== null || updating ? 'the figure is being made' : null),
+          run: async (value) => {
+            const downloaded = await handleDownload(value === 'svg' ? 'svg' : 'png');
+            return downloaded ? `downloaded the ${value.toUpperCase()} figure` : { problem: 'could not download the figure' };
+          },
+        }
+      : undefined,
+    tutorial: { run: () => openTutorial() },
+  });
+
   if (run.accepted_steps.length === 0) {
     return (
-      <div className="pathway-panel">
+      <div className="pathway-panel" id="analysis-pathway" tabIndex={-1}>
         {invitation}
         <p className="entry-empty-copy candidate-empty-copy">
           a pathway is drawn from the accepted steps. accept the steps that belong in the walkthrough under <b>steps</b>,
@@ -498,7 +555,7 @@ export function PathwayPanel({ onOpenAbout, onUpdateCandidate, projectName, reco
   );
 
   return (
-    <div className="pathway-panel" ref={areaRef}>
+    <div className="pathway-panel" id="analysis-pathway" ref={areaRef} tabIndex={-1}>
       {invitation}
       {tutorial}
       {pathway && figure && figureMarkup ? (
