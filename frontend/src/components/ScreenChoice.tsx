@@ -20,7 +20,7 @@ export function popupChange(candidate: CandidateFrame, popup: boolean): Candidat
 
 function linkText(candidate: CandidateFrame, steps: CandidateFrame[], numberOf: (step: CandidateFrame) => ReviewNumber): string | null {
   if (!candidate.screen_link) return null;
-  if (candidate.screen_link === 'new') return 'a new screen';
+  if (candidate.screen_link === 'new') return 'as new screen';
   const same = steps.find((step) => step.id === candidate.screen_link);
   if (!same) return null;
   return `same as ${numberOf(same).short}`;
@@ -32,9 +32,10 @@ export function screenChoiceSummary(
   steps: CandidateFrame[],
   numberOf: (step: CandidateFrame) => ReviewNumber,
 ): string | null {
-  const parts = [linkText(candidate, steps, numberOf), candidate.screen_kind === 'popup' ? 'pop-up' : candidate.screen_kind === 'screen' ? 'not a pop-up' : null];
-  const chosen = parts.filter(Boolean);
-  return chosen.length ? chosen.join(' · ') : null;
+  const link = linkText(candidate, steps, numberOf);
+  const kind = candidate.screen_kind === 'popup' ? 'pop-up' : candidate.screen_kind === 'screen' ? 'not a pop-up' : null;
+  if (link && kind) return `${link} (${kind})`;
+  return link ?? kind;
 }
 
 const POPOVER_WIDTH = 264;
@@ -132,7 +133,7 @@ export function ScreenChoice({ candidate, steps, onUpdate, prefix, icon, anyStep
     triggerRef.current?.focus();
   }
 
-  const valueText = `${link ?? 'automatic'}${popup && !hidePopup ? ' · pop-up' : ''}`;
+  const valueText = `${link ?? 'automatic'}${popup && !hidePopup ? ' (pop-up)' : ''}`;
   const popover = open ? (
     <div
       aria-label={`stacking of ${numberOf(candidate).name} in the pathway`}
