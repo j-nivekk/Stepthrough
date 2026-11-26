@@ -527,7 +527,7 @@ pathways**. On a practice recording you fold steps into screens, follow the jour
 grouping got wrong, correct it, and prepare the figure. Nothing in it changes your own runs.
 
 After an update, a short tour shows what changed, the first time you open the steps of a finished run: each stop lights
-up one control and says what it does. **skip** ends it, and it stays under **about** as **what's new in 1.5.0**. Used
+up one control and says what it does. **skip** ends it, and it stays under **about** as **what's new in 1.5.1**. Used
 pathways before version 1.4? Correcting them works differently now (see below), and lesson 5 of the tutorial has you try
 it.
 

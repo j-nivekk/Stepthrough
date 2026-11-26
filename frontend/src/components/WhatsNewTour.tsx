@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { createPortal } from 'react-dom';
 
 /** The version whose changes the tour shows: it opens once per browser for each. */
-export const WHATS_NEW_VERSION = '1.5.0';
+export const WHATS_NEW_VERSION = '1.5.1';
 const SEEN_KEY = 'stepthrough.whats-new';
 
 /** Whether to open the tour by itself: for someone who saw the tour of an earlier version, so knew the app before.
@@ -42,75 +42,47 @@ const first = (...selectors: string[]) => {
   return [];
 };
 
-/** Where text is asked for: the run's button, or else the bar it is in, beside export (where the run opens). */
-const readText = () => {
-  const button = all('.run-text button').filter((element) => /read|try again/.test(element.textContent ?? '')).slice(0, 1);
-  return button.length ? button : first('.review-mode-side', '.review-mode-bar');
-};
-
-/** Where a step's text opens: on a card, or beside the screenshot in the gallery. */
-const textLinks = () => {
-  const card = one('.candidate-step-text summary');
-  if (card.length) return card;
-  return all('.candidate-gallery-scores-toggle').filter((button) => button.textContent?.trim() === 'text').slice(0, 1);
-};
-
 const STOPS: Stop[] = [
   {
-    title: 'the text on the screens',
+    title: 'workspace and review',
     text: (
       <>
-        stepthrough reads the text on each screenshot, of any run, also older ones: <b>read text</b> beside{' '}
-        <b>export</b>, or <b>read text (ocr)</b> before an analysis. the steps come first and the text follows, much
-        faster than before and in more languages. you can go on working meanwhile.
+        opening a finished run puts the page in <b>review</b> mode, tucking the videos, parameters and tasks away so
+        the steps have the page. switch back to <b>workspace</b> at the top whenever you need them.
       </>
     ),
-    find: readText,
+    find: () => one('.analysis-layout-switch'),
   },
   {
-    title: 'text of 1.4 can be wrong',
+    title: 'slash opens a command bar',
     text: (
       <>
-        up to 1.4.5, a screenshot could get the text of an earlier one that looked much like it. a run with such text
-        says <b>text read by an earlier version</b>, and <b>read again</b> replaces it. in exports it is marked{' '}
-        <code>earlier</code>.
+        press <code>/</code> outside a text field to open the command bar at the bottom of the window. jump to a step
+        (<code>/30</code>), decide a range (<code>/a 3-7</code>), change settings, switch runs or export;{' '}
+        <code>/help</code> lists what works here.
       </>
     ),
-    find: () => first('.run-text', '.review-mode-bar'),
+    find: () => first('.candidate-review-key-hint', '#analysis-review-toolbar'),
   },
   {
-    title: 'read it, find it',
+    title: 'the bar stays in view, and your place is kept',
     text: (
       <>
-        <b>text</b> on a step shows what was read. in the gallery the lines are also marked on the screenshot: point at
-        a line to see where it is. <b>find text</b> shows only the steps with the words you type.
+        the filters, selection and layout stay at the top of the window as you scroll, and review clicks show at once.
+        a finished run reopens at the step you last worked on, with a link back to the start.
       </>
     ),
-    find: () => {
-      const links = textLinks();
-      return links.length ? links : first('.run-text-find', '[aria-label="step layout"]');
-    },
+    find: () => one('#analysis-review-toolbar'),
   },
   {
-    title: 'in exports, also as PAGE XML',
+    title: 'back to the top',
     text: (
       <>
-        <code>steps.json</code> has each line with its place on the screenshot. the text of each screenshot is also in{' '}
-        <code>images/page</code> as PAGE XML, which Transkribus and eScriptorium open with the screenshots.
+        once you scroll down, an orange <b>↑ top</b> tab slides out beside the watermark at the bottom right to take
+        you back to the top without invoking the command bar. this tour stays under <b>about</b>.
       </>
     ),
-    find: () => one('.candidate-export-shell'),
-  },
-  {
-    title: 'how long it takes',
-    text: (
-      <>
-        an analysis that waits or runs says when it should be ready, and so does its text:{' '}
-        <b>34%, ready in about 20 s</b>. the server works it out from what it took before, so it is rough. this tour
-        stays under <b>about</b>.
-      </>
-    ),
-    find: () => first('.analysis-tasks .analysis-task-row', '.analysis-tasks'),
+    find: () => one('.app-watermark-shell'),
   },
 ];
 
@@ -146,7 +118,7 @@ function around(elements: Element[]): Rect | null {
 /**
  * What changed, shown in place: each stop lights up one control, with the rest of the page dimmed, and says what it
  * does now. Next, back and skip (or the arrow keys and Escape); the page cannot be used meanwhile. Opened by itself
- * once per browser for each version, where the changes are (for 1.5.0 the steps of a finished run: AnalysisScreen),
+ * once per browser for each version, where the changes are (for 1.5.1 the steps of a finished run: AnalysisScreen),
  * and from about at any time. Without them on the page, the notes are shown in the middle of the window, with a word
  * to open them.
  */
