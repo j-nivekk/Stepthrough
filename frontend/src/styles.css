@@ -2834,8 +2834,10 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
 }
 
 /* Centred on the top navigation line: switches between workspace (videos, parameters and tasks above the review)
-   and review (focused on the run), in the same 30px flat bar grammar as .stage-pill. */
+   and review (focused on the run), in the same 30px flat bar grammar as .stage-pill. A white sliding thumb glides
+   between the two segments on click, and tracks upward overscroll at y=0 in review mode with friction. */
 .analysis-layout-switch {
+  position: relative;
   display: inline-flex;
   align-items: stretch;
   height: 30px;
@@ -2846,7 +2848,28 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   user-select: none;
 }
 
+.analysis-layout-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  z-index: 0;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  will-change: transform, width;
+  transition:
+    transform var(--motion-base) var(--ease-move),
+    width var(--motion-base) var(--ease-move);
+}
+
+.analysis-layout-switch.is-pulling .analysis-layout-thumb {
+  transition: none;
+}
+
 .analysis-layout-btn {
+  position: relative;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2876,12 +2899,31 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
+/* Once the sliding thumb is measured, it carries the white surface instead of the buttons themselves. */
+.analysis-layout-switch.has-thumb .analysis-layout-btn.active {
+  background: transparent;
+  box-shadow: none;
+}
+
+.analysis-layout-switch.is-pulling .analysis-layout-btn {
+  transition: none;
+}
+
+.analysis-layout-switch.is-pulling .analysis-layout-btn.is-workspace {
+  color: rgba(0, 0, 0, calc(0.48 + 0.4 * var(--layout-pull, 0)));
+}
+
+.analysis-layout-switch.is-pulling .analysis-layout-btn.is-review {
+  color: rgba(0, 0, 0, calc(0.88 - 0.34 * var(--layout-pull, 0)));
+}
+
 .analysis-layout-btn:focus-visible {
   outline: 2px solid rgba(72, 175, 124, 0.4);
   outline-offset: -2px;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .analysis-layout-thumb,
   .analysis-layout-btn {
     transition: none;
   }

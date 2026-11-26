@@ -74,6 +74,7 @@ import type {
 import { AnalysisParametersPanel } from './components/AnalysisParametersPanel';
 import { AnalysisTasksPanel } from './components/AnalysisTasksPanel';
 import { AnalysisVideosPanel } from './components/AnalysisVideosPanel';
+import { LayoutSwitch } from './components/LayoutSwitch';
 import { RunComparison, type CarryOverPair } from './components/RunComparison';
 import { RunTextControl } from './components/RunTextControl';
 import { WhatsNewTour, whatsNewDue } from '../../components/WhatsNewTour';
@@ -2369,39 +2370,11 @@ export function AnalysisScreen({
             )}
           </div>
           {setupFoldable || setupFolded ? (
-            <div aria-label="page layout" className="analysis-layout-switch" role="group">
-              <button
-                aria-controls="analysis-setup"
-                aria-pressed={!setupFolded}
-                className={`analysis-layout-btn ${!setupFolded ? 'active' : ''}`}
-                onClick={() => foldSetup(false)}
-                title="show videos, parameters and tasks above the review"
-                type="button"
-              >
-                <svg aria-hidden="true" fill="none" height="12" stroke="currentColor" strokeWidth="1.2" viewBox="0 0 14 12" width="14">
-                  <rect height="10.5" width="12.5" x="0.75" y="0.75" />
-                  <line x1="0.75" x2="13.25" y1="5.5" y2="5.5" />
-                  <line x1="5" x2="5" y1="0.75" y2="5.5" />
-                  <line x1="9" x2="9" y1="0.75" y2="5.5" />
-                </svg>
-                <span>workspace</span>
-              </button>
-              <button
-                aria-controls="analysis-setup"
-                aria-pressed={setupFolded}
-                className={`analysis-layout-btn ${setupFolded ? 'active' : ''}`}
-                onClick={() => foldSetup(true)}
-                title="focus on the run review"
-                type="button"
-              >
-                <svg aria-hidden="true" fill="none" height="12" stroke="currentColor" strokeWidth="1.2" viewBox="0 0 14 12" width="14">
-                  <rect height="10.5" width="12.5" x="0.75" y="0.75" />
-                  <line strokeOpacity="0.45" x1="3" x2="11" y1="4.2" y2="4.2" />
-                  <line strokeOpacity="0.45" x1="3" x2="9" y1="7.2" y2="7.2" />
-                </svg>
-                <span>review</span>
-              </button>
-            </div>
+            <LayoutSwitch
+              controlsId="analysis-setup"
+              mode={setupFolded ? 'review' : 'workspace'}
+              onChange={(next) => foldSetup(next === 'review')}
+            />
           ) : (
             <span aria-hidden="true" />
           )}
