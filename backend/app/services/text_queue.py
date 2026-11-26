@@ -8,17 +8,23 @@ before it are not read again.
 
 A reader that takes too long, dies or grows too large is replaced, and the screenshot it was on is tried once more. One
 that cannot be read either time is marked and left. A reader without work ends after a while, and gives its memory back.
+
+How long a run still has to wait is worked out from the same turns (``seconds_left``): before its last screenshot is
+read, every other run has at most as many read, at the time a screenshot of it takes. That time is measured: the run's
+own, once a few of its screenshots are read, or else what screenshots of its size took lately.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 import os
+import statistics
 import subprocess
 import sys
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +43,8 @@ IDLE_S = 60  # a reader without work ends after this
 MEMORY_LIMIT_MB = 2500  # a reader that used more is replaced after its screenshot
 TRIES = 2
 BACKEND = Path(__file__).resolve().parents[2]
+LATELY = 50  # screenshots whose reading time stands for what screenshots take now
+KNOWN_AFTER = 3  # screenshots of a run, or lately of any, before their time is believed
 
 
 class Unavailable(Exception):
@@ -57,6 +65,34 @@ class Screen:
     run_id: str
     step_id: str
     image: str
+    pixels: int = 0  # of the screenshot, where it is known beforehand: for how long it will take
+
+
+def seconds_left(
+    waiting: dict[str, tuple[int, float | None]],
+    run_id: str,
+    readers: int,
+    joining: list[tuple[int, float, float | None]] = (),
+) -> float | None:
+    """How long until the last screenshot of ``run_id`` is read. ``waiting`` has, for every run in the queue, how many of
+    its screenshots are left and how long one takes (None: not known). Runs take turns, so before the last of this run
+    every other run has at most as many read as this one has left; a run is read by one reader at a time.
+
+    ``joining`` are runs that will join the queue (their analysis is still going): how many screenshots they are expected
+    to have, in how many seconds they join, and how long one takes. One that joins in time takes turns from then on,
+    while this run has fewer left."""
+    left, each = waiting.get(run_id, (0, None))
+    if not left or each is None or readers < 1:
+        return None
+    total = sum(min(count, left) * (seconds if seconds is not None else each) for count, seconds in waiting.values())
+    eta = max(left * each, total / readers)
+    for count, join_in, seconds in sorted(joining, key=lambda joiner: joiner[1]):
+        if join_in >= eta:
+            continue
+        still = math.ceil(left * (1 - join_in / eta))
+        total += min(count, still) * (seconds if seconds is not None else each)
+        eta = max(left * each, total / readers)
+    return eta
 
 
 @dataclass(frozen=True)
@@ -171,6 +207,13 @@ class TextQueue:
         self._serving: dict[int, Thread] = {}
         self._live: dict[int, Reader] = {}
         self._closed = False
+        # How long reading took: each run's own (seconds, screenshots), and lately of any (seconds per megapixel, and
+        # per screenshot)
+        self._took: dict[str, tuple[float, int]] = {}
+        self._per_megapixel: deque[float] = deque(maxlen=LATELY)
+        self._per_screen: deque[float] = deque(maxlen=LATELY)
+        self._in_turn: dict[str, int] = {}  # screenshots of the turn being read, not read yet
+        self._pixels: dict[str, int] = {}
 
     # ── asking ────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -181,13 +224,44 @@ class TextQueue:
             waiting = [*waiting, *(screen for screen in screens if screen.step_id not in there)]
             if waiting and not self._closed:
                 self._waiting[run_id] = waiting
+                self._pixels[run_id] = waiting[-1].pixels or self._pixels.get(run_id, 0)
                 self._start_serving()
                 self._changed.notify_all()
+
+    def seconds_left(self, run_id: str, joining: list[tuple[int, float, int]] = ()) -> float | None:
+        """About how long until the text of the run is read; None when there is nothing to go by yet. ``joining``: runs
+        still being analysed that will join, as (screenshots expected, seconds until they join, pixels)."""
+        with self._changed:
+            runs = set(self._waiting) | set(self._reading)
+            waiting = {run: (len(self._waiting.get(run, [])) + self._in_turn.get(run, 0), self._each(run)) for run in runs}
+            later = [(count, join_in, self._each_of_size(pixels)) for count, join_in, pixels in joining]
+            return seconds_left(waiting, run_id, self._readers, later)
+
+    def _each_of_size(self, pixels: int) -> float | None:
+        if pixels and len(self._per_megapixel) >= KNOWN_AFTER:
+            return statistics.median(self._per_megapixel) * pixels / 1e6
+        return statistics.median(self._per_screen) if len(self._per_screen) >= KNOWN_AFTER else None
+
+    def _each(self, run_id: str) -> float | None:
+        """How long a screenshot of the run takes to read, as far as is known."""
+        seconds, count = self._took.get(run_id, (0.0, 0))
+        if count >= KNOWN_AFTER:
+            return seconds / count
+        return self._each_of_size(self._pixels.get(run_id, 0))
+
+    def _measured(self, screen: Screen, seconds: float, pixels: int) -> None:
+        with self._changed:
+            total, count = self._took.get(screen.run_id, (0.0, 0))
+            self._took[screen.run_id] = (total + seconds, count + 1)
+            self._per_screen.append(seconds)
+            if pixels:
+                self._per_megapixel.append(seconds / (pixels / 1e6))
 
     def remove(self, run_id: str) -> None:
         """Leave what is still waiting of a run unread. A screen being read right now is still answered."""
         with self._changed:
             self._waiting.pop(run_id, None)
+            self._took.pop(run_id, None)
 
     def set_limits(self, readers: int, threads: int) -> None:
         """How many readers there may be (0: none, nothing is read), and how many threads each has."""
@@ -242,6 +316,7 @@ class TextQueue:
                         else:
                             del self._waiting[run_id]
                         self._reading.add(run_id)
+                        self._in_turn[run_id] = len(waiting[:TURN])
                         return waiting[:TURN]
                 left = end - time.monotonic()
                 if left <= 0:
@@ -269,6 +344,10 @@ class TextQueue:
             finally:
                 with self._changed:
                     self._reading.discard(run_id)
+                    self._in_turn.pop(run_id, None)
+                    if run_id not in self._waiting:
+                        self._took.pop(run_id, None)
+                        self._pixels.pop(run_id, None)
                     if run_id in self._waiting:
                         self._waiting.move_to_end(run_id)  # behind those that came during its turn
                     self._changed.notify_all()
@@ -291,11 +370,15 @@ class TextQueue:
                     logger.warning("The text of a screenshot could not be read: %s", answer["error"])
                 else:
                     reading = Reading(answer["lines"], answer["width"], answer["height"])
+                    if isinstance(answer.get("seconds"), (int, float)):
+                        self._measured(screen, float(answer["seconds"]), answer["width"] * answer["height"])
                 if (answer.get("memory_mb") or 0) > MEMORY_LIMIT_MB:
                     self._stop_reader(number)
                 break
             if self._closed:
                 return
+            with self._changed:
+                self._in_turn[screen.run_id] = max(0, self._in_turn.get(screen.run_id, 1) - 1)
             if not self._keep(screen, reading):
                 self.remove(screen.run_id)
                 return

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { formatAnalysisWait, formatWait } from '../src/lib/formatters';
 import { foldText, hasText, runTextNotice, searchWords, stepTextNote, stepsWithText } from '../src/lib/stepText';
 import type { RunText, RunTextDetail } from '../src/types';
 
@@ -66,7 +67,7 @@ test('text of an earlier version is said to be, and can be read again', () => {
   assert.equal(runTextNotice(text({ earlier: 12 }), 12).label, 'text read by an earlier version');
   const part = runTextNotice(text({ earlier: 5, read: 7 }), 12);
   assert.deepEqual([part.label, part.action?.label], ['text of 5 steps read by an earlier version', 'read again']);
-  assert.match(part.title ?? '', /1\.4\.6/);
+  assert.match(part.title ?? '', /1\.5\.0/);
 });
 
 test('why text was not read is said as the app writes', () => {
@@ -83,4 +84,24 @@ test('a step without lines says why', () => {
     (['waiting', 'failed', 'read', null] as const).map((text_state) => stepTextNote({ text_state })),
     ['waiting to be read', 'the text of this screenshot could not be read', 'no text on this screen', 'the text of this screenshot has not been read'],
   );
+});
+
+test('a run being read says when it is ready, once the server can tell', () => {
+  assert.equal(runTextNotice(text({ waiting: 5, read: 7, seconds_left: 70 }), 12).label, 'reading text, 7 of 12, ready in about a minute');
+  assert.equal(runTextNotice(text({ waiting: 5, read: 7, seconds_left: null }), 12).label, 'reading text, 7 of 12');
+});
+
+test('waits are put as roughly as they are known', () => {
+  assert.deepEqual(
+    [3, 9.9, 14, 26, 49, 50, 89, 90, 151, 3500, 3600, 5400, 7300].map(formatWait),
+    ['a few seconds', 'a few seconds', 'about 10 s', 'about 30 s', 'about 50 s', 'about a minute', 'about a minute',
+     'about 2 min', 'about 3 min', 'about 58 min', 'about 1 hour', 'about 1.5 hours', 'about 2 hours'],
+  );
+});
+
+test('an analysis says when it is ready, and a queued one when it starts', () => {
+  assert.equal(formatAnalysisWait({ status: 'running', seconds_left: 22 }), 'ready in about 20 s');
+  assert.equal(formatAnalysisWait({ status: 'queued', seconds_to_start: 70, seconds_left: 95 }), 'ready in about 2 min, starts in about a minute');
+  assert.equal(formatAnalysisWait({ status: 'queued', seconds_to_start: 0, seconds_left: 20 }), 'ready in about 20 s');
+  assert.equal(formatAnalysisWait({ status: 'running', seconds_left: null }), null);
 });

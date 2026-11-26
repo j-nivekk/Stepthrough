@@ -83,6 +83,10 @@ class TextReading:
             self.resume(run_id)
         return asked
 
+    def seconds_left(self, run_id: str, joining: list[tuple[int, float, int]] = ()) -> float | None:
+        """About how long until what waits of the run is read; ``joining`` as ``TextQueue.seconds_left`` has it."""
+        return self._queue.seconds_left(run_id, joining)
+
     def prepare(self, run_id: str, only: Collection[str] | None = None) -> int:
         """Mark them as waiting, for ``resume`` to read."""
         with self._lock:
@@ -130,7 +134,7 @@ class TextReading:
 
     @staticmethod
     def _screen(run_id: str, step: dict[str, Any]) -> Screen:
-        return Screen(run_id, step["id"], str(absolute_data_path(step["image_path"])))
+        return Screen(run_id, step["id"], str(absolute_data_path(step["image_path"])), step.get("pixels") or 0)
 
     def _keep(self, screen: Screen, reading: Reading) -> bool:
         text = stored = None

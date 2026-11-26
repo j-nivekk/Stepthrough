@@ -163,6 +163,7 @@ from .storage import (
     relative_data_path,
     run_dir,
 )
+from .estimates import AnalysisEstimates
 from .text_reading import TextReading
 from .user_admin import delete_expired_accounts
 from .utils import sanitize_filename, utc_now
@@ -407,6 +408,7 @@ def startup() -> None:
     fail_interrupted_runs(INTERRUPTED_RUN_MESSAGE)
     app.state.text_reading = _new_text_reading()
     app.state.text_reading.resume()
+    app.state.analysis_estimates = AnalysisEstimates(lambda: _job_manager().line())
     _start_background_ocr_probe()
 
 
@@ -424,6 +426,10 @@ def _new_text_reading() -> TextReading:
 
 def _text_reading() -> TextReading:
     return app.state.text_reading
+
+
+def _analysis_estimates() -> AnalysisEstimates:
+    return app.state.analysis_estimates
 
 
 def _live() -> LiveHub:
@@ -532,6 +538,7 @@ def _json_column(row: dict, key: str) -> Any:
 def _serialize_run_summary(row: dict) -> DetectionRunSummary:
     advanced = _json_column(row, "analysis_advanced")
     analysis_config = _json_column(row, "analysis_config")
+    estimate = _analysis_estimates().get(row["id"]) if row["status"] in ACTIVE_RUN_STATUSES else None
     return DetectionRunSummary(
         id=row["id"],
         recording_id=row["recording_id"],
@@ -563,16 +570,23 @@ def _serialize_run_summary(row: dict) -> DetectionRunSummary:
         modified_at=row.get("last_modified_at") or row.get("modified_at"),
         modified_by_name=_modifier_name(row),
         export_bundle_id=row.get("export_bundle_id"),
+        seconds_to_start=_rounded(estimate.seconds_to_start) if estimate else None,
+        seconds_left=_rounded(estimate.seconds_left) if estimate else None,
         text=RunText(
             waiting=row.get("text_waiting", 0),
             read=row.get("text_read", 0),
             failed=row.get("text_failed", 0),
             earlier=row.get("text_earlier", 0),
             problem=_text_reading().problem(row["id"]),
+            seconds_left=_rounded(_text_reading().seconds_left(row["id"], _analysis_estimates().text_joining())) if row.get("text_waiting") else None,
         ),
         is_abortable=_run_is_abortable(row),
         is_deletable=_run_is_deletable(row),
     )
+
+
+def _rounded(seconds: float | None) -> float | None:
+    return None if seconds is None else round(seconds, 1)
 
 
 def _serialize_recording(row: dict) -> RecordingImportResponse:

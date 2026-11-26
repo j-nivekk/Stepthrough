@@ -453,8 +453,9 @@ count on. The opening screen is **start**.
 
 Stepthrough can read the text on every screenshot. Turn on **read text (ocr)** before an analysis, or press **read text**
 beside **export** for a run that is done. Finding steps does not wait for it: the steps are there first and the text
-follows, as **reading text, 12 of 66** says. You can go on working or close the page meanwhile, and **stop** leaves the
-rest unread. The text of a step you add by hand is read too.
+follows, as **reading text, 12 of 66, ready in about 2 min** says. Runs take turns, so the time can grow when others ask
+for text too. You can go on working or close the page meanwhile, and **stop** leaves the rest unread. The text of a step
+you add by hand is read too.
 
 - **text** on a card shows what was read, line by line. In the gallery view it also marks where each line is: point at a
   line to see its place, or at the screenshot to see its line. The text stays open as you go through the steps.
@@ -657,7 +658,10 @@ own too, which you can move or resize in a drawing program.
 
 ### Tasks
 
-Every run is listed under **tasks** with its number of steps. Runs of the same recording are grouped; click
+Every run is listed under **tasks** with its number of steps; one that is analysed or waits its turn says how far it is
+and, once the server has analysed a few recordings, when it should be ready (**34%, ready in about 20 s**). That is an
+estimate from how long the server's earlier analyses took for recordings of that length and size: it can be off by half
+or more, more often too soon than too late. Runs of the same recording are grouped; click
 the arrow next to a recording's name to fold its runs away or show them again. While a video is selected, the
 runs of the other videos are folded away until you open them or select another video. Click a run's name to open it,
 at its steps once it has any; **compare** sets two runs of a recording side by side (see

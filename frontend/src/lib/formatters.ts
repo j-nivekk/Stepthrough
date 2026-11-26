@@ -38,6 +38,26 @@ export function formatPercent(progress: number): string {
   return `${Math.round(progress * 100)}%`;
 }
 
+/** A wait the server estimated, in words as rough as it is: "about 20 s", "about 3 min". */
+export function formatWait(seconds: number): string {
+  if (seconds < 10) return 'a few seconds';
+  if (seconds < 50) return `about ${Math.round(seconds / 10) * 10} s`;
+  if (seconds < 90) return 'about a minute';
+  if (seconds < 3570) return `about ${Math.round(seconds / 60)} min`;
+  const hours = Math.round(seconds / 1800) / 2;
+  return `about ${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+}
+
+/** What an analysis that waits or runs is expected to take, or null when the server cannot say. */
+export function formatAnalysisWait(run: Pick<RunSummary, 'status' | 'seconds_to_start' | 'seconds_left'>): string | null {
+  if (run.seconds_left == null) return null;
+  const ready = `ready in ${formatWait(run.seconds_left)}`;
+  if (run.status === 'queued' && run.seconds_to_start != null && run.seconds_to_start >= 10) {
+    return `${ready}, starts in ${formatWait(run.seconds_to_start)}`;
+  }
+  return ready;
+}
+
 export function formatPhase(phase: RunPhase): string {
   return phaseLabels[phase] ?? phase;
 }

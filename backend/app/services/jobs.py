@@ -42,6 +42,11 @@ class JobManager:
             self._threads[run_id] = thread
         thread.start()
 
+    def line(self) -> tuple[list[str], list[str], int | None]:
+        """The runs that hold a slot, those waiting for one in the order they will get it, and how many slots there are."""
+        with self._lock:
+            return sorted(self._holding), list(self._waiting), self._max_concurrent_runs
+
     def runs_ahead(self, run_id: str) -> int:
         """Runs that will get a slot before this one: those still waiting in front of it."""
         with self._lock:

@@ -136,7 +136,7 @@ The text of screenshots is read by ONNX Runtime with PP-OCRv6 models (PaddlePadd
 - `app/text_reading.py`: what is asked for and how it is stored. `candidate_frames.text_state` is NULL (not asked for),
   `waiting`, `read` or `failed`; `text_reading` has the engine, the screenshot's size and the lines with their places;
   `ocr_text` the same text in one piece. What is `waiting` when the server stops is read when it is back. Text without a
-  `text_state` was read by a version before 1.4.6 (`earlier`): those used an engine that shared one text between
+  `text_state` was read by a version before 1.5.0 (`earlier`): those used an engine that shared one text between
   screenshots with nearly the same perceptual hash, so it can be another screen's.
 
 Exports also have the text of each screenshot whose text was read as PAGE XML (`app/services/page_xml.py`, version
@@ -144,6 +144,12 @@ Exports also have the text of each screenshot whose text was read as PAGE XML (`
 region with the lines in reading order, each with its box as a rectangle and `conf`; there are no baselines.
 `tests/test_page_xml.py` checks the files against PAGE's schema when `STEPTHROUGH_PAGE_SCHEMA` names its
 `pagecontent.xsd`.
+
+How long a run's text still takes (`text.seconds_left`) follows from the turns: before a run's last screenshot is read,
+every other run has at most as many read, each at the time its screenshots take, measured as they are read (the run's
+own once three are read, else what screenshots of its size took lately). Runs whose analysis is still going and will
+read text join the reckoning when they are expected to be done, with as many screenshots as analyses on the server had
+per minute of recording. Without measurements, there is no estimate.
 
 `POST /runs/{id}/text` reads what this version has not read of a finished run, `DELETE` stops it, and `GET` gives the
 text of every step in one piece; `GET /candidates/{id}/text` has a step's lines. Run summaries say how far it is
@@ -173,6 +179,16 @@ added again at the same moment. The phases come along when the target has none o
 The answer counts what was filled in (`decisions`, `titles`, `notes`, `screen_choices`), the steps added again
 (`added_manual`), and `unmatched`: reviewed steps of the source run without a match, whose review stays there.
 The caller must be an owner of both runs' project.
+
+## How long it takes
+
+Run summaries say about how long an analysis that waits or runs still takes (`seconds_left`) and, while it waits for a
+slot, how long until it starts (`seconds_to_start`); `null` where the server cannot say (`app/estimates.py`). An analysis
+is expected to take the median of the server's last 20 finished ones, in seconds per minute of recording times the square
+root of its megapixels; analyses that read text during the analysis (before 1.5.0) and copies of runs do not count, and
+with fewer than five there is no estimate. A running analysis has what is left of that, or `null` once it took longer.
+The slots are then filled in turn, from when those holding one are expected to be free. Text: see
+[Text recognition](#text-recognition).
 
 ## Configuration
 

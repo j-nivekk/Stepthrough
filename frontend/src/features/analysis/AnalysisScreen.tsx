@@ -32,6 +32,7 @@ import {
   formatRelativeTime,
   formatRunNumber,
   formatRunShortTimestamp,
+  formatAnalysisWait,
   formatRunTiming,
 } from '../../lib/formatters';
 import { StageNavigator } from '../../components/StageNavigator';
@@ -2054,7 +2055,10 @@ export function AnalysisScreen({
                   ) : null}
                 </div>
                 {!isCompletedReview && selectedRun.summary.message ? (
-                  <p className="muted">{selectedRun.summary.message}</p>
+                  <p className="muted">
+                    {selectedRun.summary.message}
+                    {formatAnalysisWait(selectedRun.summary) ? `; ${formatAnalysisWait(selectedRun.summary)}` : ''}
+                  </p>
                 ) : null}
               </div>
               <div className="analysis-detail-side">

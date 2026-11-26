@@ -12,7 +12,15 @@ import {
 import { analysisTaskFilters, activeRunStatuses, type AnalysisTaskFilter, type AnalysisTaskGroup, type AnalysisTaskItem } from '../../../lib/analysis';
 import { formatElapsedDuration } from '../../../lib/utils';
 import { EditableName } from '../../../components/EditableName';
-import { formatLastChange, formatPercent, formatPhase, formatRunNumber, formatRunShortTimestamp, formatRunTitle } from '../../../lib/formatters';
+import {
+  formatAnalysisWait,
+  formatLastChange,
+  formatPercent,
+  formatPhase,
+  formatRunNumber,
+  formatRunShortTimestamp,
+  formatRunTitle,
+} from '../../../lib/formatters';
 import { formatRecordingTypeLabel, getEffectiveStableValues } from '../../../lib/stableSettings';
 import {
   createTaskGroupFoldState,
@@ -331,6 +339,7 @@ export const AnalysisTasksPanel = memo(function AnalysisTasksPanel({
           : run.status === 'queued'
             ? 'queued' // waiting for a free analysis slot on a shared server
             : formatPercent(run.progress);
+    const waitLabel = activeRunStatuses.includes(run.status) ? formatAnalysisWait(run) : null;
     const elapsedSource = activeRunStatuses.includes(run.status) ? run.started_at ?? run.created_at : null;
     const elapsedLabel = elapsedSource ? formatElapsedDuration(taskClockMs - new Date(elapsedSource).getTime()) : null;
     const isLive = liveRunStatuses.includes(run.status);
@@ -422,8 +431,12 @@ export const AnalysisTasksPanel = memo(function AnalysisTasksPanel({
                 </span>
               </span>
             ) : (
-              <span className={`analysis-task-progress ${isError ? 'error' : isDone ? 'success' : ''}`}>
+              <span
+                className={`analysis-task-progress ${isError ? 'error' : isDone ? 'success' : ''}`}
+                title={waitLabel ? `${waitLabel}, as far as the server can tell from its earlier analyses` : undefined}
+              >
                 {progressLabel}
+                {waitLabel ? <span className="analysis-task-wait">, {waitLabel}</span> : null}
               </span>
             )}
             {elapsedLabel ? <span className="analysis-task-elapsed">{elapsedLabel}</span> : null}

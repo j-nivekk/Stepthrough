@@ -3485,6 +3485,17 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   text-decoration: none;
 }
 
+/* What a waiting or running analysis is expected to take; it gives way first when the column is narrow. */
+.analysis-task-wait {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+@container tasks-list (max-width: 380px) {
+  .analysis-task-wait {
+    display: none;
+  }
+}
+
 /* How far a completed run has been reviewed: X/Y reviewed over a mini segmented bar (accepted green, rejected red,
    pending track). At narrower column widths, the bar hides so only X/Y reviewed stays in view. */
 .analysis-task-review {

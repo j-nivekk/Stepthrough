@@ -1,4 +1,5 @@
 import type { CandidateFrame, RunText, RunTextDetail } from '../types';
+import { formatWait } from './formatters';
 
 /** The text read on the screens of a run: how far it is, and finding words in it. */
 
@@ -44,7 +45,7 @@ export interface RunTextNotice {
 }
 
 export const EARLIER_TEXT =
-  'text read by a version before 1.4.6 can be wrong: it could give a screen the text of an earlier one that looked much like it';
+  'text read by a version before 1.5.0 can be wrong: it could give a screen the text of an earlier one that looked much like it';
 
 function steps(count: number): string {
   return `${count} ${count === 1 ? 'step' : 'steps'}`;
@@ -54,9 +55,10 @@ function steps(count: number): string {
 export function runTextNotice(text: RunText, total: number): RunTextNotice {
   if (text.waiting > 0) {
     const done = Math.max(0, total - text.waiting);
+    const wait = text.seconds_left != null ? `, ready in ${formatWait(text.seconds_left)}` : '';
     return {
       kind: 'reading',
-      label: `reading text, ${done} of ${total}`,
+      label: `reading text, ${done} of ${total}${wait}`,
       action: { does: 'stop', label: 'stop' },
       title: 'the text is read in the background. you can go on, and close the page',
     };

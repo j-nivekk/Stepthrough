@@ -652,7 +652,7 @@ def recording_has_active_runs(recording_id: str) -> bool:
 
 
 # A run with how many steps are accepted or rejected, how far the reading of their text is (text_earlier: read by a
-# version before 1.4.6), and who last changed it. Runs from before changes were recorded give the last change to one of
+# version before 1.5.0), and who last changed it. Runs from before changes were recorded give the last change to one of
 # their steps instead, or when they were made, and no one.
 RUN_SUMMARY_SELECT = """
 SELECT
@@ -1058,7 +1058,8 @@ def list_text_waiting(run_id: str | None = None) -> list[dict[str, Any]]:
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT c.id, c.run_id, c.image_path FROM candidate_frames c JOIN detection_runs dr ON dr.id = c.run_id
+            SELECT c.id, c.run_id, c.image_path, r.width * r.height AS pixels
+            FROM candidate_frames c JOIN detection_runs dr ON dr.id = c.run_id JOIN recordings r ON r.id = dr.recording_id
             WHERE c.text_state = 'waiting' AND (:run_id IS NULL OR c.run_id = :run_id)
             ORDER BY dr.created_at, c.run_id, c.detector_index
             """,

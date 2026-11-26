@@ -243,3 +243,28 @@ def test_closing_ends_it_at_once(world) -> None:
     assert len(w.kept) < 10
     w.add("a", 1)
     assert w.queue.waiting() == 0
+
+
+def test_it_says_how_long_a_run_still_waits(world) -> None:
+    held, holding = threading.Event(), threading.Event()
+
+    def answer(screen: Screen, _reader) -> dict:
+        if screen.step_id == "b3":  # stops in b's first turn, with a's first turn and part of b's read
+            holding.set()
+            held.wait(5)
+        return {"lines": [], "width": 1000, "height": 1000, "seconds": 0.5 if screen.run_id == "a" else 2.0}
+
+    w = world(answer=answer)
+    assert w.queue.seconds_left("a") is None  # nothing in the queue
+    w.gate.clear()
+    w.queue.add("a", [Screen("a", f"a{n}", "/x", 1_000_000) for n in range(8)])
+    w.queue.add("b", [Screen("b", f"b{n}", "/x", 4_000_000) for n in range(8)])
+    assert w.queue.seconds_left("a") is None  # nothing read yet, on this server
+    w.gate.set()
+    assert holding.wait(5)
+    # a: 4 left at its own 0.5 s; b: 5 left (one in its turn) at its own 2 s. Before a's last: 4 of each.
+    assert w.queue.seconds_left("a") == pytest.approx(4 * 0.5 + 4 * 2.0)
+    assert w.queue.seconds_left("b") == pytest.approx(5 * 2.0 + 4 * 0.5)
+    held.set()
+    w.finish("a", "b")
+    assert w.queue.seconds_left("a") is None

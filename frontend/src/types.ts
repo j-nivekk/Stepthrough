@@ -4,7 +4,7 @@ export type ScrollMode = 'each_stop' | 'merge';
 export type AnalysisPreset = 'subtle_ui' | 'balanced' | 'noise_resistant';
 export type OcrBackend = 'paddleocr';
 export type OcrStatus = 'checking' | 'available' | 'unavailable' | 'off';
-/** How far the text of a step is: waiting to be read, read, could not be read, or read by a version before 1.4.6. */
+/** How far the text of a step is: waiting to be read, read, could not be read, or read by a version before 1.5.0. */
 export type TextState = 'waiting' | 'read' | 'failed' | 'earlier';
 export type TransitionType =
   | 'navigation'
@@ -167,6 +167,10 @@ export interface RunSummary {
   modified_at?: string | null;
   modified_by_name?: string | null;
   export_bundle_id?: string | null;
+  /** About how long a queued or running analysis waits for a slot, and until it is done; empty where there is nothing
+   *  to go by (backend/app/estimates.py). */
+  seconds_to_start?: number | null;
+  seconds_left?: number | null;
   text: RunText;
   is_abortable: boolean;
   is_deletable: boolean;
@@ -249,9 +253,11 @@ export interface RunText {
   waiting: number;
   read: number;
   failed: number;
-  /** Read by a version before 1.4.6, which could give a screen the text of another. */
+  /** Read by a version before 1.5.0, which could give a screen the text of another. */
   earlier: number;
   problem?: string | null;
+  /** About how long until what waits is read; empty while there is nothing to go by. */
+  seconds_left?: number | null;
 }
 
 /** The text of every step of a run, each in one piece: to look for words in. */

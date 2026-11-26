@@ -58,7 +58,7 @@ def test_text_follows_an_analysis_that_asked_for_it(client, recording, wait_for_
     answering(fake_reader, *TEXTS)
     run = analyse(client, recording, wait_for_run, read=True)
     summary = wait_for_text(client, run)
-    assert summary["text"] == {"waiting": 0, "read": 2, "failed": 0, "earlier": 0, "problem": None}
+    assert summary["text"] == {"waiting": 0, "read": 2, "failed": 0, "earlier": 0, "problem": None, "seconds_left": None}
     steps = list_candidates(run)
     assert [step["ocr_text"] for step in steps] == TEXTS
     assert [Path(screen.image).name for screen in fake_reader.asked] == [Path(step["image_path"]).name for step in steps]
@@ -79,6 +79,7 @@ def test_an_analysis_is_done_before_its_text_is_read(client, recording, wait_for
     run = analyse(client, recording, wait_for_run, read=True)
     detail = ok(client.get(f"/runs/{run}"))
     assert detail["summary"]["text"]["waiting"] == 2 and [step["text_state"] for step in detail["candidates"]] == ["waiting", "waiting"]
+    assert detail["summary"]["text"]["seconds_left"] is None  # nothing has been read here yet to go by
     gate.set()
     assert wait_for_text(client, run)["text"]["read"] == 2
     assert [step["text_state"] for step in ok(client.get(f"/runs/{run}"))["candidates"]] == ["read", "read"]
@@ -86,7 +87,7 @@ def test_an_analysis_is_done_before_its_text_is_read(client, recording, wait_for
 
 def test_text_is_not_read_unless_asked_for(client, recording, wait_for_run, fake_reader) -> None:
     run = analyse(client, recording, wait_for_run, read=False)
-    assert ok(client.get(f"/runs/{run}"))["summary"]["text"] == {"waiting": 0, "read": 0, "failed": 0, "earlier": 0, "problem": None}
+    assert ok(client.get(f"/runs/{run}"))["summary"]["text"] == {"waiting": 0, "read": 0, "failed": 0, "earlier": 0, "problem": None, "seconds_left": None}
     assert fake_reader.asked == []
 
 
@@ -97,7 +98,7 @@ def test_text_can_be_read_afterwards(client, recording, wait_for_run, wait_for_t
     wait_for_text(client, run)
     assert [step["text"] for step in ok(client.get(f"/runs/{run}/text"))["steps"]] == TEXTS
     # asked for again: nothing is left to read
-    assert ok(client.post(f"/runs/{run}/text"))["text"] == {"waiting": 0, "read": 2, "failed": 0, "earlier": 0, "problem": None}
+    assert ok(client.post(f"/runs/{run}/text"))["text"] == {"waiting": 0, "read": 2, "failed": 0, "earlier": 0, "problem": None, "seconds_left": None}
     assert len(fake_reader.asked) == 2
 
 
@@ -139,7 +140,7 @@ def test_what_another_version_of_the_engine_read_is_read_again(client, recording
 def test_a_screenshot_that_cannot_be_read_is_said_to_be(client, recording, wait_for_run, wait_for_text, fake_reader) -> None:
     fake_reader.answer = staticmethod(lambda screen: None if len(fake_reader.asked) <= 2 else {"lines": [], "width": 1, "height": 1})
     run = analyse(client, recording, wait_for_run, read=True)
-    assert wait_for_text(client, run)["text"] == {"waiting": 0, "read": 1, "failed": 1, "earlier": 0, "problem": None}
+    assert wait_for_text(client, run)["text"] == {"waiting": 0, "read": 1, "failed": 1, "earlier": 0, "problem": None, "seconds_left": None}
     assert ok(client.get(f"/runs/{run}"))["events"][-1]["message"] == "Text read on 1 of 2 screenshots; 1 could not be read"
     assert len(fake_reader.started) >= 3 or fake_reader.started[0].stopped
     ok(client.post(f"/runs/{run}/text"))  # it can be tried again
@@ -159,7 +160,7 @@ def test_reading_can_be_stopped(client, recording, wait_for_run, wait_for_text, 
     assert asked.wait(5)
     assert ok(client.delete(f"/runs/{run}/text"))["text"]["waiting"] == 0
     gate.set()
-    assert wait_for_text(client, run)["text"] == {"waiting": 0, "read": 0, "failed": 0, "earlier": 0, "problem": None}
+    assert wait_for_text(client, run)["text"] == {"waiting": 0, "read": 0, "failed": 0, "earlier": 0, "problem": None, "seconds_left": None}
     assert [step["ocr_text"] for step in list_candidates(run)] == [None, None]  # what came late is not kept
     ok(client.delete(f"/runs/{run}/text"))  # nothing to stop any more
 
@@ -178,7 +179,7 @@ def test_why_text_was_not_read_is_shown(client, recording, wait_for_run, wait_fo
     monkeypatch.setattr(text_models, "ensure", lambda: Path("."))
     answering(fake_reader, *TEXTS)
     ok(client.post(f"/runs/{run}/text"))
-    assert wait_for_text(client, run)["text"] == {"waiting": 0, "read": 2, "failed": 0, "earlier": 0, "problem": None}
+    assert wait_for_text(client, run)["text"] == {"waiting": 0, "read": 2, "failed": 0, "earlier": 0, "problem": None, "seconds_left": None}
 
 
 def test_text_is_refused_where_it_cannot_be_read(client, recording, wait_for_run, fake_reader) -> None:
@@ -196,7 +197,7 @@ def test_text_recognition_turned_off_while_it_reads(client, recording, wait_for_
     health = ok(client.get("/health"))
     assert (health["ocr_status"], health["ocr_available"]) == ("off", False) and "turned off" in health["ocr_message"]
     gate.set()
-    assert wait_for_text(client, run)["text"] == {"waiting": 0, "read": 0, "failed": 0, "earlier": 0, "problem": None}
+    assert wait_for_text(client, run)["text"] == {"waiting": 0, "read": 0, "failed": 0, "earlier": 0, "problem": None, "seconds_left": None}
     assert client.post(f"/runs/{run}/text").status_code == 503
     again = ok(client.post(f"/recordings/{recording}/runs", json={"stable": {"enable_ocr": True}}))
     assert again["stable"]["enable_ocr"] is False

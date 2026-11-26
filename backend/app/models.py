@@ -340,13 +340,14 @@ TextState = Literal["waiting", "read", "failed", "earlier"]
 
 class RunText(BaseModel):
     """How far the reading of a run's text is (app/text_reading.py), in steps. ``earlier``: read by a version before
-    1.4.6. ``problem``: why it was not read, when it could not be."""
+    1.5.0. ``problem``: why it was not read, when it could not be."""
 
     waiting: int = 0
     read: int = 0
     failed: int = 0
     earlier: int = 0
     problem: str | None = None
+    seconds_left: float | None = None  # about how long until what waits is read; None where it cannot be said
 
 
 class StepText(BaseModel):
@@ -411,6 +412,10 @@ class DetectionRunSummary(BaseModel):
     modified_at: str | None = None
     modified_by_name: str | None = None
     export_bundle_id: str | None = None
+    # About how long a queued or running analysis waits for a slot, and until it is done (app/estimates.py); None where
+    # there is nothing to go by.
+    seconds_to_start: float | None = None
+    seconds_left: float | None = None
     text: RunText = Field(default_factory=RunText)
     is_abortable: bool
     is_deletable: bool

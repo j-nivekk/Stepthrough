@@ -420,6 +420,18 @@ uv run python -m app.services.text_models   # the models, once
 uv run python -m tests.eval.webtext
 ```
 
+### How long it takes
+
+The app says about how long an analysis and the reading of its text will take (`app/estimates.py`). Analyses: on a
+shared server's history of 132 analyses of recordings of a few seconds to six minutes, an estimate made before each from
+the 20 finished before it (seconds per minute of recording times the square root of the megapixels) was within half again
+of the real time for 66 % and within double for 80 %. Going by progress would have been worse, off by more than double
+at a quarter and at half of the way, as the progress moves fast at first. With 12 analyses at once in two slots, all
+reading text afterwards, the estimates made at the start were within half again for 10 and within double for all; they
+were too short by a quarter at the median, as analyses that run side by side take longer. The text of those 12, from the
+first estimate on: within half again for 10, the median 1.1 times the real time; the first two, made while most analyses
+were still going, were half the real time.
+
 Up to version 1.4.5, another engine read text, during the analysis, and gave a screenshot the text of an earlier one with
 nearly the same perceptual hash. On a computer recording of 66 steps, that would have given 47 of them an earlier step's
 text, 40 of them with four words wrong or more. Text of those versions should be read again (**read again**).
