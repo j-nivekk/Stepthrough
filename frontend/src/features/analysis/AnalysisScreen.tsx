@@ -34,7 +34,10 @@ import {
   formatRunShortTimestamp,
   formatAnalysisWait,
   formatRunTiming,
+  formatRunTitle,
 } from '../../lib/formatters';
+import { summarizeRunReview } from '../../lib/taskGroups';
+import { flushSync } from 'react-dom';
 import { StageNavigator } from '../../components/StageNavigator';
 import { formatRunSummaryLabel, parseRunPresetText } from '../../lib/runSettings';
 import {
@@ -409,6 +412,11 @@ export function AnalysisScreen({
   const [stepLayout, setStepLayout] = useState<StepLayout>(() => loadStepLayout());
   const [reviewMode, setReviewMode] = useState<'steps' | 'pathway'>('steps');
   const reviewModeBarRef = useRef<HTMLDivElement | null>(null);
+  // The videos, parameters and tasks fold into the line of their headings while a finished run is reviewed, and open
+  // again with a click on it (see below).
+  const [setupFolded, setSetupFolded] = useState(false);
+  const setupRef = useRef<HTMLDivElement | null>(null);
+  const setupFoldedForRef = useRef<string | null>(null);
   // Where the page was when steps and pathway were switched, to keep the tabs where they were (see below).
   const reviewSwitchRef = useRef<number | null>(null);
   const [stepAreaRef, stepAreaWidth] = useElementWidth<HTMLDivElement>();
@@ -632,6 +640,12 @@ export function AnalysisScreen({
     () => reviewNumbers(selectedRun?.candidates ?? [], selectedRun?.accepted_steps ?? []),
     [selectedRun?.candidates, selectedRun?.accepted_steps],
   );
+  const setupTaskSummary = (() => {
+    if (!selectedRun) return `${analysisTaskItems.length} ${analysisTaskItems.length === 1 ? 'run' : 'runs'}`;
+    const review = summarizeRunReview(selectedRun.summary);
+    const title = formatRunTitle(selectedRun.summary, runNumberById.get(selectedRun.summary.id));
+    return review ? `${title}, ${review.reviewed} of ${review.total} reviewed` : title;
+  })();
   const backLinks = useMemo(() => returnLinks(selectedRun?.candidates ?? [], stepNumbers), [selectedRun?.candidates, stepNumbers]);
   // "back at step 30": the run opened where its review was left (App, lib/lastStep.ts), until another step is taken up.
   const returnNote =
@@ -892,6 +906,45 @@ export function AnalysisScreen({
     const section = reviewModeBarRef.current?.closest('section');
     if (section instanceof HTMLElement) section.style.minHeight = '';
   }, [selectedRun?.summary.id]);
+
+  // Opening a finished run with steps folds the videos, parameters and tasks, so that its review has the page; opening a
+  // run still at work, or none, opens them. At once (no animation): the page scrolls to the run right after, and must
+  // know where it will be. A run that finishes while open leaves them as they are.
+  const setupFoldable = Boolean(
+    selectedRun && !selectedRunStale && selectedRun.summary.status === 'completed' && selectedRun.candidates.length > 0,
+  );
+  useLayoutEffect(() => {
+    const id = selectedRun?.summary.id ?? null;
+    if (!id) {
+      setupFoldedForRef.current = null;
+      setSetupFolded(false);
+      return;
+    }
+    if (selectedRunStale || setupFoldedForRef.current === id) return;
+    setupFoldedForRef.current = id;
+    setSetupFolded(setupFoldable);
+  }, [selectedRun?.summary.id, selectedRunStale]);
+
+  /** Fold or open the videos, parameters and tasks, the page below following as they grow or shrink. */
+  function foldSetup(folded: boolean) {
+    const shell = setupRef.current;
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (!shell || still || typeof shell.animate !== 'function') {
+      setSetupFolded(folded);
+      return;
+    }
+    const from = shell.getBoundingClientRect().height;
+    flushSync(() => setSetupFolded(folded));
+    const to = shell.getBoundingClientRect().height;
+    const root = getComputedStyle(document.documentElement);
+    shell.classList.add('is-moving');
+    const animation = shell.animate([{ height: `${from}px` }, { height: `${to}px` }], {
+      duration: parseFloat(root.getPropertyValue('--motion-slow')) || 320,
+      easing: root.getPropertyValue('--ease-move').trim() || 'ease-in-out',
+    });
+    const done = () => shell.classList.remove('is-moving');
+    animation.finished.then(done, done);
+  }
 
   // The step the reviewer works on is where the run opens next time (lib/lastStep.ts); a step made active by the page
   // itself (on opening, or when a filter hides the active one) is not.
@@ -1788,6 +1841,18 @@ export function AnalysisScreen({
           <span aria-live="polite" className="analysis-live-status" role="status" title={liveMessage || undefined}>
             {liveMessage}
           </span>
+          {setupFoldable || setupFolded ? (
+            <button
+              aria-controls="analysis-setup"
+              aria-expanded={!setupFolded}
+              className="analysis-task-link subtle analysis-setup-toggle"
+              onClick={() => foldSetup(!setupFolded)}
+              title={setupFolded ? 'show the videos, parameters and tasks' : 'fold the videos, parameters and tasks into one line'}
+              type="button"
+            >
+              {setupFolded ? 'unfold' : 'fold'}
+            </button>
+          ) : null}
         </div>
 
         {(healthMessage || ocrProblem || appError || settingsFeedback || analysisActionMessage) && (
@@ -1800,8 +1865,32 @@ export function AnalysisScreen({
           </div>
         )}
 
+        <div className={`analysis-setup ${setupFolded ? 'is-folded' : ''}`} id="analysis-setup" ref={setupRef}>
+        {/* Folded, the headings' line says what each column holds; a click on it opens them all, each growing from its
+            heading. */}
+        <div aria-hidden={!setupFolded} className={`analysis-setup-line ${taskSelectMode ? 'tasks-widened' : ''}`}>
+          {(
+            [
+              ['videos', selectedRecordingSummary?.filename ?? `${recordings.length} ${recordings.length === 1 ? 'video' : 'videos'}`],
+              ['parameters', formatStableSummary(runSettings.stable, analysisMetadata).slice(0, 3).join(', ')],
+              ['tasks', setupTaskSummary],
+            ] as const
+          ).map(([column, summary]) => (
+            <button
+              aria-label={`unfold the videos, parameters and tasks (${column}: ${summary})`}
+              className="analysis-setup-cell"
+              key={column}
+              onClick={() => foldSetup(false)}
+              tabIndex={setupFolded ? 0 : -1}
+              type="button"
+            >
+              <span className="analysis-setup-title">{column}</span>
+              <span className="analysis-setup-summary">{summary}</span>
+            </button>
+          ))}
+        </div>
         {/* Selecting tasks needs a wider toolbar: the tasks column then takes more room and the others give way. */}
-        <div className={`analysis-grid ${taskSelectMode ? 'tasks-widened' : ''}`}>
+        <div className={`analysis-grid ${taskSelectMode ? 'tasks-widened' : ''}`} inert={setupFolded}>
           <AnalysisVideosPanel
             onDeleteRecording={onDeleteRecording}
             onCancelUpload={onCancelUpload}
@@ -1880,6 +1969,7 @@ export function AnalysisScreen({
             taskFilter={taskFilter}
             taskSelectMode={taskSelectMode}
           />
+        </div>
         </div>
 
         {previewVideoUrl && (

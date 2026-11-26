@@ -3560,7 +3560,7 @@ g.pt-clickable:not(.pt-box):hover > g > rect {
   background: #d6d6d6;
 }
 
-@container tasks-list (max-width: 300px) {
+@container tasks-list (max-width: 240px) {
   .analysis-task-review-bar {
     display: none;
   }
@@ -11386,4 +11386,126 @@ button:disabled {
   ::view-transition-new(*) {
     animation: none;
   }
+}
+
+/* The videos, parameters and tasks fold into the line of their headings while a finished run is reviewed
+   (AnalysisScreen): only the headings and the rule under them stay, the line saying what each column holds. A click on
+   it opens them, each column growing from its heading; the height moves (a Web Animation), the line fades. */
+.analysis-setup {
+  position: relative;
+}
+
+.analysis-setup.is-folded {
+  /* the headings (24px), the gap under them and the rule */
+  height: 38px;
+  overflow-y: clip;
+}
+
+.analysis-setup.is-moving {
+  overflow-y: clip;
+}
+
+.analysis-setup-line {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: -43px;
+  right: -43px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--motion-base) var(--ease-out),
+    visibility 0s linear var(--motion-base),
+    grid-template-columns var(--motion-base) var(--ease-move);
+}
+
+.analysis-setup-line.tasks-widened {
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 0.85fr) minmax(0, 1.3fr);
+}
+
+.analysis-setup.is-folded .analysis-setup-line {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--motion-base) var(--ease-out),
+    grid-template-columns var(--motion-base) var(--ease-move);
+}
+
+/* each over its column's heading, in the heading's place and type */
+.analysis-setup-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  height: 24px;
+  margin: 0;
+  padding: 0 43px;
+  border: 0;
+  background: var(--bg);
+  color: #000;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.analysis-setup-title {
+  flex: 0 0 auto;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.analysis-setup-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 14px;
+  line-height: 1.2;
+  text-align: right;
+  text-overflow: ellipsis;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 0, 0, 0.25);
+  text-underline-offset: 2px;
+  white-space: nowrap;
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    text-decoration-color var(--motion-fast) var(--ease-out);
+}
+
+.analysis-setup-cell:hover .analysis-setup-summary,
+.analysis-setup-cell:focus-visible .analysis-setup-summary {
+  color: #000;
+  text-decoration-color: currentColor;
+}
+
+.analysis-setup-cell:focus-visible {
+  outline: 2px solid rgba(205, 109, 30, 0.56);
+  outline-offset: -2px;
+}
+
+.analysis-setup-toggle {
+  flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-setup-line,
+  .analysis-setup.is-folded .analysis-setup-line {
+    transition: none;
+  }
+}
+
+/* Towards 1024 px the parameters' labels need a little more room: their column takes it from the videos, whose names
+   are cut short anyway, and the tasks keep theirs (and their review bars). */
+@media (max-width: 1200px) {
+  .analysis-grid:not(.tasks-widened),
+  .analysis-setup-line:not(.tasks-widened) {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) minmax(0, 1fr);
+  }
+}
+
+/* Opening a run at its steps puts their top below the bar that stays over them (.candidate-review-toolbar). */
+#analysis-candidate-review {
+  scroll-margin-top: 56px;
 }
