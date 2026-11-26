@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { busyElsewhere, busyRunIds, isSharedAccount, patchCandidate, projectImportsElsewhere, staleQueries, stepEditor, uploadsElsewhere } from '../src/lib/live';
+import {
+  applyCandidateChanges,
+  busyElsewhere,
+  busyRunIds,
+  isSharedAccount,
+  patchCandidate,
+  projectImportsElsewhere,
+  staleQueries,
+  stepEditor,
+  uploadsElsewhere,
+  withCandidateStatuses,
+} from '../src/lib/live';
 import type { CandidateFrame, LiveBusy, LiveEvent, LivePresence, RunDetail, SessionUser } from '../src/types';
 
 const event = (kind: LiveEvent['kind'], ids: Partial<LiveEvent> = {}): LiveEvent => ({
@@ -24,6 +35,37 @@ test('a step changed elsewhere is patched into the task, and nothing else is', (
   assert.deepEqual(patched?.candidates.map((candidate) => candidate.title), [null, 'Home']);
   assert.equal(patchCandidate(detail, step('elsewhere', 'x')), detail);
   assert.equal(patchCandidate(undefined, step('b', 'x')), undefined);
+});
+
+test('a change this browser makes shows on the step as the server will save it', () => {
+  const step = {
+    id: 'a', status: 'pending', title: 'Home', notes: null,
+    screen_link: 'b', screen_kind: 'popup', pathway_row: null, returns_to: 'c',
+  } as unknown as CandidateFrame;
+  assert.deepEqual(
+    applyCandidateChanges(step, { status: 'accepted', title: 'Inbox', previous_title: 'Home' }),
+    { ...step, status: 'accepted', title: 'Inbox' },
+  );
+  // auto clears the reviewer's say; other values are kept as they are
+  const cleared = applyCandidateChanges(step, { screen_link: 'auto', screen_kind: 'auto', returns_to: 'auto', pathway_row: 'auto' });
+  assert.equal(cleared.screen_link, null);
+  assert.equal(cleared.screen_kind, null);
+  assert.equal(cleared.returns_to, null);
+  assert.equal(cleared.pathway_row, null);
+  assert.equal(applyCandidateChanges(step, { screen_link: 'new' }).screen_link, 'new');
+  assert.equal(applyCandidateChanges(step, { notes: '' }).notes, '');
+  // the step itself is not changed
+  assert.equal(step.status, 'pending');
+});
+
+test('a decision for several steps shows on all of them, and a run with nothing to change stays the same', () => {
+  const step = (id: string, status: CandidateFrame['status']) => ({ id, status }) as CandidateFrame;
+  const detail = { candidates: [step('a', 'pending'), step('b', 'accepted'), step('c', 'pending')] } as unknown as RunDetail;
+  const decided = withCandidateStatuses(detail, ['a', 'b'], 'rejected');
+  assert.deepEqual(decided?.candidates.map((candidate) => candidate.status), ['rejected', 'rejected', 'pending']);
+  assert.equal(decided?.candidates[2], detail.candidates[2]);
+  assert.equal(withCandidateStatuses(detail, ['b'], 'accepted'), detail);
+  assert.equal(withCandidateStatuses(undefined, ['a'], 'accepted'), undefined);
 });
 
 test('of two browsers on one step, the first keeps it, and every browser agrees', () => {

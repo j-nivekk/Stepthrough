@@ -1,16 +1,25 @@
 import { absoluteApiUrl } from '../api';
 import type { ExportBundle } from '../types';
 
-export function jumpToAnchor(anchorId: string): void {
+/** Where in the window a jump puts its target: in the middle, or at the top when it is too tall for that (a whole run
+ *  centred in the window would show the middle of its steps). */
+export function jumpBlock(targetHeight: number, windowHeight: number): ScrollLogicalPosition {
+  return targetHeight > windowHeight * 0.8 ? 'start' : 'center';
+}
+
+/** Scroll smoothly to the element with this id and focus it; false when there is no such element. */
+export function jumpToAnchor(anchorId: string): boolean {
   if (typeof document === 'undefined') {
-    return;
+    return false;
   }
   const target = document.getElementById(anchorId);
   if (!(target instanceof HTMLElement)) {
-    return;
+    return false;
   }
-  target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+  const block = jumpBlock(target.getBoundingClientRect().height, window.innerHeight);
+  target.scrollIntoView({ behavior: 'smooth', block, inline: 'nearest' });
   target.focus({ preventScroll: true });
+  return true;
 }
 
 export function createLocalId(prefix: string): string {

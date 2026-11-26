@@ -1,7 +1,7 @@
 // Shared accounts: what a change from another browser means for this one (see backend/app/live.py and
 // features/live/LiveProvider.tsx, which applies it). Pure functions, so they can be tested without a browser.
 
-import type { CandidateFrame, LiveBusy, LiveEvent, LivePresence, RunDetail, SessionUser } from '../types';
+import type { CandidateChanges, CandidateFrame, LiveBusy, LiveEvent, LivePresence, RunDetail, SessionUser } from '../types';
 
 /** Whether many people may be signed in to this account at once: the `shared` tag, or `visitor` (a shared account
  *  with limits); never an administrator. */
@@ -49,6 +49,32 @@ export function staleQueries(event: LiveEvent): QueryKeyPrefix[] {
       break;
   }
   return keys;
+}
+
+/** A step with a change this browser makes, as the server will save it (backend/app/main.py, update_candidate):
+ *  shown at once, before the server answers. `auto` clears a say; the text a shared account began from (previous_*)
+ *  is only checked, not saved. */
+export function applyCandidateChanges(candidate: CandidateFrame, changes: CandidateChanges): CandidateFrame {
+  const next: CandidateFrame = { ...candidate };
+  if (changes.status !== undefined) next.status = changes.status;
+  if (changes.title !== undefined) next.title = changes.title;
+  if (changes.notes !== undefined) next.notes = changes.notes;
+  if (changes.screen_link !== undefined) next.screen_link = changes.screen_link === 'auto' ? null : changes.screen_link;
+  if (changes.screen_kind !== undefined) next.screen_kind = changes.screen_kind === 'auto' ? null : changes.screen_kind;
+  if (changes.pathway_row !== undefined) next.pathway_row = changes.pathway_row === 'auto' ? null : changes.pathway_row;
+  if (changes.returns_to !== undefined) next.returns_to = changes.returns_to === 'auto' ? null : changes.returns_to;
+  return next;
+}
+
+/** A run with several of its steps set to one decision, as the server will save them (the bulk change). */
+export function withCandidateStatuses(detail: RunDetail | undefined, candidateIds: string[], status: CandidateFrame['status']): RunDetail | undefined {
+  if (!detail) return detail;
+  const chosen = new Set(candidateIds);
+  if (!detail.candidates.some((item) => chosen.has(item.id) && item.status !== status)) return detail;
+  return {
+    ...detail,
+    candidates: detail.candidates.map((item) => (chosen.has(item.id) && item.status !== status ? { ...item, status } : item)),
+  };
 }
 
 /** A run with one of its steps as it is now; the same object when the step is not in it (nothing to patch). */

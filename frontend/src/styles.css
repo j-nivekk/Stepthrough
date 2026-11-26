@@ -5487,14 +5487,66 @@ button:disabled {
   overflow: hidden;
 }
 
+/* The filters, the selection and the layout stay at the top of the window while the steps scroll under them, as the
+   pathway's controls do (.pathway-sticky). One pixel of the bar is out of the window when it sticks, which is how the
+   page knows (useStuck); the padding and margins cancel out, so the bar sits where it did before it stuck. */
 .candidate-review-toolbar {
+  position: sticky;
+  top: -1px;
+  z-index: 8;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px 18px;
   flex-wrap: wrap;
+  margin-block: -7px;
+  padding-block: 7px;
+  background: var(--bg);
   container-type: inline-size;
   container-name: review-toolbar;
+  transition: box-shadow 140ms ease;
+}
+
+.candidate-review-toolbar.is-stuck {
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+/* Beside the filters, in the room the line has left (it never makes the line wrap): the run's name while the bar is
+   stuck, or where the run opened. */
+.candidate-review-context {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  /* no width of its own (so it never moves the layout controls to another line): it takes what the line leaves */
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  animation: candidate-review-context-in 160ms ease-out;
+}
+
+.candidate-review-context-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes candidate-review-context-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .candidate-review-toolbar,
+  .candidate-review-context {
+    transition: none;
+    animation: none;
+  }
 }
 
 .candidate-review-toolbar.has-selection .candidate-review-key-hint {

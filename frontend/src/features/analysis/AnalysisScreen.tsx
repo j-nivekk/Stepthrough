@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
 import { busyElsewhere, busyRunIds } from '../../lib/live';
 import { useLive } from '../live/LiveProvider';
 import { absoluteApiUrl, getRunText, setRunPhase } from '../../api';
@@ -91,6 +91,7 @@ import { playbackWindows, stepClip } from '../../lib/stepClips';
 import type { StepHoverProps } from '../../components/CandidateCard';
 import { PathwayPanel } from '../pathway/PathwayPanel';
 import { useElementWidth } from './useElementWidth';
+import { useStuck } from './useStuck';
 import { useHoverClips } from './useHoverClips';
 import { usePlaybackHighlight } from './usePlaybackHighlight';
 import { track } from '../../lib/usage';
@@ -102,6 +103,7 @@ import { StepNumbersProvider } from '../../components/StepNumbers';
 import type { StepMenuContext } from '../../lib/stepMenu';
 import { candidateNumber, returnLinks, reviewNumbers, START } from '../../lib/stepNumbers';
 import { useStable } from '../../lib/useStable';
+import { rememberStep, stepToReturnTo } from '../../lib/lastStep';
 
 
 export interface AnalysisScreenProps {
@@ -169,6 +171,8 @@ export interface AnalysisScreenProps {
   ) => void;
   /** Changes to several steps at once. */
   onUpdateCandidates: (runId: string, recordingId: string, changes: Array<[string, CandidateChanges]>) => Promise<void>;
+  /** The step a run opened at because its review was left there (lib/lastStep.ts): the review says so. */
+  returnedTo: { runId: string; candidateId: string } | null;
   ocrAvailable: boolean;
   ocrStatusMessage: string | null;
   ocrProblem: string | null;
@@ -212,6 +216,8 @@ interface PositionedTimelineSegment extends TimelineSegment {
 }
 
 const TIMELINE_DWELL_VISIBILITY_MS = 500;
+/** How to select many steps at once, on what selects them. */
+const RANGE_HINT = 'shift-click a step\'s box, drag across checkboxes, or press shift+x to select a range';
 const PREVIEW_TIMELINE_MIN_WIDTH_PCT: Record<PreviewSizeKey, number> = {
   sm: 0.42,
   md: 0.26,
@@ -298,6 +304,7 @@ export function AnalysisScreen({
   onStartRun,
   onUpdateCandidate,
   onUpdateCandidates,
+  returnedTo,
   ocrAvailable,
   onReadText,
   onStopReadingText,
@@ -328,6 +335,8 @@ export function AnalysisScreen({
   const [openPopover, setOpenPopover] = useState<AnalysisPopoverKey | null>(null);
   const [activeCandidateFilter, setActiveCandidateFilter] = useState<CandidateFilter>('all');
   const [activeCandidateId, setActiveCandidateId] = useState<string | null>(null);
+  // The step last made active by the page rather than the reviewer: it is not remembered as where the review was left.
+  const automaticStepRef = useRef<string | null>(null);
   const [pendingPlayFromMs, setPendingPlayFromMs] = useState<number | null>(null);
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   // The step whose box was clicked last: shift with a box selects from it (lib/stepSelection.ts). A ref, as the
@@ -391,7 +400,19 @@ export function AnalysisScreen({
   } | null>(null);
   const [stepLayout, setStepLayout] = useState<StepLayout>(() => loadStepLayout());
   const [reviewMode, setReviewMode] = useState<'steps' | 'pathway'>('steps');
+  const reviewModeBarRef = useRef<HTMLDivElement | null>(null);
+  // Where the page was when steps and pathway were switched, to keep the tabs where they were (see below).
+  const reviewSwitchRef = useRef<number | null>(null);
   const [stepAreaRef, stepAreaWidth] = useElementWidth<HTMLDivElement>();
+  // The bar over the steps stays at the top of the window while they scroll (styles.css); stuck, it names the run.
+  const [toolbarStuckRef, toolbarStuck] = useStuck<HTMLDivElement>();
+  const setStepToolbar = useCallback(
+    (node: HTMLDivElement | null) => {
+      stepAreaRef(node);
+      toolbarStuckRef(node);
+    },
+    [stepAreaRef, toolbarStuckRef],
+  );
   const parameterColumnRef = useRef<HTMLElement | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const presetMenuRef = useRef<HTMLDivElement | null>(null);
@@ -604,6 +625,11 @@ export function AnalysisScreen({
     [selectedRun?.candidates, selectedRun?.accepted_steps],
   );
   const backLinks = useMemo(() => returnLinks(selectedRun?.candidates ?? [], stepNumbers), [selectedRun?.candidates, stepNumbers]);
+  // "back at step 30": the run opened where its review was left (App, lib/lastStep.ts), until another step is taken up.
+  const returnNote =
+    returnedTo && selectedRun && !showPathway && returnedTo.runId === selectedRun.summary.id && activeCandidateId === returnedTo.candidateId
+      ? stepNumbers.get(returnedTo.candidateId)?.name ?? null
+      : null;
   const stepPhases = useMemo(
     () => (selectedRun ? { runId: selectedRun.summary.id, boundaries: selectedRun.phases } : undefined),
     [selectedRun?.summary.id, selectedRun?.phases],
@@ -818,7 +844,11 @@ export function AnalysisScreen({
       setActiveCandidateId(null);
       return;
     }
-    setActiveCandidateId(selectedRun.candidates[0].id);
+    // where the review of the run was left, or its first step
+    const ids = selectedRun.candidates.map((candidate) => candidate.id);
+    const next = stepToReturnTo(selectedRun.summary.id, ids) ?? ids[0];
+    automaticStepRef.current = next;
+    setActiveCandidateId(next);
   }, [selectedRun?.summary.id, selectedRun?.candidates.length]);
 
   useEffect(() => {
@@ -828,8 +858,43 @@ export function AnalysisScreen({
     if (activeCandidateId && filteredCandidates.some((candidate) => candidate.id === activeCandidateId)) {
       return;
     }
-    setActiveCandidateId(filteredCandidates[0].id);
+    // Opening another run, this runs with the last run's step still active: the step just chosen above (where the
+    // review was left) stays, when it is shown.
+    const chosen = automaticStepRef.current;
+    const next = chosen && filteredCandidates.some((candidate) => candidate.id === chosen) ? chosen : filteredCandidates[0].id;
+    automaticStepRef.current = next;
+    setActiveCandidateId(next);
   }, [activeCandidateId, filteredCandidates]);
+
+  // Switching between steps and pathway keeps the tabs where they were in the window. The other view may be shorter,
+  // or still loading, and the page would then end higher and pull them down: the run's section keeps the room the
+  // window had below them until the next switch.
+  useLayoutEffect(() => {
+    const scrollY = reviewSwitchRef.current;
+    reviewSwitchRef.current = null;
+    const section = reviewModeBarRef.current?.closest('section');
+    if (scrollY === null || !(section instanceof HTMLElement)) return;
+    section.style.minHeight = '';
+    const sectionTop = section.getBoundingClientRect().top + window.scrollY;
+    const needed = Math.ceil(scrollY + window.innerHeight - sectionTop);
+    if (section.offsetHeight < needed) section.style.minHeight = `${needed}px`;
+    if (window.scrollY !== scrollY) window.scrollTo({ top: scrollY });
+  }, [reviewMode]);
+  useEffect(() => {
+    const section = reviewModeBarRef.current?.closest('section');
+    if (section instanceof HTMLElement) section.style.minHeight = '';
+  }, [selectedRun?.summary.id]);
+
+  // The step the reviewer works on is where the run opens next time (lib/lastStep.ts); a step made active by the page
+  // itself (on opening, or when a filter hides the active one) is not.
+  useEffect(() => {
+    if (!selectedRun || !activeCandidateId) return;
+    if (activeCandidateId === automaticStepRef.current) return;
+    // still the step of a run left a moment ago, before the next one has loaded
+    if (!selectedRun.candidates.some((candidate) => candidate.id === activeCandidateId)) return;
+    automaticStepRef.current = null;
+    rememberStep(selectedRun.summary.id, activeCandidateId);
+  }, [activeCandidateId]);
 
   useEffect(() => {
     if (!selectedRun || !queuedManualMarkItems.length) {
@@ -1652,6 +1717,13 @@ export function AnalysisScreen({
     }));
   }
 
+  /** From the step a run opened at back to its first step, at the top of the run. */
+  function returnToStart() {
+    const first = filteredCandidates[0];
+    if (first) setActiveCandidateId(first.id);
+    jumpToAnchor('analysis-run-detail');
+  }
+
   function handleReviewTaskOutputs(recordingId: string, runId: string) {
     setActiveCandidateFilter('all');
     onSelectRun(recordingId, runId, 'analysis-candidate-review');
@@ -2103,7 +2175,7 @@ export function AnalysisScreen({
             ) : null}
 
             {canReviewCandidates && isCompletedReview ? (
-              <div className="review-mode-bar">
+              <div className="review-mode-bar" ref={reviewModeBarRef}>
                 <div aria-label="what to review" className="review-mode-switch" role="tablist">
                   {(['steps', 'pathway'] as const).map((mode) => (
                     <button
@@ -2111,7 +2183,9 @@ export function AnalysisScreen({
                       className={`candidate-filter-tab ${reviewMode === mode ? 'active' : ''}`}
                       key={mode}
                       onClick={() => {
-                        if (mode !== reviewMode) track({ kind: 'page', name: mode === 'pathway' ? 'pathway' : 'review' });
+                        if (mode === reviewMode) return;
+                        track({ kind: 'page', name: mode === 'pathway' ? 'pathway' : 'review' });
+                        reviewSwitchRef.current = window.scrollY;
                         setReviewMode(mode);
                       }}
                       role="tab"
@@ -2503,9 +2577,9 @@ export function AnalysisScreen({
                 ) : null}
 
                 <div
-                  className={`candidate-review-toolbar ${selectedShownCandidateIds.length > 0 ? 'has-selection' : ''}`}
+                  className={`candidate-review-toolbar ${selectedShownCandidateIds.length > 0 ? 'has-selection' : ''} ${toolbarStuck ? 'is-stuck' : ''}`}
                   id="analysis-review-toolbar"
-                  ref={stepAreaRef}
+                  ref={setStepToolbar}
                 >
                   <div className="candidate-review-nav-group">
                     <div aria-label="candidate review filters" className="candidate-filter-tabs" role="tablist">
@@ -2540,47 +2614,50 @@ export function AnalysisScreen({
                     {canReviewCandidates && filteredCandidates.length > 0 ? (
                       // Two groups: which steps (of the ones shown), and what to do with them.
                       <div className="candidate-bulk-actions">
+                        {/* What is selected comes first, then only what can still be done: with nothing selected, that
+                            is selecting all; "select all" is an action here, not a choice that is on. */}
                         <div aria-label="select steps" className="candidate-bulk-group" role="group">
-                          <span
-                            className="candidate-bulk-count"
-                            title="shift-click a step's box, drag across checkboxes, or press shift+x to select a range"
-                          >
-                            select
-                          </span>
-                          <button
-                            className="analysis-task-link subtle"
-                            disabled={shownSelectionState === 'all'}
-                            onClick={() => setSelectedCandidateIds(shownCandidateIds)}
-                            title="every step shown"
-                            type="button"
-                          >
-                            all
-                          </button>
-                          <button
-                            className="analysis-task-link subtle"
-                            disabled={shownSelectionState === 'none'}
-                            onClick={() => {
-                              selectionAnchorRef.current = null;
-                              setSelectedCandidateIds([]);
-                            }}
-                            type="button"
-                          >
-                            none
-                          </button>
-                          <button
-                            className="analysis-task-link subtle"
-                            onClick={() => setSelectedCandidateIds((current) => invertSelection(current, shownCandidateIds))}
-                            title="the steps shown that are not selected, instead of the ones that are"
-                            type="button"
-                          >
-                            invert
-                          </button>
+                          {shownSelectionState !== 'none' ? (
+                            <span className="candidate-bulk-count" title={RANGE_HINT}>
+                              {selectedShownCandidateIds.length} of {shownCandidateIds.length} selected
+                            </span>
+                          ) : null}
+                          {shownSelectionState !== 'all' ? (
+                            <button
+                              className="analysis-task-link subtle"
+                              onClick={() => setSelectedCandidateIds(shownCandidateIds)}
+                              title={`every step shown. ${RANGE_HINT}`}
+                              type="button"
+                            >
+                              select all
+                            </button>
+                          ) : null}
+                          {shownSelectionState !== 'none' ? (
+                            <button
+                              className="analysis-task-link subtle"
+                              onClick={() => {
+                                selectionAnchorRef.current = null;
+                                setSelectedCandidateIds([]);
+                              }}
+                              title="select no step (esc)"
+                              type="button"
+                            >
+                              clear
+                            </button>
+                          ) : null}
+                          {shownSelectionState === 'some' ? (
+                            <button
+                              className="analysis-task-link subtle"
+                              onClick={() => setSelectedCandidateIds((current) => invertSelection(current, shownCandidateIds))}
+                              title="the steps shown that are not selected, instead of the ones that are"
+                              type="button"
+                            >
+                              invert
+                            </button>
+                          ) : null}
                         </div>
                         {selectedShownCandidateIds.length > 0 ? (
                           <div aria-label="act on the selected steps" className="candidate-bulk-group" role="group">
-                            <span className="candidate-bulk-count">
-                              {selectedShownCandidateIds.length} of {shownCandidateIds.length} selected
-                            </span>
                             <button
                               className="candidate-bulk-decision accepted"
                               disabled={bulkCandidatePending}
@@ -2618,6 +2695,23 @@ export function AnalysisScreen({
                           </div>
                         ) : null}
                       </div>
+                    ) : null}
+                    {returnNote ? (
+                      <span className="candidate-review-context" role="status">
+                        <span className="candidate-review-context-text">back at {returnNote}</span>
+                        <button className="analysis-task-link subtle" onClick={returnToStart} type="button">
+                          to the start
+                        </button>
+                      </span>
+                    ) : toolbarStuck ? (
+                      <span
+                        className="candidate-review-context"
+                        title={selectedRecordingSummary?.filename ?? undefined}
+                      >
+                        <span className="candidate-review-context-text">
+                          {selectedRecordingSummary?.filename ?? ''}
+                        </span>
+                      </span>
                     ) : null}
                   </div>
 

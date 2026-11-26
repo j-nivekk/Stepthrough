@@ -61,8 +61,9 @@ import {
   type SimilarLink,
 } from './lib/analysis';
 import { downloadExportBundle, jumpToAnchor, sleep, triggerDownload } from './lib/utils';
+import { stepToReturnTo } from './lib/lastStep';
 import { formatCalendarDate } from './lib/formatters';
-import { isSharedAccount } from './lib/live';
+import { applyCandidateChanges, isSharedAccount, patchCandidate, withCandidateStatuses } from './lib/live';
 import { reviewNumbers, returnsTo } from './lib/stepNumbers';
 import { formatSize, isVisitor, uploadProblem } from './lib/visitors';
 import {
@@ -112,6 +113,10 @@ type PendingTaskNavigation = {
 };
 
 const SAVED_RUN_SETTINGS_KEY = ['saved-run-settings'];
+const CANDIDATE_UPDATE = ['candidate-update'];
+/** After changes to steps, what follows from them is loaded this long after the last one, so a burst of decisions
+ *  costs one reload. */
+const SETTLE_MS = 600;
 
 // Logged-in people are reminded this many days before their account is deleted.
 const DELETION_NOTICE_DAYS = 30;
@@ -144,6 +149,8 @@ function App({ session, onSessionChange }: AppProps) {
   const [videoListFocus, setVideoListFocus] = useState<{ recordingId: string; nonce: number } | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [pendingTaskNavigation, setPendingTaskNavigation] = useState<PendingTaskNavigation | null>(null);
+  // The step a run opened at because its review was left there (see lib/lastStep.ts).
+  const [returnedTo, setReturnedTo] = useState<{ runId: string; candidateId: string } | null>(null);
   const [runSettings, setRunSettingsState] = useState<RunSettings>(defaultRunSettings);
   const [settingsFeedback, setSettingsFeedback] = useState('');
   const [importQueue, setImportQueue] = useState<ImportQueueItem[]>([]);
@@ -293,7 +300,8 @@ function App({ session, onSessionChange }: AppProps) {
   const projectRecordings = projectDetailQuery.data?.recordings ?? [];
   const analysisRecordingQueries = useQueries({
     queries: projectRecordings.map((recording) => ({
-      queryKey: ['recording', recording.id, 'analysis'],
+      // the same entry as the selected video's (recordingDetailQuery), so it is loaded once
+      queryKey: ['recording', recording.id],
       queryFn: () => getRecording(recording.id),
       enabled: workflowStage === 'analysis' && Boolean(selectedProjectId),
       refetchInterval: (query: { state: { data: RecordingDetail | undefined } }) =>
@@ -551,10 +559,8 @@ function App({ session, onSessionChange }: AppProps) {
     projectRecordings.find((recording) => recording.id === previewRecordingId) ?? null;
 
   async function refreshRecordingQueries(recordingId: string): Promise<void> {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['recording', recordingId] }),
-      queryClient.invalidateQueries({ queryKey: ['recording', recordingId, 'analysis'] }),
-    ]);
+    // one request: the tasks list and the selected video share the recording's entry
+    await queryClient.invalidateQueries({ queryKey: ['recording', recordingId] });
   }
 
   async function refreshRunQueries(runId: string, recordingId: string): Promise<void> {
@@ -583,8 +589,22 @@ function App({ session, onSessionChange }: AppProps) {
       selectedRun.candidates.length > 0
         ? 'analysis-candidate-review'
         : 'analysis-run-detail';
+    // A finished run opens where its review was left, when that was further than its first step (lib/lastStep.ts);
+    // the review then says so (AnalysisScreen).
+    const runId = selectedRun.summary.id;
+    const back =
+      selectedRun.summary.status === 'completed'
+        ? stepToReturnTo(runId, selectedRun.candidates.map((candidate) => candidate.id))
+        : null;
 
-    jumpToAnalysisAnchor(anchorId);
+    window.setTimeout(() => {
+      if (back && jumpToAnchor(`candidate-${back}`)) {
+        setReturnedTo({ runId, candidateId: back });
+        return;
+      }
+      setReturnedTo(null);
+      jumpToAnchor(anchorId);
+    }, 0);
     setPendingTaskNavigation(null);
   }, [pendingTaskNavigation, selectedRun]);
 
@@ -1051,14 +1071,64 @@ function App({ session, onSessionChange }: AppProps) {
     onError: (error: Error) => setAppError(error.message),
   });
 
+  // A change to a step shows at once: the step is changed in the cached run before the server answers, and put back
+  // if the server refuses it. What follows from it (the tasks list's counts, the accepted steps) is loaded once a
+  // burst of changes is over, not after each one.
+  const settlingRunsRef = useRef(new Map<string, string>());
+  const settleTimerRef = useRef<number | undefined>(undefined);
+  function refreshRunSoon(runId: string, recordingId: string) {
+    settlingRunsRef.current.set(runId, recordingId);
+    window.clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = window.setTimeout(() => {
+      // a change still on its way schedules this again when it is done
+      if (queryClient.isMutating({ mutationKey: CANDIDATE_UPDATE })) return;
+      const due = [...settlingRunsRef.current];
+      settlingRunsRef.current.clear();
+      for (const [run, recording] of due) void refreshRunQueries(run, recording);
+    }, SETTLE_MS);
+  }
+  useEffect(() => () => window.clearTimeout(settleTimerRef.current), []);
+
+  /** The step as this browser has it, in whichever run it is cached. */
+  function cachedCandidate(candidateId: string): CandidateFrame | null {
+    for (const [, detail] of queryClient.getQueriesData<RunDetail>({ queryKey: ['run'] })) {
+      const candidate = detail?.candidates?.find((item) => item.id === candidateId);
+      if (candidate) return candidate;
+    }
+    return null;
+  }
+
   const updateCandidateMutation = useMutation({
-    mutationKey: ['candidate-update'],
+    mutationKey: CANDIDATE_UPDATE,
     mutationFn: ({ candidateId, payload }: { candidateId: string; payload: CandidateChanges }) =>
       updateCandidate(candidateId, payload),
-    onSuccess: (candidate) => {
-      return refreshRunQueries(candidate.run_id, candidate.recording_id);
+    onMutate: async ({ candidateId, payload }) => {
+      const before = cachedCandidate(candidateId);
+      if (!before) return null;
+      // a reload already on its way would bring the step back as it was
+      await queryClient.cancelQueries({ queryKey: ['run', before.run_id] });
+      queryClient.setQueryData<RunDetail>(['run', before.run_id], (detail) =>
+        patchCandidate(detail, applyCandidateChanges(before, payload)),
+      );
+      return { before };
     },
-    onError: (error: Error, { payload }) => {
+    onSuccess: (candidate, { candidateId }) => {
+      // The step as the server saved it, unless a later change to it is still on its way: that one shows already.
+      const later = queryClient.isMutating({
+        mutationKey: CANDIDATE_UPDATE,
+        predicate: (mutation) => (mutation.state.variables as { candidateId?: string } | undefined)?.candidateId === candidateId,
+      });
+      if (later <= 1) queryClient.setQueryData<RunDetail>(['run', candidate.run_id], (detail) => patchCandidate(detail, candidate));
+    },
+    onSettled: (candidate, _error, _variables, context) => {
+      const step = candidate ?? context?.before;
+      if (step) refreshRunSoon(step.run_id, step.recording_id);
+    },
+    onError: (error: Error, { payload }, context) => {
+      if (context?.before) {
+        const { before } = context;
+        queryClient.setQueryData<RunDetail>(['run', before.run_id], (detail) => patchCandidate(detail, before));
+      }
       // In a shared account, text saved in another browser meanwhile is kept and shown here; this browser's text
       // goes into the message, so it is not lost.
       const text = payload.title ?? payload.notes;
@@ -1610,6 +1680,10 @@ function App({ session, onSessionChange }: AppProps) {
 
     clearAnalysisMessages();
 
+    // Shown at once; a refusal is put right by the reload below.
+    await queryClient.cancelQueries({ queryKey: ['run', runId] });
+    queryClient.setQueryData<RunDetail>(['run', runId], (detail) => withCandidateStatuses(detail, uniqueCandidateIds, status));
+
     // One request for all of them: one change to the task, whoever else is working on it.
     let failure: unknown = null;
     try {
@@ -2012,6 +2086,7 @@ function App({ session, onSessionChange }: AppProps) {
         onSelectRun={handleSelectTaskRun}
         onStartRun={handleStartAnalysisRun}
         onUpdateCandidate={(candidateId, payload) => updateCandidateMutation.mutate({ candidateId, payload })}
+        returnedTo={returnedTo}
         onUpdateCandidates={handleUpdateCandidates}
         ocrAvailable={ocrAvailable}
         ocrProblem={ocrProblem}
