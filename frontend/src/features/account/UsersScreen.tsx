@@ -85,7 +85,7 @@ export function UsersScreen({ currentUserId, onBack }: UsersScreenProps) {
   return (
     <div className="analysis-screen admin-tint">
       <div className="analysis-stage-shell">
-        <div className="analysis-stage-nav">
+        <div className="entry-stage-nav">
           <nav aria-label="pages" className="stage-pill">
             <span aria-hidden="true" className="stage-pill-dot" />
             <button className="stage-pill-btn" onClick={onBack} type="button">
