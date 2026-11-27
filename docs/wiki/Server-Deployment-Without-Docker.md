@@ -12,7 +12,7 @@ moves it).
 
 ```bash
 git clone https://github.com/j-nivekk/Stepthrough.git && cd Stepthrough
-git checkout v1.5.1                                           # the latest release
+git checkout v1.5.2                                           # the latest release
 (cd backend && uv sync)                                       # leave text recognition out with --no-group ocr
 (cd frontend && npm ci && VITE_API_BASE_URL= npm run build)
 ```
@@ -66,7 +66,7 @@ folder, and `STEPTHROUGH_OCR_MODEL_URL` another server with the same files.
 To upgrade, check out the new release, update both parts and restart:
 
 ```bash
-git fetch --tags && git checkout v1.5.2                       # the new release
+git fetch --tags && git checkout v1.5.3                       # the new release
 (cd backend && uv sync)                                       # with the same options as before
 (cd frontend && npm ci && VITE_API_BASE_URL= npm run build)
 systemctl --user restart stepthrough

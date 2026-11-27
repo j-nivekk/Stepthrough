@@ -121,7 +121,7 @@ and how to upgrade. The Docker images are at `ghcr.io/j-nivekk/stepthrough`:
 | tag | what it is |
 |---|---|
 | `stable` | the latest release |
-| `1.5.1`, `1.5` | a release, or the latest of a series, to stay on a known version |
+| `1.5.2`, `1.5` | a release, or the latest of a series, to stay on a known version |
 | `edge` | the latest build of `main`; the app shows `edge` at the bottom right and its commit under **about** |
 
 Text recognition came in an image of its own, with `-ocr` behind the tag, up to 1.4.5. Every image has it now, and the
@@ -132,11 +132,11 @@ smoke test in it, and only then publishes. It runs for:
 
 - a push to `main` that changes the app, its tests or the image (it publishes `edge`). Changes to documentation and
   other files outside the image skip it, and so does any commit with `[skip ci]` in its message;
-- a version tag such as `v1.5.1` (it publishes the release images and moves `stable`);
+- a version tag such as `v1.5.2` (it publishes the release images and moves `stable`);
 - pull requests that change the app (tests only).
 
 **To release:** set the new version in `backend/app/__init__.py`, `backend/pyproject.toml` and
-`frontend/package.json` (a test checks they match), commit, push a tag such as `v1.5.1`, and write the release notes
+`frontend/package.json` (a test checks they match), commit, push a tag such as `v1.5.2`, and write the release notes
 on GitHub. `docs/wiki/Server-Deployment-Without-Docker.md` names the latest release in its checkout commands, and
 `README_IF_DOWNLOADED_FROM_ZENODO.md` the archived version: update both.
 
